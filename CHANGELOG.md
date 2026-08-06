@@ -40,10 +40,28 @@ Documentos anteriores a 06/08 que citam `F:\prospectai` **ficam como estão**. S
 - **Bellvia** (`F:\drmind`) copiado para `C:\backup-drmind`: 5.146 arquivos, zero falhas
 - **Volumes Docker intactos.** `propectai-postgres-data` e `propectai-redis-data` são gerenciados pelo Docker e nunca estiveram no F: — o seed, as contas de demonstração e o histórico de buscas sobreviveram sem intervenção
 
+#### Validação
+
+Executado em 06/08/2026, após a migração:
+
+| Verificação | Resultado |
+|---|---|
+| `docker volume ls` | `propectai-postgres-data` e `propectai-redis-data` presentes — banco, seed e contas intactos |
+| `docker compose up -d` | Três containers no ar; `gmaps-scraper` como `Up` puro, sem o `unhealthy` do healthcheck inválido |
+| `@propectai/types` | 35 testes |
+| `@propectai/worker` | 5 testes — regras comerciais 5.3, 5.4 e 5.5 |
+| `@propectai/api` | 26 testes — isolamento de tenant em banco e HTTP, invariantes, provider de IA |
+| **Total** | **66 testes, zero falhas** |
+
+**Nenhum arquivo veio corrompido.** A verificação estrutural feita antes da instalação já indicava isso, mas compilar e exercitar o banco é o que prova.
+
+`F:\drmind` não foi modificado. Os containers do Bellvia seguiram no ar, saudáveis, durante toda a migração.
+
 #### Pendente
 
 - `chkdsk F: /scan` (somente leitura) para dimensionar a corrupção de índice registrada no evento 55. **Não rodar `/f` nem `/r`** antes de backup íntegro: em dispositivo instável, reescrever metadados transforma perda parcial em total
-- Reinstalar dependências e revalidar: `pnpm install`, `pnpm typecheck`, `pnpm test`, `pnpm --filter @propectai/web test:e2e`
+- E2E (`pnpm --filter @propectai/web test:e2e`) — o Chromium do Playwright vive em `%LOCALAPPDATA%\ms-playwright` e não foi afetado pela migração, mas a suíte ainda não rodou no volume novo
+- Os 14 critérios em `G` na conferência, que exigem percurso no navegador
 
 
 ### Ficha do lead, regras comerciais e Swagger · 31/07/2026
