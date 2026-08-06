@@ -49,3 +49,7 @@ Thumbs.db
 .npmrc
 
 e2e-saida.txt
+
+# saidas de execucao local
+worker-test.txt
+e2e-saida.txt
