@@ -55,21 +55,21 @@ export async function irPara(page: Page, nome: string, url: RegExp): Promise<voi
 }
 
 /**
- * Valor de um card de KPI.
+ * Valor de um card de KPI, pelo contrato de teste do componente.
  *
- * O rótulo aparece em MAIÚSCULAS na tela, mas por CSS (`uppercase`) — no DOM o
- * texto é "Leads encontrados". Buscar pelo que se vê renderizado é a armadilha
- * clássica aqui, e o erro que ela produz ("recebido: Leads encontrados") não
- * sugere a causa.
+ * A versão anterior usava `div.pa-card` + `p.text-kpi` e quebrou na migração de
+ * 06/08/2026 com "element(s) not found". Classe de estilo é contrato acidental:
+ * o `cn()` do KpiCard passa por tailwind-merge, que pode descartar `text-kpi`
+ * por conflito de grupo com `text-navy-900` — o seletor some sem ninguém tocar
+ * no componente, e o erro não sugere a causa.
  *
- * O valor mora num <p> irmão do rótulo, não dentro dele: filtrar o card
- * inteiro e descer até o número é o caminho estável.
+ * `data-kpi-label` também evita a armadilha do rótulo: ele aparece em
+ * MAIÚSCULAS na tela por CSS, mas no DOM é "Leads encontrados".
  */
 export function kpiValue(page: Page, rotulo: string) {
   return page
-    .locator('div.pa-card')
-    .filter({ hasText: new RegExp(rotulo, 'i') })
-    .locator('p.text-kpi')
+    .locator(`[data-testid="kpi-card"][data-kpi-label="${rotulo}"]`)
+    .locator('[data-testid="kpi-value"]')
     .first();
 }
 

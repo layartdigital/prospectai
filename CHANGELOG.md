@@ -57,11 +57,23 @@ Executado em 06/08/2026, após a migração:
 
 `F:\drmind` não foi modificado. Os containers do Bellvia seguiram no ar, saudáveis, durante toda a migração.
 
+#### Corrigido
+
+**Seletor de KPI acoplado a classe de estilo**
+
+O E2E localizava o card por `div.pa-card` e o número por `p.text-kpi`, e as duas asserções quebraram com `element(s) not found` depois da reinstalação.
+
+Classe de Tailwind é contrato acidental: o `KpiCard` monta `className` via `cn()`, que passa por `tailwind-merge` — e `text-kpi` (tamanho customizado) pode ser descartado por conflito de grupo com `text-navy-900` (cor customizada). O seletor deixa de existir sem ninguém tocar no componente, e a mensagem de erro fala de elemento ausente, não de estilo.
+
+`KpiCard` ganhou `data-testid="kpi-card"`, `data-kpi-label={label}` e `data-testid="kpi-value"`. O `data-kpi-label` resolve de quebra a armadilha do rótulo, que aparece em maiúsculas por CSS mas vive em minúsculas no DOM.
+
+**A verificar visualmente:** se `text-kpi` estiver mesmo sendo descartado, os números do dashboard renderizam menores que o design pede. É defeito visual que o E2E encontrou de lado, procurando outra coisa.
+
 #### Pendente
 
 - `chkdsk F: /scan` (somente leitura) para dimensionar a corrupção de índice registrada no evento 55. **Não rodar `/f` nem `/r`** antes de backup íntegro: em dispositivo instável, reescrever metadados transforma perda parcial em total
-- E2E (`pnpm --filter @propectai/web test:e2e`) — o Chromium do Playwright vive em `%LOCALAPPDATA%\ms-playwright` e não foi afetado pela migração, mas a suíte ainda não rodou no volume novo
-- Os 14 critérios em `G` na conferência, que exigem percurso no navegador
+- Confirmar no navegador se `text-kpi` sobrevive ao `tailwind-merge`
+- Os 10 critérios que continuam em `G` na conferência
 
 
 ### Ficha do lead, regras comerciais e Swagger · 31/07/2026

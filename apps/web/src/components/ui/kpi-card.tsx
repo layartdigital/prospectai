@@ -22,6 +22,17 @@ export function KpiCard({
 }: KpiCardProps) {
   return (
     <div
+      // data-* em vez de classe como âncora de teste.
+      //
+      // O E2E localizava o card por `div.pa-card` e o número por `p.text-kpi`.
+      // Classe de estilo é contrato acidental: `cn()` passa por tailwind-merge,
+      // que pode descartar `text-kpi` por conflito de grupo com `text-navy-900`
+      // — e aí o seletor deixa de existir sem ninguém mudar o componente.
+      //
+      // O rótulo vai junto para o teste filtrar sem depender do texto renderizado,
+      // que aparece em maiúsculas por CSS mas vive em minúsculas no DOM.
+      data-testid="kpi-card"
+      data-kpi-label={label}
       className={cn(
         'pa-card flex flex-col justify-between p-4 transition-shadow hover:shadow-card-hover',
         highlight && 'border-brand-600 bg-brand-600 text-white',
@@ -49,7 +60,10 @@ export function KpiCard({
       {loading ? (
         <div className="pa-skeleton mt-3 h-9 w-20" />
       ) : (
-        <p className={cn('mt-3 text-kpi', highlight ? 'text-white' : 'text-navy-900')}>
+        <p
+          data-testid="kpi-value"
+          className={cn('mt-3 text-kpi', highlight ? 'text-white' : 'text-navy-900')}
+        >
           {value}
         </p>
       )}

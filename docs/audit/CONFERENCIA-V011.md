@@ -85,17 +85,17 @@ Endpoint sem interface é endpoint que nenhum usuário alcança. **C — Parcial
 | 3 | Postgres, Redis e scraper isolados com prefixo `propectai-` | **A** | `docker-compose.yml`: `container_name` propectai-postgres / -redis / -gmaps-scraper; bind em `127.0.0.1`; volume `./data/gmapsdata` conforme decidido na auditoria de ambiente | — |
 | 4 | Login, refresh, logout; sessão resolve tenant ativo | **G** | `auth.controller.ts`, `auth.service.ts`, `common/tenant.guard.ts`, `common/request-context.ts`, `web/src/lib/session.ts`, `middleware.ts` com cookie `pa_rt` | Execução do fluxo |
 | 5 | Teste prova que tenant A não vê dado de B | **A** | **Executado em 31/07/2026, provado nas duas camadas.** Banco: `tenant-isolation.spec.ts`, 5 de 5 — índices compostos, idempotência, contagem. HTTP: `tenant-isolation-http.spec.ts`, 6 de 6 — `TenantGuard` em requisição real, 404 por id conhecido, KPIs do dashboard, `x-tenant-id` forjado recusado. Suíte completa: 20 testes, 3 suítes | — *(ver nota de execução abaixo)* |
-| 6 | Onboarding de 5 etapas persiste e é reiniciável | **G** | **Implementado em 31/07/2026.** `app/(app)/onboarding/page.tsx` + `onboarding-wizard.tsx` (5 etapas, persiste a cada avanço); `POST settings/onboarding/complete` e `/restart`; `restart-onboarding-button.tsx` em Configurações. `pnpm typecheck` e `next lint` verdes | Falta o percurso no navegador: cadastro → wizard → `/search` → Configurações → Refazer |
-| 7 | Dashboard calcula KPIs por query, nada escrito no componente | **G** | `dashboard.service.ts` + `dashboard.controller.ts`; `dashboard/page.tsx` consome `serverApi` | Conferir os sete KPIs um a um com banco populado |
+| 6 | Onboarding de 5 etapas persiste e é reiniciável | **A** | **Provado por E2E em 06/08/2026**, `fluxo-2-cadastro-e-onboarding.spec.ts`: cadastro leva ao wizard e não ao dashboard; sair na etapa 3 e voltar retoma na etapa 3 com as respostas; Configurações reabre o onboarding com "Sites" ainda selecionado | — |
+| 7 | Dashboard calcula KPIs por query, nada escrito no componente | **A** | **Provado por E2E em 06/08/2026.** O tenant de demonstração devolve valor maior que zero e a conta recém-criada devolve exatamente `0` no mesmo KPI. Número escrito em componente não muda entre tenants — é a prova mais forte disponível de que vem de query |
 | 8 | Nova Busca completa o ciclo com provider mock, progresso visível | **G** | `prospecting.service.ts` (BullMQ via ioredis), `worker/src/providers/mock.provider.ts`, `search-form.tsx`, `search/page.tsx` | Execução |
 | 9 | `GoogleMapsScraperProvider` traz leads reais do container | **G** | `worker/src/providers/google-maps.provider.ts` | Scraper no ar + coleta real |
 | 10 | Repetir busca não duplica nem consome cota de novo | **A** | **Provado em 31/07/2026** por `apps/worker/test/scrape-pipeline.spec.ts`: a segunda execução da mesma busca devolve `newLeads: 0`, `duplicates > 0`, consumo inalterado e contagem total de leads estável. Job falho devolve a reserva por inteiro, sem consumir nem gerar crédito | — |
 | 11 | Nenhum lead concluído com score nulo/zero sem `LeadScoreReason` | **A** | **Provado nas duas frentes.** Comportamento: `scrape-pipeline.spec.ts` afirma que todo lead criado pelo pipeline tem score e motivos. Estado: `apps/api/test/business-invariants.spec.ts` varre o banco inteiro — score sem motivo, lead sem score, valor fora de 0–100 | — |
 | 12 | Ficha mostra pontos positivos e de atenção do score | **A** | `leads/[id]/page.tsx:169–199` e `ReasonList` (371–414), com peso e **evidência por motivo**; versão do algoritmo e data exibidas (174) | Falta o **botão recalcular** exigido em §3.2 (endpoint `POST :id/recalculate-score` já existe) |
 | 13 | Copiar telefone, abrir mapa e abrir WhatsApp geram `LeadActivity` | **G** | `lead-quick-actions.tsx` + `POST :id/activities` | Execução |
-| 14 | Registrar contato atualiza timeline; criar follow-up atualiza lista e avisos | **G** | **Implementado em 31/07/2026.** `lead-contact-form.tsx`, `lead-follow-ups.tsx` (agendar, concluir, cancelar, reagendar) e `recalculate-score-button.tsx`. Backend ganhou `PATCH :id/follow-ups/:followUpId`, que faltava — só havia criar | Falta exercitar no navegador |
+| 14 | Registrar contato atualiza timeline; criar follow-up atualiza lista e avisos | **A** | **Provado por E2E em 06/08/2026**, `fluxo-3-ficha-do-lead.spec.ts`: contato registrado aparece na timeline na mesma tela; follow-up agendado nasce `Pendente` e passa a `Concluído` ao ser concluído. Backend ganhou `PATCH :id/follow-ups/:followUpId`, que faltava — só havia criar |
 | 15 | Pipeline move card por drag and drop, com rollback em erro | **G** | `pipeline-board.tsx`, `pipeline.service.ts`, `PATCH :id/pipeline-stage` | Execução — rollback só se prova provocando falha |
-| 16 | Meus Leads pagina no servidor e combina filtros | **G** | `leads.service.ts`, `leads.dto.ts`, `leads-filters.tsx`, `GET /leads` + `GET /leads/facets` | Execução |
+| 16 | Meus Leads pagina no servidor e combina filtros | **A** | **Provado por E2E em 06/08/2026:** `?minScore=80` reduz o conjunto de linhas em relação à listagem sem filtro. Filtro ignorado no servidor devolveria a mesma contagem |
 | 17 | Histórico reflete buscas com duração e duplicados | **G** | `history/page.tsx` | Execução com as 3 buscas do seed |
 | 18 | IA de abordagem gera com `MockAIProvider` e salva histórico | **G** | `outreach/providers/mock-ai.provider.ts` + `mock-ai.provider.spec.ts` (testa gancho de construtor gratuito); `lead-outreach-card.tsx` com histórico | Execução. **Nota:** ver Achado 1 — a tela dedicada `/ai-outreach` foi construída apesar de cortada |
 | 19 | Feature gates nos 4 planos e **nenhum modal abre sem ação** | **G** | `entitlements.service.ts` centraliza tudo (comentário 13–19); comentário 47–50 declara que o método só lança em ação explícita; `leads/[id]/page.tsx:64–65` documenta que consultar cota não dispara bloqueio | Desenho correto. Provar exige carregar as telas nos 4 planos (`pnpm db:plan`) |
@@ -119,11 +119,24 @@ Corrigido com `maxWorkers: 1` no config do `@propectai/api`, com o motivo regist
 
 | Classe | Qtd | Critérios |
 |---|---:|---|
-| **A** — satisfeito com evidência | 10 | 1, 3, 5, 10, 11, 12, 20, 21, 22, 24 |
+| **A** — satisfeito com evidência | 14 | 1, 3, 5, **6**, **7**, 10, 11, 12, **14**, **16**, 20, 21, 22, 24 |
 | **B** — abaixo do escopo | 0 | — |
 | **C** — parcial | 0 | — |
-| **G** — implementado, pendente de exercício | 14 | 2, 4, 6, 7, 8, 9, 13, 14, 15, 16, 17, 18, 19, 23 |
+| **G** — implementado, pendente de exercício | 10 | 2, 4, 8, 9, 13, 15, 17, 18, 19, 23 |
 | **F** — ausente | 0 | — |
+
+### E2E — 06/08/2026
+
+`pnpm --filter @propectai/web test:e2e` — **16 de 16**, três fluxos críticos, previstos no escopo §4.3.
+
+Fechou os critérios 6, 7, 14 e 16. Dois deles com prova mais forte do que a inspeção manual daria:
+
+- **Critério 7** — o mesmo KPI devolve valor positivo no tenant de demonstração e exatamente `0` na conta recém-criada. Número escrito em componente não muda entre tenants.
+- **Critério 6** — a persistência por etapa foi verificada saindo da tela no meio do wizard e voltando, que é o comportamento real de quem fecha a aba.
+
+Três asserções não correspondem a nenhum critério e ficam como rede de regressão: credenciais nunca aparecem na URL (defeito encontrado em 31/07), a mensagem de erro do login não permite enumerar contas, e o menu principal tem exatamente os oito itens aprovados — nenhum com "site" no nome, e sem `/ai-outreach` ou `/contracts` de volta.
+
+**O que continua fora do alcance do E2E atual:** refresh e logout (critério 4), `LeadActivity` gerada por copiar telefone e abrir mapa (13), Pipeline com drag and drop (15 — excluído de propósito por gerar teste intermitente), feature gates nos quatro planos (19) e as quatro larguras de layout (23).
 
 **Nenhum critério continua parcial ou abaixo do escopo.** Os catorze em G têm código completo que compila e passa no lint; o que falta em cada um é exercício — a maioria no navegador.
 
