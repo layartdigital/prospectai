@@ -176,22 +176,50 @@ Além dos três achados, itens que divergem do aprovado sem decisão documentada
 
 ---
 
-## 5. O que fecha a v0.1.1
+## 5. Plano de fechamento
 
-Ordenado por bloqueio, não por esforço:
+A lista original desta seção foi cumprida entre 31/07 e 06/08 — `/register`, `/onboarding`, camada de escrita da ficha, testes das regras comerciais, Swagger por módulo, decisão do menu e os três fluxos de E2E. Fica substituída pelo plano abaixo.
 
-1. **Liberar espaço em disco e executar o ambiente.** Quatorze critérios estão em G por isso. Nenhuma outra tarefa desta lista deveria começar antes — sem runtime, todo relatório de fase seguinte é opinião.
-2. **Rodar `pnpm test`** e registrar o resultado real de `tenant-isolation.spec.ts`. É o critério 5, o único cuja falha significa vazamento entre clientes.
-3. **Criar `/register`** — hoje é rota pública apontando para o vazio.
-4. **Criar `/onboarding`** com as 5 etapas e a ação de reiniciar em Configurações (critério 6).
-5. **UI de escrita na ficha do lead**: registrar contato, agendar/concluir/reagendar/cancelar follow-up, recalcular score. Os quatro endpoints já existem (critério 14).
-6. **Testes das duas regras comerciais**: duplicado não consome cota / job falho devolve reserva (5.3), e nenhum lead concluído sem `LeadScoreReason` (5.4 — o escopo pede asserção, não boa intenção).
-7. **Decidir o menu.** Ou os cinco itens extras voltam para a v0.2, ou o `scope-v0.1.1.md` é atualizado registrando a mudança e os critérios de aceite correspondentes. As duas saídas são legítimas; deixar como está não é.
-8. **`addTag` por módulo no Swagger** (critério 21).
-9. **QA visual nas 4 larguras** (critério 23).
-10. **E2E dos 3 fluxos críticos.**
+Os critérios restantes estão agrupados **por como se fecham**, não por assunto. Agrupar por assunto produz uma lista que parece organizada e não ajuda a decidir o que fazer na segunda-feira.
 
-Itens 3, 4 e 5 são o grosso do trabalho de interface restante. Itens 1 e 2 são pré-requisito de tudo.
+*(O critério 19 aguarda a primeira execução de `fluxo-4-planos-e-gates.spec.ts`.)*
+
+### Fase A — extensão do E2E existente
+
+Quatro critérios que cabem nos fluxos atuais, sem infraestrutura nova. Uma sessão de trabalho.
+
+| # | O que falta | Nota |
+|---|---|---|
+| **4** | Clicar em Sair e afirmar que a rota protegida volta a redirecionar; forçar expiração do access token e ver o refresh renovar | Login já está provado. **O refresh é o que importa:** quebrado, só aparece quinze minutos depois, quando o usuário já saiu da mesa |
+| **13** | Clicar nas ações rápidas e afirmar que a trilha de `LeadActivity` cresceu | Precisa verificar o efeito, não só o clique. Clique que não grava nada também "passa" |
+| **17** | Afirmar duração e taxa de duplicidade sobre as três buscas do seed | Uma concluída, uma com duplicados, uma falha — o dado já existe |
+| **18** | Regenerar a abordagem e afirmar que a versão anterior fica no histórico | O fluxo 4 já exercita a geração no AGENCY |
+
+### Fase B — E2E com orquestração própria
+
+| # | O que falta | Custo real |
+|---|---|---|
+| **8** | Ciclo completo da Nova Busca com o provider mock, com progresso visível | O mais caro dos nove. Exige o **worker rodando durante o teste** — o `webServer` do config sobe API e web, não ele — e o Playwright acompanhando o polling até `COMPLETED`. Lento por natureza: espera trabalho real |
+| **15** | Rollback visual quando a API falha | O drag and drop continua **fora de propósito**: dnd-kit produz teste intermitente, e a troca de etapa já é coberta por `PATCH /leads/:id/pipeline-stage` na suíte da API. Mas o rollback dá para testar sem arrastar nada — `page.route()` devolve erro e o teste afirma que o card volta à coluna original |
+
+### Fase C — verificação humana, sem substituto
+
+| # | O que falta | O que automatiza e o que não |
+|---|---|---|
+| **23** | Layout em 1920, 1440, 1366 e 390 px | Metade automatiza: projetos nas quatro larguras no `playwright.config.ts`, afirmando ausência de scroll horizontal. Isso pega o defeito grosseiro. Julgar se a tabela de leads em 390px virou algo **usável** ou só encolheu é olho humano |
+| **2** | `install → up → migrate → seed → dev` em máquina limpa | Não se prova onde tudo já funciona: cache e estado escondem dependência implícita. Precisa de container, VM ou outra máquina |
+
+### Fase D — depende de ambiente externo
+
+| # | O que falta | Nota |
+|---|---|---|
+| **9** | Trocar `LEAD_SOURCE_PROVIDER` para `google-maps` e rodar coleta real | O container sobe saudável desde a correção do healthcheck. Não é teste de rotina — bate em serviço de terceiro e custa tempo |
+
+### Ordem recomendada
+
+Fase A inteira → rollback do 15 → automação parcial do 23. O 8 e o 2 ficam para quando incomodarem; o 9 é uma tarde de validação manual.
+
+Nenhum dos nove é bloqueador de uso: são lacunas de **prova**, não de funcionamento.
 
 ---
 
@@ -199,6 +227,21 @@ Itens 3, 4 e 5 são o grosso do trabalho de interface restante. Itens 1 e 2 são
 
 O código inspecionado tem qualidade acima da média e coerência clara com o escopo aprovado: multi-tenant desde a primeira migration, entitlements centralizados com o comentário certo no lugar certo, descarte de PII na origem, score com evidência por motivo exibida ao usuário, proibição do Construtor de Sites respeitada sem exceção. Os comentários explicam *por que*, não *o que* — inclusive as decisões contraintuitivas, como o bind dual-stack em `main.ts:60–66`.
 
-O problema não é qualidade. É **fronteira**: a v0.1.1 cresceu cinco telas além do aprovado enquanto duas telas obrigatórias ficaram para trás e a camada de escrita da tela mais importante do produto ficou pela metade. E há **quatorze critérios que ninguém pode declarar aprovados**, porque o ambiente não subiu.
+O problema não era qualidade. Era **fronteira**: a v0.1.1 cresceu cinco telas além do aprovado enquanto duas telas obrigatórias ficaram para trás e a camada de escrita da tela mais importante do produto ficou pela metade.
 
-**Recomendação:** não iniciar a v0.2 — nem qualquer item extraído do prompt mestre — antes de os 24 critérios estarem verdes com evidência de execução. A tabela acima é o checklist.
+### Estado em 06/08/2026
+
+Essas três lacunas foram fechadas. `/register` e `/onboarding` existem, a ficha do lead escreve, o menu foi decidido e registrado na §4.4 do escopo. A suíte saiu de 4 arquivos e 39 testes para **7 arquivos, 66 testes de unidade e integração, mais 16 E2E**.
+
+Quatro defeitos apareceram no caminho, e nenhum deles seria pego por revisão de código:
+
+| Defeito | Como apareceu |
+|---|---|
+| **Senha na query string** — submit nativo antes da hidratação, vazando credencial para histórico, log de acesso e `Referer` | O Playwright clica mais rápido que qualquer pessoa. O `handleSubmit` estava correto; errado era o intervalo em que ele ainda não existia |
+| **API não liberava a conexão Redis no encerramento** — `SIGTERM` ignorado, container só morre no kill forçado | Só apareceu quando um teste subiu o `AppModule` inteiro pela primeira vez |
+| **Onboarding não podia ser concluído** — `completedAt` escrito apenas num ramo de upsert que nunca era alcançado | Encontrado ao construir a tela que dependia dele |
+| **Botão de recalcular duplicado** na ficha do lead | Violação de strict mode no E2E |
+
+O que resta são **nove lacunas de prova, não de funcionamento** — o plano da seção 5.
+
+**Recomendação:** não iniciar a v0.2 antes da Fase A. As fases C e D podem correr em paralelo com trabalho de produto, porque dependem de ambiente e de olho humano, não de código.
