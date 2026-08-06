@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
@@ -31,14 +31,23 @@ const RAIZ = path.resolve(__dirname, '../../..');
 
 type Plano = 'free' | 'start' | 'pro' | 'agency';
 
-/** Troca o plano do tenant de demonstração pelo mesmo CLI que a pessoa usa. */
+/**
+ * Troca o plano do tenant de demonstração pelo mesmo CLI que a pessoa usa.
+ *
+ * `execSync` com comando em string, e não `execFileSync` com vetor de
+ * argumentos. As duas alternativas óbvias falham no Windows:
+ *
+ *   - `execFileSync('pnpm', [...], { shell: true })` funciona, mas dispara
+ *     DEP0190: argumentos concatenados sem escape.
+ *   - `execFileSync('pnpm.cmd', [...])` sem shell falha com EINVAL. O Node 20+
+ *     recusa executar `.cmd` e `.bat` diretamente, por segurança.
+ *
+ * `execSync` recebe a linha inteira e é a API pensada para uso com shell.
+ * Injeção não é risco aqui: `plano` vem de um union de literais, não de
+ * entrada externa.
+ */
 function trocarPlano(plano: Plano): void {
-  execFileSync('pnpm', ['db:plan', plano, '--reset'], {
-    cwd: RAIZ,
-    stdio: 'pipe',
-    // Windows precisa de shell para resolver o pnpm.cmd do PATH.
-    shell: true,
-  });
+  execSync(`pnpm db:plan ${plano} --reset`, { cwd: RAIZ, stdio: 'pipe' });
 }
 
 /** Telas que qualquer plano pode abrir. Nenhuma delas pode disparar modal. */
@@ -133,33 +142,21 @@ test.describe('o gate muda entre os planos', () => {
   });
 });
 
-test.describe('exportação por plano', () => {
-  test('FREE não exporta; PRO exporta', async ({ page }) => {
-    trocarPlano('free');
-    await login(page);
-    await page.goto('/leads');
-
-    // O botão pode existir e bloquear na tentativa, ou não existir. As duas
-    // formas são aceitáveis — o que não vale é exportar num plano sem direito.
-    const exportarFree = page.getByRole('button', { name: /exportar/i });
-    if (await exportarFree.count()) {
-      await exportarFree.first().click();
-      await expect(page.getByRole('dialog')).toHaveCount(0);
-      await expect(page.getByText(/plano|upgrade|Ver planos/i).first()).toBeVisible();
-    }
-
-    trocarPlano('pro');
-    await login(page);
-    await page.goto('/leads');
-
-    const exportarPro = page.getByRole('button', { name: /exportar/i });
-    if (await exportarPro.count()) {
-      const download = page.waitForEvent('download', { timeout: 30_000 }).catch(() => null);
-      await exportarPro.first().click();
-      expect(
-        await download,
-        'PRO tem CSV no plano e a exportação não produziu download',
-      ).not.toBeNull();
-    }
-  });
-});
+/*
+ * Exportação CSV por plano — SEM TESTE, de propósito.
+ *
+ * A primeira versão deste arquivo tinha um teste que verificava a exportação
+ * "se o botão existir". Ele passou, e passou sem verificar nada: **o produto
+ * não tem exportação.** Não há botão em Meus Leads nem endpoint na API. A
+ * capacidade `export.csv` existe em EntitlementsService e ninguém a consome.
+ *
+ * Teste condicional que passa quando a funcionalidade não existe é pior que
+ * teste ausente: ele aparece verde no relatório e cria a impressão de cobertura.
+ *
+ * O escopo §3.1 lista "exportação CSV conforme plano" como parte do que
+ * significa Meus Leads estar funcional, e §4.3 adia só o Excel para a v0.2 —
+ * o que implica CSV dentro da v0.1.1. A lacuna está registrada na conferência.
+ *
+ * Quando a exportação existir, o teste volta: FREE tenta e é bloqueado, PRO
+ * tenta e recebe download. Sem `if`.
+ */

@@ -21,6 +21,17 @@ export const DEMO = {
  * Aceita /dashboard ou /onboarding porque conta recém-criada vai para o wizard.
  */
 export async function login(page: Page, credentials = DEMO): Promise<void> {
+  // Sessão anterior é limpa sempre, não só quando parece necessário.
+  //
+  // Chamar `login()` duas vezes no mesmo teste — trocar de plano, entrar com
+  // outra conta — levava o middleware a redirecionar o usuário já autenticado
+  // para o dashboard, e o botão "Entrar" nunca aparecia. O erro dizia
+  // "elemento não encontrado", que manda investigar o formulário.
+  //
+  // Nos fluxos 1 a 3 nunca apareceu porque cada teste ganha contexto novo. Era
+  // pré-condição acidental; aqui virou explícita.
+  await page.context().clearCookies();
+
   await page.goto('/login');
   await aguardarHidratacao(page, 'Entrar');
 

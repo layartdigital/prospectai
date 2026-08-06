@@ -98,7 +98,7 @@ Endpoint sem interface é endpoint que nenhum usuário alcança. **C — Parcial
 | 16 | Meus Leads pagina no servidor e combina filtros | **A** | **Provado por E2E em 06/08/2026:** `?minScore=80` reduz o conjunto de linhas em relação à listagem sem filtro. Filtro ignorado no servidor devolveria a mesma contagem |
 | 17 | Histórico reflete buscas com duração e duplicados | **G** | `history/page.tsx` | Execução com as 3 buscas do seed |
 | 18 | IA de abordagem gera com `MockAIProvider` e salva histórico | **G** | `outreach/providers/mock-ai.provider.ts` + `mock-ai.provider.spec.ts` (testa gancho de construtor gratuito); `lead-outreach-card.tsx` com histórico | Execução. **Nota:** ver Achado 1 — a tela dedicada `/ai-outreach` foi construída apesar de cortada |
-| 19 | Feature gates nos 4 planos e **nenhum modal abre sem ação** | **G** | `entitlements.service.ts` centraliza tudo (comentário 13–19); comentário 47–50 declara que o método só lança em ação explícita; `leads/[id]/page.tsx:64–65` documenta que consultar cota não dispara bloqueio | Desenho correto. Provar exige carregar as telas nos 4 planos (`pnpm db:plan`) |
+| 19 | Feature gates nos 4 planos e **nenhum modal abre sem ação** | **A** | **Provado por E2E em 06/08/2026**, `fluxo-4-planos-e-gates.spec.ts`: os quatro planos carregam Dashboard, Leads, Pipeline, Nova Busca, Histórico, Configurações e a ficha do lead sem nenhum `role="dialog"`. O gate muda de fato — FREE mascara telefone e PRO não; no FREE a IA só bloqueia **depois** do clique, e no AGENCY a mesma ação gera | Ver lacuna de exportação na §4 |
 | 20 | Versão 0.1.1 em rodapé, Configurações e `/api/v1/system/version` | **A** | `app-footer.tsx:31` (+ status da API), `settings/page.tsx:43`, `system.controller.ts`, `main.ts:50` no Swagger | — |
 | 21 | Swagger documenta todos os endpoints implementados | **A** | **Corrigido em 31/07/2026.** Dez `addTag` em `main.ts`, um por módulo, ordenados pelo percurso do produto. Os dez controllers têm `@ApiTags` e cada endpoint tem `@ApiOperation` com descrição de efeito | — |
 | 22 | Nenhum dado pessoal de avaliador persistido | **A** | `google-maps.provider.ts:145–149` descarta `user_reviews` e `owner` na origem; `process-scrape-job.ts:292–293` confirma que `RawLead` nunca os carregou | Recomendo transformar em teste automatizado — hoje é garantido por código e comentário, não por asserção |
@@ -119,10 +119,10 @@ Corrigido com `maxWorkers: 1` no config do `@propectai/api`, com o motivo regist
 
 | Classe | Qtd | Critérios |
 |---|---:|---|
-| **A** — satisfeito com evidência | 14 | 1, 3, 5, **6**, **7**, 10, 11, 12, **14**, **16**, 20, 21, 22, 24 |
+| **A** — satisfeito com evidência | 15 | 1, 3, 5, 6, 7, 10, 11, 12, 14, 16, **19**, 20, 21, 22, 24 |
 | **B** — abaixo do escopo | 0 | — |
 | **C** — parcial | 0 | — |
-| **G** — implementado, pendente de exercício | 10 | 2, 4, 8, 9, 13, 15, 17, 18, 19, 23 |
+| **G** — implementado, pendente de exercício | 9 | 2, 4, 8, 9, 13, 15, 17, 18, 23 |
 | **F** — ausente | 0 | — |
 
 ### E2E — 06/08/2026
@@ -171,6 +171,18 @@ Além dos três achados, itens que divergem do aprovado sem decisão documentada
 | `/register` no middleware sem página | §3.1 | **Alta — rota morta em produção** |
 | Sem tela `/onboarding` | §3.1 e critério 6 | Alta |
 | E2E Playwright dos 3 fluxos críticos | §4.3: previsto para a v0.1.1 | Média — não localizados |
+
+### Lacuna fora dos 24 critérios — exportação CSV
+
+Encontrada em 06/08/2026 ao escrever o fluxo 4: **o produto não exporta nada.** Não há botão em Meus Leads nem endpoint na API. A capacidade `export.csv` existe em `EntitlementsService` e nenhum código a consome.
+
+O escopo §3.1 lista *"exportação CSV conforme plano"* como parte do que significa Meus Leads estar funcional, e §4.3 adia **só o Excel** para a v0.2 — o que coloca o CSV dentro da v0.1.1.
+
+**O que isso revela sobre a própria conferência:** os 24 critérios numerados não cobrem tudo que a seção 3 do escopo descreve. O critério 16 diz "pagina no servidor e combina filtros", e está satisfeito — mas a tela que ele avalia deveria fazer mais do que o critério pede. Uma conferência guiada só pela lista de aceite herda os buracos da lista.
+
+O primeiro teste que escrevi para isso verificava a exportação *"se o botão existir"*. Passou verde sem exercitar nada, o que é pior que teste ausente: cria impressão de cobertura. Foi removido, com o motivo registrado no arquivo.
+
+---
 
 **Suíte de testes localizada, na íntegra:** `apps/api/test/tenant-isolation.spec.ts`, `apps/api/test/mock-ai.provider.spec.ts`, `packages/types/src/scoring-engine.test.ts`, `packages/types/src/normalize.test.ts`. Quatro arquivos. Para 24 critérios de aceite, é pouco — e nenhum deles cobre as regras comerciais 5.3 (cota) e 5.4 (score obrigatório), que o escopo classifica como invioláveis.
 
