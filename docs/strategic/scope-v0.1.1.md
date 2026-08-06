@@ -23,7 +23,7 @@ Entregar tudo de uma vez produz exatamente o produto que a análise de concorren
 | **Ambiente de dev** | Híbrido: Postgres, Redis e scraper em Docker; web/api/worker locais com `pnpm dev`. O compose completo existe e funciona, mas o ciclo diário não passa por rebuild de imagem |
 | **Autenticação** | Real desde a v0.1.1: JWT curto, Argon2, refresh com rotação em cookie HttpOnly |
 | **Multi-tenant** | Completo desde a primeira migration. `tenantId` em toda entidade de negócio, `TenantGuard`, teste explícito de vazamento horizontal |
-| **Raiz do projeto** | `F:\prospectai`, sempre |
+| **Raiz do projeto** | `C:\ResgateProjetos\prospectai`, sempre — migrado de `F:\prospectai` em 06/08/2026 por falha de hardware do disco externo |
 | **Motor de coleta** | `gosom/google-maps-scraper`, sempre |
 
 Auth e multi-tenant entram agora justamente porque são as duas coisas impossíveis de acrescentar depois sem reescrever tudo. Uma tela a mais é barata; um schema sem `tenantId` é uma migração de dados dolorosa.

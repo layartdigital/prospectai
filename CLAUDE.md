@@ -8,7 +8,14 @@ Este arquivo vale para **todas** as sessões de trabalho neste projeto. Ler ante
 
 **PropectAI** — plataforma SaaS multi-tenant de prospecção de clientes locais. Conceito de marca: Prospect + AI.
 **Versão atual:** 0.1.1 (em construção)
-**Raiz:** `F:\prospectai` — todo o trabalho acontece aqui, sem exceção.
+**Raiz:** `C:\ResgateProjetos\prospectai` — todo o trabalho acontece aqui, sem exceção.
+
+> **Migrado de `F:\prospectai` em 06/08/2026.** O volume F: é um HD externo USB que
+> apresentou erro de hardware durante o desenvolvimento: falha de I/O em blocos
+> lógicos, perda de dados em escrita atrasada e corrupção de índice NTFS, todos
+> registrados no Visualizador de Eventos. O projeto foi copiado para o SSD interno.
+> Referências a `F:\prospectai` em documentos anteriores a esta data são registro
+> histórico e ficam como estão — reescrevê-las falsificaria o que se sabia à época.
 
 ---
 
@@ -16,6 +23,8 @@ Este arquivo vale para **todas** as sessões de trabalho neste projeto. Ler ante
 
 ### 1. Não tocar no Bellvia
 O Bellvia vive em `F:\drmind` e usa a mesma stack (Node, TypeScript, PostgreSQL, Docker). Nenhum arquivo, pasta, container, rede, volume ou porta dele pode ser modificado, movido, parado ou reutilizado.
+
+A regra não mudou com a migração do PropectAI para o C:. Os dois projetos deixaram de dividir o disco, mas continuam dividindo a **mesma instância do Docker** — que é onde o risco real sempre esteve. Backup do Bellvia feito em `C:\backup-drmind` em 06/08/2026: 5.146 arquivos, zero falhas.
 
 **Nunca executar** `docker system prune`, `docker volume prune`, `docker network prune` ou qualquer remoção global.
 

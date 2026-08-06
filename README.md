@@ -26,7 +26,7 @@ Já verificados nesta máquina em 27/07/2026:
 O scraper é software de terceiros e não é versionado neste repositório.
 
 ```powershell
-cd F:\prospectai
+cd C:\ResgateProjetos\prospectai
 git clone https://github.com/gosom/google-maps-scraper services/google-maps-scraper
 ```
 
@@ -35,11 +35,15 @@ Se a pasta já existir, pule este passo.
 ### 3. Instalar dependências
 
 ```powershell
-cd F:\prospectai
+cd C:\ResgateProjetos\prospectai
 pnpm install
 ```
 
-O `.npmrc` da raiz mantém o store do pnpm em `F:\.pnpm-store` — mesmo volume do projeto, o que permite hardlinks em vez de cópia.
+O store do pnpm precisa ficar **no mesmo volume do projeto** — é o que permite hardlink em vez de cópia, e a diferença é de gigabytes.
+
+Até 06/08/2026 o `.npmrc` da raiz fixava `store-dir=F:\.pnpm-store`. Com a migração para o C:, essa linha passou a apontar para outro volume, e um externo com falha de hardware — pior dos dois mundos. Foi removida: sem ela o pnpm usa o padrão do usuário, que já vive no C:.
+
+Se precisar fixar de novo, use um caminho no mesmo volume da raiz.
 
 ### 4. Criar o arquivo de ambiente
 

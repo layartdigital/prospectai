@@ -7,6 +7,45 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Migração de volume por falha de hardware · 06/08/2026
+
+#### Contexto
+
+Durante a sessão de 31/07 a escrita em disco começou a falhar de forma intermitente: `EPERM` no `prisma generate`, escritas recusadas em pastas distintas, e o Node reportando `UNKNOWN: unknown error, read` ao carregar arquivos de `node_modules` que lera minutos antes.
+
+As três primeiras hipóteses estavam erradas — disco cheio, conexão da sessão, arquivo travado. O Visualizador de Eventos do Windows deu o diagnóstico real, com carimbo do dia:
+
+| Evento | Conteúdo |
+|---|---|
+| **154** | Falha de I/O em bloco lógico do Disco 2 **por erro de hardware** |
+| **51** | Erro durante operação de paginação, dezenas de ocorrências |
+| **50** | *"O Windows não pôde salvar todos os dados para o arquivo F:\prospectai. **Os dados foram perdidos.**"* |
+| **55** | **Corrupção detectada em estrutura de índice NTFS do volume F:** |
+
+O Disco 2 é um `Samsung M3 Portable` — HD externo USB — que hospedava o PropectAI e o Bellvia. O `robocopy` confirmou com `ERROR_DEVICE_HARDWARE_ERROR` (483), e em certo momento o dispositivo respondeu "inexistente" (433). O `HealthStatus: Healthy` do Windows era ruído: ponte USB raramente repassa SMART.
+
+Trocar cabo e porta USB estabilizou o volume — o que aponta para a ponte, o cabo ou a alimentação do gabinete, não necessariamente para as plataformas.
+
+#### Alterado
+
+- **Raiz do projeto: `F:\prospectai` → `C:\ResgateProjetos\prospectai`.** Independente de o disco sobreviver, HD externo USB hospedando bind mount de Docker e `node_modules` com centenas de milhares de arquivos é o lugar errado para desenvolver
+- **`.npmrc`** — removido `store-dir=F:\.pnpm-store`. A diretiva estava correta enquanto a raiz vivia no F: (store no mesmo volume permite hardlink); depois da migração passou a apontar para outro volume, e um defeituoso
+- `CLAUDE.md`, `README.md` e `scope-v0.1.1.md` atualizados com a raiz nova
+
+Documentos anteriores a 06/08 que citam `F:\prospectai` **ficam como estão**. São registro histórico do que se sabia à época; reescrevê-los falsificaria o rastro.
+
+#### Preservado
+
+- **Primeiro commit do repositório**, com 192 arquivos e 35.915 linhas, e push para o remoto. Até 06/08/2026 o projeto inteiro existia em cópia única, sem histórico — sobreviveu ao incidente por sorte, não por processo. Era a maior fragilidade do projeto e não tinha relação com o disco
+- **Bellvia** (`F:\drmind`) copiado para `C:\backup-drmind`: 5.146 arquivos, zero falhas
+- **Volumes Docker intactos.** `propectai-postgres-data` e `propectai-redis-data` são gerenciados pelo Docker e nunca estiveram no F: — o seed, as contas de demonstração e o histórico de buscas sobreviveram sem intervenção
+
+#### Pendente
+
+- `chkdsk F: /scan` (somente leitura) para dimensionar a corrupção de índice registrada no evento 55. **Não rodar `/f` nem `/r`** antes de backup íntegro: em dispositivo instável, reescrever metadados transforma perda parcial em total
+- Reinstalar dependências e revalidar: `pnpm install`, `pnpm typecheck`, `pnpm test`, `pnpm --filter @propectai/web test:e2e`
+
+
 ### Ficha do lead, regras comerciais e Swagger · 31/07/2026
 
 #### Adicionado

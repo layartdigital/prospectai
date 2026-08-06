@@ -3,7 +3,19 @@
 **Projeto:** PropectAI
 **Versão alvo:** 0.1.1
 **Data da auditoria:** 27 de julho de 2026
-**Raiz do projeto:** `F:\prospectai`
+**Raiz do projeto:** `F:\prospectai` — **obsoleto desde 06/08/2026**
+
+> **Adendo de 06/08/2026.** Este documento registra a Fase 0 como ela foi, em
+> 27/07/2026, e por isso não foi reescrito. Duas conclusões dele caducaram:
+>
+> - A raiz passou a ser `C:\ResgateProjetos\prospectai`. O volume F: é um HD
+>   externo USB que apresentou erro de hardware — falha de I/O, perda de dados em
+>   escrita atrasada e corrupção de índice NTFS, tudo no Visualizador de Eventos.
+> - A decisão da seção 9 de criar `.npmrc` com `store-dir=F:\.pnpm-store` era
+>   correta então (hardlink exige mesmo volume) e passou a ser nociva depois da
+>   migração. A diretiva foi removida.
+>
+> O raciocínio original continua válido; mudaram os fatos, não a lógica.
 
 ---
 
