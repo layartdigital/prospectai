@@ -1,0 +1,25 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# O clone do scraper NAO e um workspace pnpm. E um projeto Go consumido
+# como container. Fica fora da lista de proposito.
+
+# pnpm 10 bloqueia scripts de postinstall por padrao, o que e a decisao
+# correta: pacote de terceiro nao deveria executar codigo na instalacao sem
+# consentimento. Estes sao os que precisam rodar, e por que:
+#
+#   prisma / @prisma/client / @prisma/engines  baixam os engines nativos;
+#                                              sem eles `prisma generate` falha
+#   esbuild                                    binario nativo usado pelo tsx
+#   sharp                                      otimizacao de imagem do Next.js
+#   msgpackr-extract                           aceleracao nativa do BullMQ
+#   unrs-resolver                              resolver do eslint-config-next
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - prisma
+  - esbuild
+  - sharp
+  - msgpackr-extract
+  - unrs-resolver

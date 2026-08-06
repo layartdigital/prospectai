@@ -1,0 +1,50 @@
+{
+  "name": "propectai",
+  "version": "0.1.1",
+  "private": true,
+  "description": "PropectAI - plataforma SaaS multi-tenant de prospeccao de clientes locais",
+  "packageManager": "pnpm@10.30.1",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rimraf node_modules",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:ps": "docker compose ps",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:reset": "prisma migrate reset",
+    "db:seed": "prisma db seed",
+    "db:reset-quota": "tsx prisma/reset-quota.ts",
+    "db:plan": "tsx prisma/set-plan.ts",
+    "dev:unlock": "tsx prisma/set-plan.ts agency --reset",
+    "dev:lock": "tsx prisma/set-plan.ts free --reset",
+    "db:studio": "prisma studio --port 5556"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "devDependencies": {
+    "@node-rs/argon2": "^2.0.2",
+    "@propectai/types": "workspace:*",
+    "@types/node": "^22.10.2",
+    "dotenv": "^16.4.7",
+    "prisma": "6.3.0",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@prisma/client": "6.3.0"
+  }
+}

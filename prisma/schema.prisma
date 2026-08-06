@@ -1,0 +1,1011 @@
+// PropectAI - modelo de dados v0.1.1
+// Referencia: docs/technical/data-model.md
+//
+// Principios:
+//   1. Toda entidade de negocio carrega tenantId desde a primeira migration.
+//   2. Indices unicos de negocio sao sempre compostos com tenantId.
+//   3. Exclusao e logica (deletedAt). AuditLog nunca e alterado.
+//   4. Entidades sem interface na v0.1.1 existem no schema para nao exigir
+//      retrofit depois (Proposal, Contract, Tag, ExportJob).
+//   5. O modulo "Construtor de Sites" nao existe - nenhuma tabela o representa.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================================================
+// ENUMS
+// ===========================================================================
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  SDR
+  VIEWER
+}
+
+enum PlanCode {
+  FREE
+  START
+  PRO
+  AGENCY
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum ScrapeJobStatus {
+  PENDING
+  QUEUED
+  RUNNING
+  NORMALIZING
+  SCORING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum LeadSource {
+  GOOGLE_MAPS
+  CSV_IMPORT
+  MANUAL
+  MOCK
+}
+
+/// Tres estados, nunca dois. DESCONHECIDO significa "nao verificado" e nao
+/// pontua no score. So vira AUSENTE apos verificacao real.
+enum SignalState {
+  PRESENTE
+  AUSENTE
+  DESCONHECIDO
+}
+
+/// SITE_PRECARIO = dominio de construtor gratuito, encurtador ou rede social
+/// usada como site. E oportunidade comercial, nao "ja tem site".
+enum WebsiteStatus {
+  SEM_SITE
+  SITE_PRECARIO
+  SITE_PROPRIO
+  DESCONHECIDO
+}
+
+/// LIKELY = telefone celular brasileiro. Nao houve verificacao externa.
+/// O rotulo na interface e "WhatsApp provavel", nunca "Com WhatsApp".
+enum WhatsAppStatus {
+  UNKNOWN
+  LIKELY
+  VERIFIED
+}
+
+enum ScoreLevel {
+  BAIXA
+  MEDIA
+  ALTA
+  MUITO_ALTA
+}
+
+enum ScoreReasonPolarity {
+  POSITIVE
+  NEGATIVE
+  DISQUALIFYING
+}
+
+enum ActivityType {
+  LEAD_CREATED
+  LEAD_UPDATED
+  PHONE_COPIED
+  MAP_OPENED
+  WHATSAPP_OPENED
+  WEBSITE_OPENED
+  SOCIAL_OPENED
+  STAGE_CHANGED
+  FAVORITED
+  UNFAVORITED
+  SUPPRESSED
+  SCORE_RECALCULATED
+  OUTREACH_GENERATED
+  CONTACT_REGISTERED
+  FOLLOWUP_CREATED
+  FOLLOWUP_COMPLETED
+  NOTE_ADDED
+}
+
+enum ContactChannel {
+  WHATSAPP
+  EMAIL
+  INSTAGRAM
+  PHONE
+  IN_PERSON
+  OTHER
+}
+
+enum ContactDirection {
+  SENT
+  RECEIVED
+}
+
+enum FollowUpStatus {
+  PENDING
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum FollowUpPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum OutreachTone {
+  CONSULTIVO
+  DIRETO
+  INFORMAL
+  EXECUTIVO
+}
+
+enum NotificationType {
+  HIGH_SCORE_LEAD
+  SEARCH_COMPLETED
+  SEARCH_FAILED
+  FOLLOWUP_OVERDUE
+  LIMIT_NEAR
+  WEEKLY_SUMMARY
+  LEAD_PROFILE_UPDATED
+}
+
+enum SuppressionReason {
+  USER_REQUEST
+  INVALID_DATA
+  COMPETITOR
+  ALREADY_CLIENT
+  OTHER
+}
+
+enum ProposalStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum ContractStatus {
+  DRAFT
+  SENT
+  SIGNED
+  CANCELLED
+}
+
+enum ExportStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+// ===========================================================================
+// IDENTIDADE E ACESSO
+// ===========================================================================
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  avatarUrl    String?
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  memberships    Membership[]
+  refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
+  activities     LeadActivity[]
+  notes          LeadNote[]
+  contactRecords LeadContactRecord[]
+  followUps      LeadFollowUp[]      @relation("FollowUpOwner")
+  ownedCards     PipelineCard[]
+  outreach       OutreachMessage[]
+  transitions    PipelineTransition[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model Tenant {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  timezone  String    @default("America/Sao_Paulo")
+  isDemo    Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  memberships     Membership[]
+  subscription    Subscription?
+  planUsages      PlanUsage[]
+  onboardingState OnboardingState?
+  searches        ProspectingSearch[]
+  scrapeJobs      ScrapeJob[]
+  leads           Lead[]
+  pipelineStages  PipelineStage[]
+  pipelineCards   PipelineCard[]
+  activities      LeadActivity[]
+  notes           LeadNote[]
+  contactRecords  LeadContactRecord[]
+  followUps       LeadFollowUp[]
+  outreach        OutreachMessage[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+  suppressions    SuppressionEntry[]
+  settings        AppSetting[]
+  featureFlags    FeatureFlag[]
+  proposals       Proposal[]
+  contracts       Contract[]
+  tags            Tag[]
+  exportJobs      ExportJob[]
+
+  @@map("tenants")
+}
+
+model Membership {
+  id        String    @id @default(cuid())
+  userId    String
+  tenantId  String
+  role      Role      @default(SDR)
+  isDefault Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@map("memberships")
+}
+
+/// Refresh token guardado como hash, nunca em claro. Rotaciona a cada uso.
+model RefreshToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  userAgent  String?
+  ipAddress  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ===========================================================================
+// PLANOS E CONSUMO
+// ===========================================================================
+
+model Plan {
+  id          String   @id @default(cuid())
+  code        PlanCode @unique
+  name        String
+  description String?
+  priceCents  Int      @default(0)
+  currency    String   @default("BRL")
+  /// Limites como JSON: leadsIncluded, searchesPerMonth, aiGenerationsPerMonth,
+  /// maxUsers, exportFormats, retentionDays. Lido apenas pelo EntitlementService.
+  limits      Json
+  features    Json     @default("[]")
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  tenantId           String             @unique
+  planId             String
+  status             SubscriptionStatus @default(TRIALING)
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime?
+  trialEndsAt        DateTime?
+  cancelledAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  @@index([planId])
+  @@map("subscriptions")
+}
+
+/// reserved e settled ficam separados de proposito: a reserva acontece ao
+/// iniciar o job, a liquidacao ao terminar com o numero real de leads novos.
+/// Job que falha devolve a reserva. Lead duplicado nao consome cota.
+model PlanUsage {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  periodStart         DateTime
+  periodEnd           DateTime
+  leadsReserved       Int      @default(0)
+  leadsSettled        Int      @default(0)
+  searchesCount       Int      @default(0)
+  aiGenerationsCount  Int      @default(0)
+  exportsCount        Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, periodStart])
+  @@index([tenantId])
+  @@map("plan_usages")
+}
+
+model OnboardingState {
+  id             String    @id @default(cuid())
+  tenantId       String    @unique
+  currentStep    Int       @default(1)
+  servicesSold   Json      @default("[]")
+  targetNiches   Json      @default("[]")
+  targetRegions  Json      @default("[]")
+  preferredChannel String?
+  monthlyGoal    String?
+  skipped        Boolean   @default(false)
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("onboarding_states")
+}
+
+// ===========================================================================
+// PROSPECCAO
+// ===========================================================================
+
+model ProspectingSearch {
+  id             String   @id @default(cuid())
+  tenantId       String
+  createdById    String?
+  niche          String
+  stateUf        String
+  city           String
+  neighborhood   String?
+  radiusKm       Int      @default(10)
+  requestedCount Int      @default(5)
+  /// Filtros avancados: hasWebsite, noWebsite, hasPhone, hasEmail,
+  /// minRating, minReviews, openOnly
+  filters        Json     @default("{}")
+  leadsFound     Int      @default(0)
+  duplicatesFound Int     @default(0)
+  isDemo         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  jobs   ScrapeJob[]
+  leads  Lead[]
+
+  @@index([tenantId, createdAt])
+  @@map("prospecting_searches")
+}
+
+/// Uma busca pode gerar varios ScrapeJob: o scraper tem teto de 300 segundos
+/// por job, entao buscas grandes sao fatiadas pelo worker.
+model ScrapeJob {
+  id             String          @id @default(cuid())
+  tenantId       String
+  searchId       String
+  status         ScrapeJobStatus @default(PENDING)
+  source         LeadSource      @default(GOOGLE_MAPS)
+  idempotencyKey String
+  externalJobId  String?
+  queueJobId     String?
+  keyword        String
+  attempts       Int             @default(0)
+  maxAttempts    Int             @default(3)
+  resultCount    Int             @default(0)
+  newLeadCount   Int             @default(0)
+  duplicateCount Int             @default(0)
+  errorCode      String?
+  errorMessage   String?
+  queuedAt       DateTime?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  durationMs     Int?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  search  ProspectingSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  records LeadSourceRecord[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status])
+  @@index([searchId])
+  @@map("scrape_jobs")
+}
+
+// ===========================================================================
+// LEADS
+// ===========================================================================
+
+model Lead {
+  id       String  @id @default(cuid())
+  tenantId String
+  searchId String?
+
+  name     String
+  category String?
+
+  phoneE164 String?
+  phoneRaw  String?
+  email     String?
+
+  website       String?
+  websiteStatus WebsiteStatus @default(DESCONHECIDO)
+
+  addressStreet       String?
+  addressNeighborhood String?
+  addressCity         String?
+  /// Sigla de duas letras. O scraper devolve o nome por extenso
+  /// ("Sao Paulo"); a normalizacao converte via tabela de UF.
+  addressStateUf      String?
+  addressPostalCode   String?
+  addressFull         String?
+  latitude            Float?
+  longitude           Float?
+
+  reviewCount  Int?
+  reviewRating Float?
+  openHours    Json?
+  timezone     String?
+
+  source     LeadSource @default(GOOGLE_MAPS)
+  placeId    String?
+  cid        String?
+  sourceUrl  String?
+  /// sha256(nome normalizado + telefone E.164 + CEP). Deduplica leads sem placeId.
+  fingerprint String
+
+  isFavorite     Boolean   @default(false)
+  isDisqualified Boolean   @default(false)
+  suppressedAt   DateTime?
+  lastContactedAt DateTime?
+  lastEnrichedAt DateTime?
+  isDemo         Boolean   @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  search           ProspectingSearch?    @relation(fields: [searchId], references: [id], onDelete: SetNull)
+  sourceRecord     LeadSourceRecord?
+  digitalPresence  LeadDigitalPresence?
+  score            LeadScore?
+  pipelineCard     PipelineCard?
+  activities       LeadActivity[]
+  notes            LeadNote[]
+  contactRecords   LeadContactRecord[]
+  followUps        LeadFollowUp[]
+  outreachMessages OutreachMessage[]
+  tags             LeadTag[]
+  proposals        Proposal[]
+
+  @@unique([tenantId, fingerprint])
+  @@unique([tenantId, placeId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, addressStateUf, addressCity])
+  @@index([tenantId, websiteStatus])
+  @@index([searchId])
+  @@map("leads")
+}
+
+/// Payload bruto da fonte, ja higienizado. user_reviews, user_reviews_extended
+/// e o link de perfil em owner sao DESCARTADOS antes da gravacao: sao dados
+/// pessoais de terceiros sem finalidade comercial no produto.
+model LeadSourceRecord {
+  id          String     @id @default(cuid())
+  tenantId    String
+  leadId      String     @unique
+  scrapeJobId String?
+  source      LeadSource @default(GOOGLE_MAPS)
+  sourceId    String?
+  payload     Json
+  collectedAt DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+
+  lead      Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  scrapeJob ScrapeJob? @relation(fields: [scrapeJobId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([scrapeJobId])
+  @@map("lead_source_records")
+}
+
+/// Na v0.1.1 hasInstagram e hasFacebook sao SEMPRE DESCONHECIDO: nao existe
+/// enriquecimento de redes sociais. Nunca AUSENTE.
+model LeadDigitalPresence {
+  id             String         @id @default(cuid())
+  tenantId       String
+  leadId         String         @unique
+  hasWebsite     SignalState    @default(DESCONHECIDO)
+  hasEmail       SignalState    @default(DESCONHECIDO)
+  hasPhone       SignalState    @default(DESCONHECIDO)
+  hasInstagram   SignalState    @default(DESCONHECIDO)
+  hasFacebook    SignalState    @default(DESCONHECIDO)
+  hasReviews     SignalState    @default(DESCONHECIDO)
+  whatsappStatus WhatsAppStatus @default(UNKNOWN)
+  instagramUrl   String?
+  facebookUrl    String?
+  websiteHasHttps Boolean?
+  lastCheckedAt  DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("lead_digital_presences")
+}
+
+model LeadScore {
+  id               String     @id @default(cuid())
+  tenantId         String
+  leadId           String     @unique
+  value            Int        @default(0)
+  level            ScoreLevel @default(BAIXA)
+  algorithmVersion String     @default("score-v1")
+  calculatedAt     DateTime   @default(now())
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  lead    Lead              @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  reasons LeadScoreReason[]
+
+  @@index([tenantId, value])
+  @@map("lead_scores")
+}
+
+/// O numero sozinho nao e gravado. Cada peso aplicado gera um registro aqui.
+/// evidence guarda o dado que embasou, para o usuario poder discordar
+/// de forma produtiva.
+model LeadScoreReason {
+  id        String              @id @default(cuid())
+  tenantId  String
+  scoreId   String
+  code      String
+  label     String
+  weight    Int
+  polarity  ScoreReasonPolarity
+  evidence  String?
+  createdAt DateTime            @default(now())
+
+  score LeadScore @relation(fields: [scoreId], references: [id], onDelete: Cascade)
+
+  @@index([scoreId])
+  @@index([tenantId, code])
+  @@map("lead_score_reasons")
+}
+
+// ===========================================================================
+// PIPELINE
+// ===========================================================================
+
+model PipelineStage {
+  id         String   @id @default(cuid())
+  tenantId   String
+  name       String
+  slug       String
+  order      Int
+  color      String   @default("#2F6BFF")
+  isTerminal Boolean  @default(false)
+  isWon      Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  cards       PipelineCard[]
+  fromMoves   PipelineTransition[] @relation("FromStage")
+  toMoves     PipelineTransition[] @relation("ToStage")
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, order])
+  @@map("pipeline_stages")
+}
+
+model PipelineCard {
+  id             String    @id @default(cuid())
+  tenantId       String
+  leadId         String    @unique
+  stageId        String
+  ownerId        String?
+  position       Int       @default(0)
+  estimatedValue Int?
+  lostReason     String?
+  enteredStageAt DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead        Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  stage       PipelineStage        @relation(fields: [stageId], references: [id])
+  owner       User?                @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  transitions PipelineTransition[]
+
+  @@index([tenantId, stageId, position])
+  @@map("pipeline_cards")
+}
+
+model PipelineTransition {
+  id          String   @id @default(cuid())
+  tenantId    String
+  cardId      String
+  fromStageId String?
+  toStageId   String
+  changedById String?
+  origin      String   @default("manual")
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  card      PipelineCard   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  fromStage PipelineStage? @relation("FromStage", fields: [fromStageId], references: [id])
+  toStage   PipelineStage  @relation("ToStage", fields: [toStageId], references: [id])
+  changedBy User?          @relation(fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([cardId, createdAt])
+  @@index([tenantId])
+  @@map("pipeline_transitions")
+}
+
+// ===========================================================================
+// ATIVIDADE COMERCIAL
+// ===========================================================================
+
+/// Trilha automatica. E a diferenca entre um CRM que registra e um que so
+/// armazena: toda acao do usuario na ficha do lead gera um registro.
+model LeadActivity {
+  id        String       @id @default(cuid())
+  tenantId  String
+  leadId    String
+  actorId   String?
+  type      ActivityType
+  metadata  Json         @default("{}")
+  createdAt DateTime     @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  actor  User?  @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, leadId, createdAt])
+  @@map("lead_activities")
+}
+
+/// Nunca sobrescrita. Correcao gera nota nova, nao edicao silenciosa.
+model LeadNote {
+  id        String    @id @default(cuid())
+  tenantId  String
+  leadId    String
+  authorId  String?
+  content   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  author User?  @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, leadId, createdAt])
+  @@map("lead_notes")
+}
+
+model LeadContactRecord {
+  id           String           @id @default(cuid())
+  tenantId     String
+  leadId       String
+  authorId     String?
+  channel      ContactChannel
+  direction    ContactDirection
+  outcome      String?
+  notes        String?
+  outreachId   String?
+  occurredAt   DateTime         @default(now())
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  rectifiedById String?
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead     Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  author   User?            @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  outreach OutreachMessage? @relation(fields: [outreachId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, leadId, occurredAt])
+  @@map("lead_contact_records")
+}
+
+/// OVERDUE e calculado por job periodico contra o timezone do TENANT,
+/// nao do servidor.
+model LeadFollowUp {
+  id          String           @id @default(cuid())
+  tenantId    String
+  leadId      String
+  ownerId     String?
+  channel     ContactChannel   @default(WHATSAPP)
+  priority    FollowUpPriority @default(MEDIUM)
+  status      FollowUpStatus   @default(PENDING)
+  dueAt       DateTime
+  notes       String?
+  completedAt DateTime?
+  cancelledAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  owner  User?  @relation("FollowUpOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, dueAt])
+  @@index([leadId])
+  @@map("lead_follow_ups")
+}
+
+/// Na v0.1.1 nenhuma mensagem e disparada automaticamente. O produto gera
+/// rascunho, o humano envia.
+model OutreachMessage {
+  id           String         @id @default(cuid())
+  tenantId     String
+  leadId       String
+  authorId     String?
+  channel      ContactChannel @default(WHATSAPP)
+  tone         OutreachTone   @default(CONSULTIVO)
+  serviceOffered String?
+  objective    String?
+  callToAction String?
+  extraNotes   String?
+  prompt       String
+  content      String
+  provider     String         @default("mock")
+  model        String?
+  tokensEstimated Int?
+  version      Int            @default(1)
+  isSent       Boolean        @default(false)
+  sentAt       DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead           Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  author         User?               @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  contactRecords LeadContactRecord[]
+
+  @@index([tenantId, leadId, createdAt])
+  @@map("outreach_messages")
+}
+
+// ===========================================================================
+// SISTEMA
+// ===========================================================================
+
+model Notification {
+  id        String           @id @default(cuid())
+  tenantId  String
+  userId    String?
+  type      NotificationType
+  title     String
+  body      String?
+  payload   Json             @default("{}")
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, readAt, createdAt])
+  @@map("notifications")
+}
+
+/// Imutavel. Nunca sofre update nem delete.
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String?
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  actor  User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model SuppressionEntry {
+  id        String            @id @default(cuid())
+  tenantId  String
+  phoneE164 String?
+  email     String?
+  domain    String?
+  reason    SuppressionReason @default(USER_REQUEST)
+  notes     String?
+  createdAt DateTime          @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, phoneE164])
+  @@index([tenantId, email])
+  @@map("suppression_entries")
+}
+
+/// Torna o score ajustavel sem deploy: pesos, faixas e a lista de dominios
+/// de construtor gratuito vivem aqui.
+model AppSetting {
+  id        String   @id @default(cuid())
+  tenantId  String
+  key       String
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@map("app_settings")
+}
+
+model FeatureFlag {
+  id        String   @id @default(cuid())
+  tenantId  String
+  key       String
+  enabled   Boolean  @default(false)
+  payload   Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@map("feature_flags")
+}
+
+// ===========================================================================
+// SEM INTERFACE NA v0.1.1
+// Modeladas agora porque relacionamento e caro de acrescentar depois.
+// Sem rota, sem item de menu, sem tela. Interface na v0.2.
+// ===========================================================================
+
+model Proposal {
+  id          String         @id @default(cuid())
+  tenantId    String
+  leadId      String?
+  title       String
+  status      ProposalStatus @default(DRAFT)
+  totalCents  Int            @default(0)
+  currency    String         @default("BRL")
+  validUntil  DateTime?
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead      Lead?          @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  items     ProposalItem[]
+  contracts Contract[]
+
+  @@index([tenantId, status])
+  @@map("proposals")
+}
+
+model ProposalItem {
+  id          String   @id @default(cuid())
+  proposalId  String
+  description String
+  quantity    Int      @default(1)
+  unitCents   Int      @default(0)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
+  @@map("proposal_items")
+}
+
+model Contract {
+  id         String         @id @default(cuid())
+  tenantId   String
+  proposalId String?
+  title      String
+  status     ContractStatus @default(DRAFT)
+  content    String?
+  signedAt   DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  deletedAt  DateTime?
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  proposal Proposal? @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@map("contracts")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  color     String   @default("#6B7A99")
+  createdAt DateTime @default(now())
+
+  tenant Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leads  LeadTag[]
+
+  @@unique([tenantId, name])
+  @@map("tags")
+}
+
+model LeadTag {
+  leadId    String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([leadId, tagId])
+  @@map("lead_tags")
+}
+
+model ExportJob {
+  id           String       @id @default(cuid())
+  tenantId     String
+  requestedById String?
+  format       String       @default("csv")
+  status       ExportStatus @default(PENDING)
+  filters      Json         @default("{}")
+  rowCount     Int          @default(0)
+  filePath     String?
+  errorMessage String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@map("export_jobs")
+}

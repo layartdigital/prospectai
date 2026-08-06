@@ -1,0 +1,51 @@
+# Dependencias
+node_modules/
+.pnpm-store/
+
+# Builds
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Ambiente - nunca versionar credenciais
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Prisma - client gerado
+prisma/generated/
+
+# Testes
+coverage/
+playwright-report/
+test-results/
+artifacts/
+
+# Motor de coleta: clone git de terceiros, consumido como container.
+# Recriar com: git clone https://github.com/gosom/google-maps-scraper services/google-maps-scraper
+services/google-maps-scraper/
+
+# Estado de runtime do scraper (jobs.db e CSVs coletados)
+data/gmapsdata/
+
+# Saidas de auditoria local
+docs/technical/audit-resultado.txt
+docs/technical/scraper-inspect.json
+
+# Sistema operacional e editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
+
+.npmrc
+
+e2e-saida.txt

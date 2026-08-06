@@ -1,0 +1,19 @@
+{
+  "extends": "@propectai/config/tsconfig.node.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": "./",
+    "noUncheckedIndexedAccess": false,
+
+    // Compilacao incremental desligada nesta app.
+    // O arquivo .tsbuildinfo vive dentro de dist/. Se a pasta for removida
+    // por fora, o tsc pode concluir que esta tudo atualizado e nao emitir
+    // nada - o mesmo sintoma de "0 errors" sem dist/main.js.
+    "incremental": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}

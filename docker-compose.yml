@@ -1,0 +1,183 @@
+# PropectAI - infraestrutura local
+#
+# ISOLAMENTO: todo recurso aqui usa o prefixo propectai-. O projeto Bellvia
+# (F:\drmind) roda na mesma maquina com os containers drm-*, rede drmind_* e
+# volumes drmind_*. Nada neste arquivo toca esses recursos.
+#
+# NUNCA executar: docker system prune / volume prune / network prune.
+#
+# Modo hibrido de desenvolvimento: este compose sobe apenas Postgres, Redis e
+# o scraper. Web, API e worker rodam local com `pnpm dev` para ter hot reload.
+# Os servicos de aplicacao existem sob o profile "full" para producao.
+
+name: propectai
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16 - porta 5434 no host (5432 e do Bellvia)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: propectai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-propectai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-propectai_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-propectai}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - propectai-postgres-data:/var/lib/postgresql/data
+    networks:
+      - propectai-network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-propectai} -d ${POSTGRES_DB:-propectai}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 - porta 6381 no host (6379 e do Bellvia)
+  # A imagem redis:7-alpine ja existe nesta maquina. Compartilhar a imagem nao
+  # cria acoplamento algum: container, volume, rede e porta sao separados.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: propectai-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --save 60 1
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6381}:6379"
+    volumes:
+      - propectai-redis-data:/data
+    networks:
+      - propectai-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Motor de coleta - gosom/google-maps-scraper
+  #
+  # Publicado em 127.0.0.1 de proposito: o container que existia antes deste
+  # compose estava em 0.0.0.0, alcancavel por toda a rede local sem autenticacao.
+  #
+  # O bind mount aponta para ./data/gmapsdata (nao ./data/gmaps): a pasta ja
+  # contem jobs.db e coletas reais que nao podem ser perdidas.
+  # ---------------------------------------------------------------------------
+  gmaps-scraper:
+    image: gosom/google-maps-scraper:latest
+    container_name: propectai-gmaps-scraper
+    restart: unless-stopped
+    command: ["-data-folder", "/gmapsdata"]
+    environment:
+      DISABLE_TELEMETRY: "1"
+    ports:
+      - "127.0.0.1:${SCRAPER_PORT:-8081}:8080"
+    volumes:
+      - ./data/gmapsdata:/gmapsdata
+    networks:
+      - propectai-network
+    # Sem healthcheck de proposito.
+    #
+    # O teste anterior era `wget -q --spider .../api/v1/health` e estava errado
+    # por dois motivos independentes, ambos confirmados em 31/07/2026:
+    #
+    #   1. A imagem e um binario Go em base minima. Nao ha shell nem wget, entao
+    #      CMD-SHELL falha na largada e o container fica `unhealthy` com o
+    #      servico perfeitamente no ar.
+    #   2. `/api/v1/health` nao existe. O servidor tem rota catch-all que devolve
+    #      a UI HTML com 200 para qualquer caminho desconhecido. Se o wget
+    #      existisse, o teste passaria pelo motivo errado - o pior dos dois
+    #      mundos, porque aprovaria sem nunca ter verificado nada.
+    #
+    # Healthcheck que grita falso ensina o time a ignorar o sinal. A verificacao
+    # de alcance real vive na aplicacao: GoogleMapsScraperProvider.probe() bate
+    # no endpoint de jobs, exige JSON e aparece em GET /api/v1/health como
+    # estado degradado. O worker depende deste servico com `service_started`,
+    # entao nada aqui bloqueia a subida.
+
+  # ---------------------------------------------------------------------------
+  # Aplicacao - somente com `docker compose --profile full up -d`
+  # No dia a dia estes tres rodam local via `pnpm dev`.
+  # ---------------------------------------------------------------------------
+  api:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    container_name: propectai-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-propectai}:${POSTGRES_PASSWORD:-propectai_dev_only}@postgres:5432/${POSTGRES_DB:-propectai}?schema=public
+      REDIS_URL: redis://redis:6379
+      SCRAPER_BASE_URL: http://gmaps-scraper:8080
+      API_PORT: 3101
+    ports:
+      - "127.0.0.1:${API_PORT:-3101}:3101"
+    networks:
+      - propectai-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: infra/docker/worker.Dockerfile
+    container_name: propectai-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-propectai}:${POSTGRES_PASSWORD:-propectai_dev_only}@postgres:5432/${POSTGRES_DB:-propectai}?schema=public
+      REDIS_URL: redis://redis:6379
+      SCRAPER_BASE_URL: http://gmaps-scraper:8080
+    networks:
+      - propectai-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gmaps-scraper:
+        condition: service_started
+
+  web:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    container_name: propectai-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-3101}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3100}:3100"
+    networks:
+      - propectai-network
+    depends_on:
+      - api
+
+networks:
+  propectai-network:
+    name: propectai-network
+    driver: bridge
+
+volumes:
+  propectai-postgres-data:
+    name: propectai-postgres-data
+  propectai-redis-data:
+    name: propectai-redis-data

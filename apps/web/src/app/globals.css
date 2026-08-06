@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Tokens do design system PropectAI.
+ * Duplicados no tailwind.config.ts como valores literais, para que os
+ * modificadores de opacidade funcionem. Aqui ficam disponiveis para CSS puro.
+ */
+:root {
+  --color-navy-950: #0f1b33;
+  --color-navy-900: #14213d;
+  --color-blue-600: #2f6bff;
+  --color-blue-700: #1f56d9;
+  --color-blue-100: #dceaff;
+  --color-blue-50: #eaf2fc;
+  --color-surface: #ffffff;
+  --color-surface-soft: #f5f8fd;
+  --color-app-bg: #eaf2fc;
+  --color-border: #d8e3f1;
+  --color-text: #14213d;
+  --color-text-muted: #6b7a99;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #3b82f6;
+
+  --shadow-card: 0 8px 24px rgba(15, 27, 51, 0.06);
+  --radius-card: 14px;
+  --radius-control: 9px;
+}
+
+@layer base {
+  * {
+    @apply border-line;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-appbg text-navy-900 font-sans antialiased;
+  }
+
+  /* Focus visivel e acessivel em todo elemento interativo (WCAG 2.1 AA). */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-600 ring-offset-2 ring-offset-appbg;
+  }
+
+  ::selection {
+    @apply bg-brand-100 text-navy-900;
+  }
+}
+
+@layer components {
+  .pa-card {
+    @apply rounded-card border border-line bg-surface shadow-card;
+  }
+
+  .pa-label {
+    @apply text-label uppercase tracking-wide text-muted;
+  }
+
+  /* Estado neutro para sinal DESCONHECIDO.
+     Nunca usar vermelho aqui: nao verificado nao e o mesmo que ausente. */
+  .pa-signal-unknown {
+    @apply inline-flex items-center gap-1 rounded-full bg-surface-soft px-2 py-0.5
+           text-xs font-medium text-muted;
+  }
+
+  .pa-signal-present {
+    @apply inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5
+           text-xs font-medium text-success;
+  }
+
+  .pa-signal-absent {
+    @apply inline-flex items-center gap-1 rounded-full bg-danger/10 px-2 py-0.5
+           text-xs font-medium text-danger;
+  }
+
+  .pa-skeleton {
+    @apply relative overflow-hidden rounded-md bg-line/50;
+  }
+
+  .pa-skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full animate-shimmer
+           bg-gradient-to-r from-transparent via-white/60 to-transparent;
+  }
+}
