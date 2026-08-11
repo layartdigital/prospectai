@@ -172,7 +172,9 @@ Além dos três achados, itens que divergem do aprovado sem decisão documentada
 | Sem tela `/onboarding` | §3.1 e critério 6 | Alta |
 | E2E Playwright dos 3 fluxos críticos | §4.3: previsto para a v0.1.1 | Média — não localizados |
 
-### Lacuna fora dos 24 critérios — exportação CSV
+### Lacuna fora dos 24 critérios — exportação CSV · **RESOLVIDA em 06/08/2026**
+
+> **Implementada no mesmo dia em que foi encontrada.** `GET /api/v1/leads/export` respeitando os filtros ativos, botão em Meus Leads, gate por plano agindo na tentativa. Provado por E2E: FREE é bloqueado depois do clique, PRO recebe download com nome datado. O registro abaixo fica como estava, porque o que ele revela sobre o método da conferência continua valendo.
 
 Encontrada em 06/08/2026 ao escrever o fluxo 4: **o produto não exporta nada.** Não há botão em Meus Leads nem endpoint na API. A capacidade `export.csv` existe em `EntitlementsService` e nenhum código a consome.
 

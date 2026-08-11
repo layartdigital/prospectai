@@ -7,6 +7,33 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Exportação CSV · 06/08/2026
+
+#### Adicionado
+
+- `GET /api/v1/leads/export` — CSV da listagem **com os filtros ativos**, não da base inteira. Paginação ignorada de propósito: exportar só a página visível seria surpresa desagradável. Teto de 5.000 linhas como trava, não como limite de plano — o maior plano inclui 3.000 leads
+- `export-leads-button.tsx` em Meus Leads. **O botão aparece em todos os planos** e o bloqueio acontece na tentativa. Esconder de quem não tem direito impede a pessoa de descobrir que o recurso existe, e o upgrade nunca é considerado
+- Capacidade `export.csv` do `EntitlementsService`, que existia desde a v0.1.1 sem nenhum consumidor, finalmente ligada
+- Registro em `AuditLog` e contagem em `PlanUsage.exportsCount`
+
+**Separador `;` e BOM UTF-8.** O Excel em português assume ponto e vírgula e, sem o BOM, quebra os acentos. São dois detalhes que decidem se o arquivo é útil ou se a pessoa desiste na primeira tentativa — e o público deste produto abre planilha no Excel, não no pandas.
+
+#### Corrigido
+
+**`Content-Disposition` não chegava ao navegador**
+
+O nome do arquivo definido pelo servidor era ignorado, e todo download saía como `leads.csv`, sem data. `Content-Disposition` não é cabeçalho *safelisted*: em requisição cross-origin, o JavaScript não o lê sem `Access-Control-Expose-Headers`. Com web em 3100 e API em 3101, isso valia para o usuário real, não só para o teste.
+
+Resolvido com `exposedHeaders` no `enableCors`. Em produção, com API e web no mesmo domínio, o defeito nem existiria — apareceu porque o ambiente de desenvolvimento separa as portas.
+
+#### Nota de método
+
+A lacuna foi encontrada ao escrever o teste do critério 19, e o primeiro teste que escrevi para ela **verificava a exportação "se o botão existir"**. Passou verde num produto que não exportava nada.
+
+Teste condicional que passa na ausência da funcionalidade é pior que teste ausente: aparece como cobertura no relatório. Foi removido, a funcionalidade construída, e o teste voltou sem `if`.
+
+---
+
 ### Migração de volume por falha de hardware · 06/08/2026
 
 #### Contexto
