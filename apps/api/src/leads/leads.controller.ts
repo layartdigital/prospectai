@@ -9,10 +9,13 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { LeadDetail, LeadFacets, LeadListResponse } from '@propectai/types';
+import type { Response } from 'express';
 
 import { CurrentTenant, CurrentUser } from '../common/decorators';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
@@ -61,6 +64,42 @@ export class LeadsController {
   })
   async facets(@CurrentTenant() tenant: ActiveTenant): Promise<LeadFacets> {
     return this.leads.facets(tenant.id);
+  }
+
+  // Declarado ANTES de `:id`. O Nest casa rotas na ordem de declaração — com
+  // `:id` antes, `/leads/export` seria interpretado como um lead de id "export"
+  // e devolveria 404.
+  @Get('export')
+  @ApiOperation({
+    summary: 'Exportar leads em CSV',
+    description:
+      'Exporta a listagem **com os filtros ativos**, não a base inteira: quem ' +
+      'filtrou quer o recorte que fez. Ignora paginação de propósito. Exige ' +
+      '`export.csv` no plano — a verificação acontece aqui, na tentativa, e ' +
+      'nunca no carregamento da tela. Separador `;` e BOM UTF-8, para abrir ' +
+      'corretamente no Excel em português. Grava AuditLog e conta em PlanUsage.',
+  })
+  @ApiResponse({ status: 200, description: 'Arquivo CSV' })
+  @ApiResponse({ status: 403, description: 'Plano sem direito a exportação' })
+  async export(
+    @CurrentTenant() tenant: ActiveTenant,
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: LeadQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    const { filename, content } = await this.leads.exportCsv(
+      tenant.id,
+      tenant.planCode,
+      user.id,
+      query,
+    );
+
+    response.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(Buffer.from(content, 'utf-8'));
   }
 
   @Get(':id')

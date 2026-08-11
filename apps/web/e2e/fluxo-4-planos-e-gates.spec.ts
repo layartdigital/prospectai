@@ -142,21 +142,51 @@ test.describe('o gate muda entre os planos', () => {
   });
 });
 
-/*
- * Exportação CSV por plano — SEM TESTE, de propósito.
+/**
+ * Exportação CSV por plano.
  *
- * A primeira versão deste arquivo tinha um teste que verificava a exportação
- * "se o botão existir". Ele passou, e passou sem verificar nada: **o produto
- * não tem exportação.** Não há botão em Meus Leads nem endpoint na API. A
- * capacidade `export.csv` existe em EntitlementsService e ninguém a consome.
+ * A primeira versão destes testes verificava a exportação "se o botão
+ * existir" — e passou verde num produto que não exportava nada. Teste
+ * condicional que passa na ausência da funcionalidade é pior que teste
+ * ausente: aparece como cobertura no relatório.
  *
- * Teste condicional que passa quando a funcionalidade não existe é pior que
- * teste ausente: ele aparece verde no relatório e cria a impressão de cobertura.
- *
- * O escopo §3.1 lista "exportação CSV conforme plano" como parte do que
- * significa Meus Leads estar funcional, e §4.3 adia só o Excel para a v0.2 —
- * o que implica CSV dentro da v0.1.1. A lacuna está registrada na conferência.
- *
- * Quando a exportação existir, o teste volta: FREE tenta e é bloqueado, PRO
- * tenta e recebe download. Sem `if`.
+ * Agora não há `if`. Se a exportação sumir, isto quebra.
  */
+test.describe('exportação CSV por plano', () => {
+  test('FREE é bloqueado na tentativa, não antes dela', async ({ page }) => {
+    trocarPlano('free');
+    await login(page);
+    await page.goto('/leads');
+
+    const bloqueio = page.getByText(/Exportação não disponível no seu plano/i);
+
+    // O botão existe mesmo sem direito: esconder impede a pessoa de descobrir
+    // que o recurso existe, e o upgrade nunca é considerado.
+    const botao = page.getByRole('button', { name: /Exportar CSV/i });
+    await expect(botao).toBeVisible();
+    await expect(bloqueio).toHaveCount(0);
+
+    await botao.click();
+
+    await expect(bloqueio).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('PRO baixa um CSV com o recorte da tela', async ({ page }) => {
+    trocarPlano('pro');
+    await login(page);
+
+    // Com filtro ativo: o arquivo precisa sair filtrado, não com a base inteira.
+    await page.goto('/leads?minScore=70');
+
+    const download = page.waitForEvent('download', { timeout: 30_000 });
+    await page.getByRole('button', { name: /Exportar CSV/i }).click();
+
+    const arquivo = await download;
+    expect(arquivo.suggestedFilename()).toMatch(/^leads-\d{4}-\d{2}-\d{2}\.csv$/);
+
+    await expect(
+      page.getByText(/Exportação não disponível no seu plano/i),
+    ).toHaveCount(0);
+  });
+});

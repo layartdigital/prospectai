@@ -27,6 +27,11 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: [webOrigin],
     credentials: true,
+    // Content-Disposition não é cabeçalho "safelisted": sem expor
+    // explicitamente, o JavaScript da web em 3100 não consegue lê-lo da
+    // resposta da API em 3101, e o download da exportação sai com nome
+    // genérico em vez do `leads-AAAA-MM-DD.csv` que o servidor definiu.
+    exposedHeaders: ['Content-Disposition'],
   });
 
   // Validacao global. whitelist + forbidNonWhitelisted protegem contra

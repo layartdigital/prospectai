@@ -19,6 +19,41 @@ import type { LeadQueryDto } from './leads.dto';
 /** Etapas onde o lead ainda não está resolvido. */
 const OPEN_WEBSITE_STATUSES: WebsiteStatus[] = ['SEM_SITE', 'SITE_PRECARIO'];
 
+/**
+ * Teto da exportação síncrona.
+ *
+ * O maior plano inclui 3.000 leads, então o teto não corta ninguém na prática.
+ * Existe como trava: exportação sem limite é o caminho mais curto para derrubar
+ * a API com uma requisição só. Acima disso, o caminho certo é `ExportJob`
+ * assíncrono, que já está modelado no schema e fica para quando fizer falta.
+ */
+const EXPORT_MAX_ROWS = 5000;
+
+/** Rótulos legíveis. O CSV é lido por pessoa, não por máquina. */
+const WEBSITE_STATUS_LABEL: Record<string, string> = {
+  SEM_SITE: 'Sem site',
+  SITE_PRECARIO: 'Site precário',
+  SITE_PROPRIO: 'Site próprio',
+};
+
+const WHATSAPP_STATUS_LABEL: Record<string, string> = {
+  VERIFIED: 'Confirmado',
+  LIKELY: 'Provável',
+  UNKNOWN: 'Não verificado',
+};
+
+/**
+ * Escapa um campo de CSV.
+ *
+ * Aspas, ponto e vírgula e quebra de linha dentro do valor quebram o arquivo
+ * silenciosamente — a planilha abre, com as colunas deslocadas a partir da
+ * linha ruim. Nome de empresa com aspas não é caso raro.
+ */
+function csvCampo(valor: string): string {
+  if (!/[";\r\n]/.test(valor)) return valor;
+  return `"${valor.replace(/"/g, '""')}"`;
+}
+
 @Injectable()
 export class LeadsService {
   constructor(
@@ -653,6 +688,111 @@ export class LeadsService {
   }
 
   // ---------------------------------------------------------------------------
+
+  /**
+   * Exportação CSV da listagem.
+   *
+   * Respeita os filtros ativos, e não a base inteira: quem filtrou 40 leads de
+   * score alto quer esses 40. Exportar tudo obrigaria a pessoa a refazer o
+   * recorte na planilha, que é justamente o trabalho que a tela já fez.
+   *
+   * Sem paginação — `page` e `pageSize` são ignorados de propósito. Exportar
+   * só a página visível seria surpresa desagradável, e o teto de segurança
+   * fica em EXPORT_MAX_ROWS.
+   *
+   * O gate é verificado aqui, na tentativa. Nunca no carregamento da tela.
+   */
+  async exportCsv(
+    tenantId: string,
+    planCode: PlanCode,
+    userId: string,
+    query: LeadQueryDto,
+  ): Promise<{ filename: string; content: string; rows: number }> {
+    this.entitlements.assert(planCode, 'export.csv');
+
+    const where = this.buildWhere(tenantId, query);
+
+    const leads = await this.prisma.lead.findMany({
+      where,
+      orderBy: { score: { value: 'desc' } },
+      take: EXPORT_MAX_ROWS,
+      include: {
+        score: true,
+        digitalPresence: true,
+        pipelineCard: { include: { stage: true } },
+      },
+    });
+
+    const maskPhones = !this.entitlements.can(planCode, 'phone.full');
+
+    const linhas = leads.map((lead) => [
+      lead.name,
+      lead.category ?? '',
+      lead.addressCity ?? '',
+      lead.addressStateUf ?? '',
+      maskPhones
+        ? (this.entitlements.maskPhone(lead.phoneRaw, planCode) ?? '')
+        : (lead.phoneRaw ?? ''),
+      lead.email ?? '',
+      lead.website ?? '',
+      WEBSITE_STATUS_LABEL[lead.websiteStatus] ?? lead.websiteStatus,
+      WHATSAPP_STATUS_LABEL[lead.digitalPresence?.whatsappStatus ?? 'UNKNOWN'] ??
+        'Não verificado',
+      lead.score ? String(lead.score.value) : '',
+      lead.pipelineCard?.stage?.name ?? '',
+      lead.createdAt.toISOString().slice(0, 10),
+    ]);
+
+    const cabecalho = [
+      'Empresa',
+      'Categoria',
+      'Cidade',
+      'UF',
+      'Telefone',
+      'E-mail',
+      'Website',
+      'Situação do site',
+      'WhatsApp',
+      'Score',
+      'Etapa',
+      'Descoberto em',
+    ];
+
+    // BOM + separador ponto e vírgula.
+    //
+    // O Excel em português abre CSV assumindo `;` e latin-1. Sem o BOM, acento
+    // vira caractere quebrado; com vírgula, tudo cai numa coluna só. Os dois
+    // detalhes decidem se o arquivo é útil ou se a pessoa desiste na primeira
+    // tentativa — e o público deste produto abre planilha no Excel, não no pandas.
+    const conteudo =
+      '﻿' +
+      [cabecalho, ...linhas].map((linha) => linha.map(csvCampo).join(';')).join('\r\n');
+
+    await this.entitlements.currentUsage(tenantId);
+    await this.prisma.planUsage.updateMany({
+      where: { tenantId },
+      data: { exportsCount: { increment: 1 } },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId,
+        actorId: userId,
+        action: 'leads.exported',
+        entityType: 'Lead',
+        entityId: null,
+        after: { rows: leads.length, filtros: { ...query } } as unknown as object,
+      },
+    });
+
+    const carimbo = new Date().toISOString().slice(0, 10);
+
+    return {
+      filename: `leads-${carimbo}.csv`,
+      content: conteudo,
+      rows: leads.length,
+    };
+  }
 
   private buildWhere(tenantId: string, query: LeadQueryDto): Prisma.LeadWhereInput {
     const where: Prisma.LeadWhereInput = { tenantId, deletedAt: null };

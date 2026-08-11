@@ -9,6 +9,7 @@ import {
   WebsiteBadge,
   WhatsAppBadge,
 } from '@/components/leads/badges';
+import { ExportLeadsButton } from '@/components/leads/export-leads-button';
 import { LeadsFilters } from '@/components/leads/leads-filters';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/ui/page-header';
@@ -73,6 +74,9 @@ export default async function LeadsPage({
       <PageHeader
         title="Meus Leads"
         subtitle={`${formatInteger(data.total)} ${data.total === 1 ? 'lead' : 'leads'} no total.`}
+        // A exportação recebe a mesma query da listagem: o arquivo sai com o
+        // recorte que está na tela, não com a base inteira.
+        action={<ExportLeadsButton query={query} />}
       />
 
       {planCode === 'FREE' ? (
