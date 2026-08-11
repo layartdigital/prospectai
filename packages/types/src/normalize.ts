@@ -68,6 +68,29 @@ export function toStateUf(value: string | null | undefined): string | null {
   return STATE_BY_NAME[cleaned] ?? null;
 }
 
+/**
+ * Região administrativa, ciente do país.
+ *
+ * `toStateUf` devolve `null` para qualquer coisa fora da tabela de UF
+ * brasileira. Enquanto o produto era só Brasil, isso era correto. Com alcance
+ * global virou perda silenciosa de dado: uma busca em Milão produziria leads
+ * sem região, sem erro e sem ninguém perceber — a pior forma de falhar num
+ * produto de dados.
+ *
+ * Fora do Brasil, guarda o que a origem devolveu. Preferir o nome bruto a
+ * `null` é decisão consciente: dado imperfeito com procedência é utilizável,
+ * ausência não é.
+ */
+export function toRegion(
+  value: string | null | undefined,
+  country = 'BR',
+): string | null {
+  if (!value) return null;
+  if (country.toUpperCase() === 'BR') return toStateUf(value);
+
+  return value.trim() || null;
+}
+
 /** Normaliza para E.164 brasileiro. Devolve null quando não dá para confiar. */
 export function toE164BR(phone: string | null | undefined): string | null {
   if (!phone) return null;
@@ -85,13 +108,52 @@ export function toE164BR(phone: string | null | undefined): string | null {
 }
 
 /**
+ * Telefone em E.164, ciente do país.
+ *
+ * No Brasil aplica a regra conhecida. Fora dele, aceita apenas o que já vem
+ * em formato internacional — número que começa com `+` e tem entre 8 e 15
+ * dígitos, que é o limite do padrão E.164.
+ *
+ * **Não tenta adivinhar código de país.** Inferir prefixo a partir de um
+ * número local estrangeiro produz telefone plausível e errado, que é pior que
+ * telefone ausente: alguém liga, e liga para a pessoa errada.
+ *
+ * Quando houver mercado internacional de verdade, a resposta certa é
+ * `libphonenumber`, que conhece a regra de cada país. Até lá, ser honesto
+ * sobre o que não se sabe custa menos que fingir.
+ */
+export function toE164(
+  phone: string | null | undefined,
+  country = 'BR',
+): string | null {
+  if (!phone) return null;
+  if (country.toUpperCase() === 'BR') return toE164BR(phone);
+
+  const trimmed = phone.trim();
+  if (!trimmed.startsWith('+')) return null;
+
+  const digits = trimmed.slice(1).replace(/\D/g, '');
+  if (digits.length < 8 || digits.length > 15) return null;
+
+  return `+${digits}`;
+}
+
+/**
  * Celular brasileiro: 11 dígitos com 9 na primeira posição do número.
  * É o máximo que dá para afirmar sem verificação externa — daí o rótulo
  * "WhatsApp provável", nunca "com WhatsApp".
+ *
+ * Fora do Brasil devolve `UNKNOWN`, sempre. Cada país tem sua própria regra de
+ * numeração móvel, e chutar violaria a regra 5.2 do escopo: sinal só vira
+ * afirmação depois de verificação que aconteceu. `DESCONHECIDO` é resposta
+ * legítima; palpite disfarçado de dado não é.
  */
 export function whatsappStatusFromPhone(
   phone: string | null | undefined,
+  country = 'BR',
 ): WhatsAppStatus {
+  if (country.toUpperCase() !== 'BR') return 'UNKNOWN';
+
   const e164 = toE164BR(phone);
   if (!e164) return 'UNKNOWN';
 

@@ -225,11 +225,44 @@ model User {
   @@map("users")
 }
 
+/// Tipo de cliente, para efeito fiscal.
+///
+/// Existe porque a venda B2B na Uniao Europeia aplica reverse charge — quem
+/// recolhe o imposto e o comprador, desde que tenha numero fiscal valido. Na
+/// venda a pessoa fisica nao ha essa saida, e boa parte dos paises cobra do
+/// vendedor estrangeiro desde o primeiro euro, sem limiar.
+///
+/// Decisao de 06/08/2026: PF liberado no Brasil, `taxId` obrigatorio fora.
+/// O campo existe para que abrir PF em outro pais depois seja mudanca de
+/// regra de validacao, nao migration sobre dado ambiguo.
+enum CustomerType {
+  PF
+  PJ
+}
+
 model Tenant {
   id        String    @id @default(cuid())
   name      String
   slug      String    @unique
   timezone  String    @default("America/Sao_Paulo")
+
+  /// Pais da empresa cliente, ISO 3166-1 alpha-2.
+  country String @default("BR")
+
+  /// Moeda de cobranca, ISO 4217. Deixa a porta aberta para preco por regiao,
+  /// que e pratica corrente em SaaS — plano unico convertido pela cotacao do
+  /// dia trata Brasil e Suica como o mesmo mercado.
+  currency String @default("BRL")
+
+  /// Numero de identificacao fiscal: VAT na Europa, CNPJ no Brasil,
+  /// equivalente em cada pais. Habilita reverse charge na venda B2B, e o
+  /// Stripe Tax valida a partir dele.
+  ///
+  /// Nulo e valido: pessoa fisica brasileira nao precisa.
+  taxId String?
+
+  customerType CustomerType @default(PJ)
+
   isDemo    Boolean   @default(false)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -394,6 +427,14 @@ model ProspectingSearch {
   tenantId       String
   createdById    String?
   niche          String
+
+  /// Pais da busca, ISO 3166-1 alpha-2. O termo enviado ao scraper precisa do
+  /// pais para desambiguar: existe Sao Paulo no Brasil e San Paolo na Italia,
+  /// e "Santiago" aparece em meia duzia deles.
+  country        String   @default("BR")
+
+  /// Regiao da busca. Sigla de UF no Brasil, nome da regiao fora dele —
+  /// mesma convencao de Lead.addressStateUf, e o mesmo rename adiado.
   stateUf        String
   city           String
   neighborhood   String?
@@ -472,11 +513,28 @@ model Lead {
   website       String?
   websiteStatus WebsiteStatus @default(DESCONHECIDO)
 
+  /// Pais em ISO 3166-1 alpha-2. Default BR porque todo lead coletado ate
+  /// 06/08/2026 veio do Brasil — a afirmacao e verdadeira para o dado
+  /// existente, e por isso o default nao mente.
+  ///
+  /// Acrescentado em 06/08/2026, quando o alcance global virou requisito.
+  /// Era o unico campo cujo custo crescia todo dia: sem ele, nao ha como
+  /// descobrir retroativamente de que pais era cada lead.
+  country String @default("BR")
+
   addressStreet       String?
   addressNeighborhood String?
   addressCity         String?
-  /// Sigla de duas letras. O scraper devolve o nome por extenso
-  /// ("Sao Paulo"); a normalizacao converte via tabela de UF.
+  /// Regiao administrativa: estado, provincia, condado.
+  ///
+  /// O nome do campo diz "StateUf" e a normalizacao converte via tabela de UF
+  /// brasileira — correto enquanto o produto era so Brasil, mentiroso quando
+  /// guardar "Lombardia". O rename para `addressRegion` foi adiado de
+  /// proposito em 06/08/2026: sao 106 ocorrencias em 30 arquivos, e renomear
+  /// nunca fica ambiguo, entao custa o mesmo depois. `country` nao tinha essa
+  /// propriedade, e por isso entrou sozinho.
+  ///
+  /// Fora do Brasil, guarda o nome da regiao como veio da origem.
   addressStateUf      String?
   addressPostalCode   String?
   addressFull         String?

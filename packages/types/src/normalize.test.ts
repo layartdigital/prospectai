@@ -5,10 +5,66 @@ import {
   classifyWebsite,
   fingerprintInput,
   normalizeBusinessName,
+  toE164,
   toE164BR,
+  toRegion,
   toStateUf,
   whatsappStatusFromPhone,
 } from './normalize';
+
+/**
+ * Caminho internacional — acrescentado em 06/08/2026.
+ *
+ * Antes disso, lead estrangeiro perdia região e telefone em silêncio: as
+ * funções devolviam `null` para tudo fora do Brasil, sem erro e sem sinal.
+ * Perda silenciosa é a pior falha num produto de dados, porque ninguém
+ * percebe até alguém conferir à mão.
+ */
+describe('normalização fora do Brasil', () => {
+  it('mantém o nome da região quando o país não é o Brasil', () => {
+    // Preferir o nome bruto a `null` é decisão consciente: dado imperfeito
+    // com procedência é utilizável, ausência não é.
+    expect(toRegion('Lombardia', 'IT')).toBe('Lombardia');
+    expect(toRegion('Bayern', 'DE')).toBe('Bayern');
+    expect(toRegion('Greater London', 'GB')).toBe('Greater London');
+  });
+
+  it('continua convertendo para sigla no Brasil', () => {
+    expect(toRegion('São Paulo', 'BR')).toBe('SP');
+    // Sem país declarado, presume Brasil — compatibilidade com o que existia.
+    expect(toRegion('São Paulo')).toBe('SP');
+  });
+
+  it('não inventa código de país em telefone estrangeiro', () => {
+    // Inferir prefixo a partir de número local produz telefone plausível e
+    // errado. Alguém liga, e liga para a pessoa errada.
+    expect(toE164('02 1234 5678', 'IT')).toBeNull();
+    expect(toE164('(020) 7946 0958', 'GB')).toBeNull();
+  });
+
+  it('aceita telefone estrangeiro que já vem internacional', () => {
+    expect(toE164('+39 02 1234 5678', 'IT')).toBe('+390212345678');
+    expect(toE164('+44 20 7946 0958', 'GB')).toBe('+442079460958');
+  });
+
+  it('recusa número fora da faixa do padrão E.164', () => {
+    expect(toE164('+1234567', 'US')).toBeNull();
+    expect(toE164(`+${'9'.repeat(16)}`, 'US')).toBeNull();
+  });
+
+  it('nunca afirma WhatsApp provável fora do Brasil', () => {
+    // Regra 5.2 do escopo: sinal só vira afirmação depois de verificação que
+    // aconteceu. Cada país tem sua regra de numeração móvel, e chutar seria
+    // palpite disfarçado de dado.
+    expect(whatsappStatusFromPhone('+39 340 123 4567', 'IT')).toBe('UNKNOWN');
+    expect(whatsappStatusFromPhone('+44 7700 900123', 'GB')).toBe('UNKNOWN');
+  });
+
+  it('mantém a regra brasileira intacta', () => {
+    expect(whatsappStatusFromPhone('(11) 98765-4321')).toBe('LIKELY');
+    expect(whatsappStatusFromPhone('(11) 3456-7890')).toBe('UNKNOWN');
+  });
+});
 
 describe('toStateUf', () => {
   it('converte nome por extenso em sigla', () => {

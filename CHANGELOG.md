@@ -7,6 +7,45 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Alcance internacional — schema · 06/08/2026
+
+Migration `20260811201507_alcance_internacional`.
+
+Primeiro item da sequência de `docs/strategic/lacunas-estruturais.md`, e o único cujo custo crescia todo dia: sem `country`, não haveria como descobrir retroativamente de que país era cada lead.
+
+#### Adicionado
+
+| Modelo | Campo | Papel |
+|---|---|---|
+| `Lead` | `country` | ISO 3166-1 alpha-2, default `BR` |
+| `ProspectingSearch` | `country` | Desambigua a busca — existe São Paulo no Brasil e San Paolo na Itália |
+| `Tenant` | `country` | País da empresa cliente |
+| `Tenant` | `currency` | ISO 4217, default `BRL`. Abre caminho para preço por região |
+| `Tenant` | `taxId` | VAT, CNPJ ou equivalente. Habilita *reverse charge* na venda B2B |
+| `Tenant` | `customerType` | `PF` \| `PJ`. Tira a decisão comercial do caminho crítico técnico |
+
+O default `BR` não mente: todo lead coletado até esta data veio do Brasil.
+
+#### Corrigido
+
+**Lead estrangeiro perdia dado em silêncio**
+
+`toStateUf` devolvia `null` para qualquer região fora da tabela de UF brasileira, e `toE164BR` para qualquer telefone não brasileiro. Uma busca em Milão produziria leads sem região, sem telefone normalizado e sem sinal de WhatsApp — **sem erro, sem log, sem ninguém perceber.** É a pior forma de falhar num produto de dados.
+
+- `toRegion(valor, country)` — no Brasil converte para sigla; fora dele guarda o nome como veio. Dado imperfeito com procedência é utilizável; ausência não é
+- `toE164(telefone, country)` — **não adivinha código de país.** Fora do Brasil, aceita apenas número que já vem com `+`. Inferir prefixo a partir de número local produz telefone plausível e errado, e telefone errado é pior que ausente: alguém liga
+- `whatsappStatusFromPhone` — devolve `UNKNOWN` fora do Brasil, sempre. Cada país tem sua regra de numeração móvel, e chutar violaria a regra 5.2 do escopo
+
+Sete testes novos cobrem o caminho internacional, incluindo dois que afirmam **ausência de invenção**: número local italiano não vira E.164, e prefixo móvel italiano legítimo ainda assim devolve `UNKNOWN`.
+
+#### Adiado de propósito
+
+**O rename de `addressStateUf` para `addressRegion` não foi feito.** São 106 ocorrências em 30 arquivos, e renomear nunca fica ambíguo — custa o mesmo daqui a um ano. `country` não tinha essa propriedade, e por isso entrou sozinho. Misturar os dois numa migration só tornaria impossível saber qual quebrou o quê. O motivo está registrado no comentário do campo, para não parecer esquecimento.
+
+Quando houver mercado internacional de verdade, `libphonenumber` substitui a heurística de telefone.
+
+---
+
 ### Exportação CSV · 06/08/2026
 
 #### Adicionado
