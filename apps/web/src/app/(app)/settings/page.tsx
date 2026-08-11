@@ -1,5 +1,7 @@
 import type { PreferencesView, VersionResponse } from '@propectai/types';
+import { Users } from 'lucide-react';
 import type { Metadata } from 'next';
+import Link from 'next/link';
 
 import { PreferencesForm } from '@/components/settings/preferences-form';
 import { RestartOnboardingButton } from '@/components/settings/restart-onboarding-button';
@@ -36,6 +38,21 @@ export default async function SettingsPage() {
               <Row label="Papel" value={session?.tenant?.role ?? '—'} />
               <Row label="Plano" value={session?.tenant?.planCode ?? '—'} />
             </dl>
+          </section>
+
+          <section className="pa-card p-4">
+            <h2 className="text-card-title text-navy-900">Equipe</h2>
+            <p className="mt-2 text-xs text-muted">
+              Convide pessoas, defina papéis e remova acessos. Convite pendente
+              ocupa assento do plano.
+            </p>
+            <Link
+              href="/settings/team"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-xs font-medium text-navy-900 transition-colors hover:border-brand-600"
+            >
+              <Users className="h-3.5 w-3.5" aria-hidden="true" />
+              Gerenciar equipe
+            </Link>
           </section>
 
           <section className="pa-card p-4">

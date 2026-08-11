@@ -14,6 +14,7 @@ import { ProposalsModule } from './proposals/proposals.module';
 import { ProspectingModule } from './prospecting/prospecting.module';
 import { RedisModule } from './redis/redis.module';
 import { SystemModule } from './system/system.module';
+import { TeamModule } from './team/team.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { SystemModule } from './system/system.module';
     ProposalsModule,
     ProspectingModule,
     SystemModule,
+    TeamModule,
   ],
 })
 export class AppModule {}

@@ -23,3 +23,4 @@ export * from './prospecting-api';
 export * from './score';
 export * from './scoring-engine';
 export * from './system';
+export * from './team-api';

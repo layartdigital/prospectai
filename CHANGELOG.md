@@ -7,6 +7,45 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Gestão de equipe · 06/08/2026
+
+Migration `20260811204408_convites_de_equipe`. Item 2 da sequência de `docs/strategic/lacunas-estruturais.md`.
+
+**Fecha uma promessa comercial que o produto não cumpria.** PRO e AGENCY vendiam 5 e 25 usuários e entregavam 1 — não havia convite, endpoint nem tela. O `register` criava tenant e dono, e acabava ali. Junto disso, os cinco papéis do RBAC estavam implementados, guardados por `MinRole` e **inalcançáveis**: com um usuário por tenant, nenhum era exercitado.
+
+#### Adicionado
+
+- Modelo `Invitation`, com token guardado em hash — mesma política do `RefreshToken`
+- `GET /api/v1/team` — membros, convites pendentes e assentos
+- `POST /api/v1/team/invitations` — convida e devolve o link de aceite
+- `DELETE /api/v1/team/invitations/:id` — revoga
+- `PATCH /api/v1/team/members/:id/role` e `DELETE /api/v1/team/members/:id`
+- `GET /api/v1/invitations/:token` e `POST /api/v1/invitations/accept` — públicas
+- Configurações → **Gerenciar equipe**, e `/invite/[token]` para o aceite
+- `SessionCookieService`, extraído do `AuthController`: o aceite também abre sessão, e política de cookie duplicada em dois lugares é política que diverge
+
+#### Regras que o produto passa a garantir
+
+| Regra | Por que existe |
+|---|---|
+| Ninguém concede papel acima do próprio | Sem ela, um ADMIN cria um OWNER e escala privilégio em duas requisições |
+| Ninguém altera quem está acima de si | A mesma escalada, pelo avesso |
+| O último dono não é removido nem rebaixado | Workspace sem dono não tem quem convide, remova ou mude plano. Estado terminal, sem caminho de volta pela interface |
+| Convite pendente ocupa assento | Sem isso, mil convites furam o limite do plano sem ninguém ter entrado |
+| Remover membro revoga os refresh tokens | Sem isso, quem saiu continua trabalhando até o access token expirar |
+| Vínculo é soft delete | Contatos e notas apontam para o autor; apagar deixaria histórico órfão |
+| Aceite em conta existente exige a senha atual | Impede que alguém de posse do link anexe um workspace à conta alheia |
+
+Onze testes cobrem essas regras, incluindo o caminho completo de escalada: convida um ADMIN de verdade, aceita o convite, pega a sessão dele e tenta a promoção a OWNER.
+
+#### Decisão: sem envio de e-mail
+
+Não há provedor de e-mail no produto, e **fingir que um e-mail saiu seria pior que admitir que ele não existe**. O link de aceite é devolvido uma única vez, na criação, para quem convidou copiar e enviar pelo canal que preferir. A tela diz isso — sem o aviso, alguém fecharia a janela e perderia o convite sem entender por quê.
+
+Como o token vive em hash, não há como reconstruir o link depois. Na listagem, `acceptUrl` vem `null`.
+
+---
+
 ### Alcance internacional — schema · 06/08/2026
 
 Migration `20260811201507_alcance_internacional`.

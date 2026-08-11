@@ -3,7 +3,11 @@ import { NextResponse, type NextRequest } from 'next/server';
 const ACCESS_COOKIE = 'pa_at';
 const REFRESH_COOKIE = 'pa_rt';
 
-const PUBLIC_ROUTES = ['/login', '/register'];
+/**
+ * `/invite` é público por necessidade: quem foi convidado ainda não tem conta.
+ * O token no caminho é a credencial, e ele expira em sete dias.
+ */
+const PUBLIC_ROUTES = ['/login', '/register', '/invite'];
 
 const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? 'http://127.0.0.1:3101';
 

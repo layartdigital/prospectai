@@ -212,6 +212,7 @@ model User {
 
   memberships    Membership[]
   refreshTokens  RefreshToken[]
+  invitationsSent Invitation[]      @relation("InvitationInviter")
   auditLogs      AuditLog[]
   activities     LeadActivity[]
   notes          LeadNote[]
@@ -269,6 +270,7 @@ model Tenant {
   deletedAt DateTime?
 
   memberships     Membership[]
+  invitations     Invitation[]
   subscription    Subscription?
   planUsages      PlanUsage[]
   onboardingState OnboardingState?
@@ -311,6 +313,39 @@ model Membership {
   @@unique([userId, tenantId])
   @@index([tenantId])
   @@map("memberships")
+}
+
+/// Convite para entrar num workspace.
+///
+/// Por que convite com token, e nao criacao direta de usuario com senha
+/// definida pelo dono: senha escolhida por terceiro e senha que o dono
+/// conhece. O convidado define a propria, e o dono nunca vê.
+///
+/// O token e guardado como hash, mesma politica do RefreshToken — vazamento
+/// da tabela nao entrega acesso.
+///
+/// Nao ha envio de e-mail no produto. O link e mostrado a quem convidou, para
+/// enviar pelo canal que preferir. Fingir que um e-mail saiu seria pior que
+/// admitir que ele nao existe.
+model Invitation {
+  id          String    @id @default(cuid())
+  tenantId    String
+  email       String
+  role        Role      @default(SDR)
+  tokenHash   String    @unique
+  invitedById String?
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invitedBy User?  @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, acceptedAt, revokedAt])
+  @@index([email])
+  @@map("invitations")
 }
 
 /// Refresh token guardado como hash, nunca em claro. Rotaciona a cada uso.
