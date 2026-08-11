@@ -47,13 +47,21 @@ test.describe('sessão e visão geral', () => {
     const antes = await linhas.count();
     expect(antes).toBeGreaterThan(1);
 
-    // Filtro por score alto precisa reduzir o conjunto. Se a contagem não
-    // mudar, o filtro está sendo ignorado no servidor.
-    await page.goto('/leads?minScore=80');
-    await expect(page.getByRole('row').first()).toBeVisible();
+    // Filtro que não pode casar com nada, e não `minScore=80`.
+    //
+    // A primeira versão usava 80 e quebrou quando o seed deixou de ter lead
+    // acima disso — recalcular o score de um lead no fluxo 3 já altera a
+    // distribuição. O teste falhava sem nada estar errado no produto, que é o
+    // tipo de intermitência que ensina o time a reexecutar em vez de investigar.
+    //
+    // Score impossível não serve: `LeadQueryDto` tem `@Max(100)` em `minScore`,
+    // então 101 devolveria 400 e o teste morreria por outro motivo. Cidade
+    // inexistente passa na validação e é determinística: filtro aplicado
+    // devolve vazio, filtro ignorado devolve tudo.
+    await page.goto('/leads?city=Cidade+Inexistente+E2E');
 
-    const depois = await page.getByRole('row').count();
-    expect(depois).toBeLessThanOrEqual(antes);
+    await expect(page.getByRole('row')).toHaveCount(0);
+    await expect(page.getByText(/nenhum lead/i)).toBeVisible();
   });
 
   test('o menu tem apenas o que foi aprovado para a v0.1.1', async ({ page }) => {

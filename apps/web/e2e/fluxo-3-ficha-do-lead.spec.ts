@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { login } from './helpers';
+import { login, runId } from './helpers';
 
 /**
  * Fluxo crítico 3 — a tela mais importante do produto.
@@ -71,37 +71,49 @@ test.describe('ficha do lead', () => {
     await expect(cardScore.getByRole('alert')).toHaveCount(0);
   });
 
+  /*
+   * Texto único por execução.
+   *
+   * A primeira versão usava frase fixa. Como estes testes escrevem no lead do
+   * seed e nada é limpo depois, a segunda execução encontrava dois registros
+   * com o mesmo texto e o Playwright recusava por strict mode.
+   *
+   * Falhava na segunda rodada, não na primeira — a pior forma de quebrar,
+   * porque passa na revisão e quebra para quem vier depois. `runId` resolve
+   * sem exigir limpeza: cada execução escreve o seu.
+   */
+
   test('registrar contato entra na timeline', async ({ page }) => {
     await login(page);
     await abrirPrimeiroLead(page);
 
+    const texto = `Contato E2E ${runId}`;
+
     await page.getByRole('button', { name: 'Registrar contato' }).click();
-    await page.getByLabel('Resultado').fill('Contato de teste automatizado');
+    await page.getByLabel('Resultado').fill(texto);
     await page.getByRole('button', { name: 'Registrar', exact: true }).click();
 
     // Critério 14: registrar precisa atualizar a timeline na mesma tela.
-    await expect(page.getByText('Contato de teste automatizado')).toBeVisible();
+    await expect(page.getByText(texto)).toBeVisible();
   });
 
   test('agendar e concluir follow-up', async ({ page }) => {
     await login(page);
     await abrirPrimeiroLead(page);
 
+    const texto = `Follow-up E2E ${runId}`;
+
     await page.getByRole('button', { name: 'Agendar' }).first().click();
-    await page.getByLabel('Observação').fill('Follow-up de teste automatizado');
+    await page.getByLabel('Observação').fill(texto);
     await page.getByRole('button', { name: 'Agendar', exact: true }).last().click();
 
-    const item = page
-      .getByRole('listitem')
-      .filter({ hasText: 'Follow-up de teste automatizado' });
+    const item = page.getByRole('listitem').filter({ hasText: texto });
     await expect(item).toBeVisible();
     await expect(item).toContainText('Pendente');
 
     await item.getByRole('button', { name: 'Concluir' }).click();
     await expect(
-      page
-        .getByRole('listitem')
-        .filter({ hasText: 'Follow-up de teste automatizado' }),
+      page.getByRole('listitem').filter({ hasText: texto }),
     ).toContainText('Concluído');
   });
 });
