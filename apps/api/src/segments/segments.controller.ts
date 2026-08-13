@@ -3,7 +3,7 @@ import { ApiOperation, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import type { SegmentDetail, SegmentSearchResult } from '@propectai/types';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
 
-import { CurrentTenant } from '../common/decorators';
+import { ConsomeRecurso, CurrentTenant } from '../common/decorators';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import type { ActiveTenant } from '../common/request-context';
 import { TenantGuard } from '../common/tenant.guard';
@@ -50,6 +50,10 @@ export class SegmentsController {
   }
 
   @Get(':id')
+  // Leitura que pode gastar: segmento sem tradução no idioma do tenant dispara
+  // geração por IA. Sem esta marca, workspace suspenso queimaria orçamento de
+  // Gemini só navegando.
+  @ConsomeRecurso()
   @ApiOperation({
     summary: 'Detalhe do segmento',
     description:

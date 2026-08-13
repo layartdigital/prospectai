@@ -125,7 +125,7 @@ beforeAll(async () => {
     where: { code: 'PRO' },
     create: {
       code: 'PRO',
-      name: 'Pro',
+      name: 'Impulso',
       priceCents: 14900,
       currency: 'BRL',
       limits: {},

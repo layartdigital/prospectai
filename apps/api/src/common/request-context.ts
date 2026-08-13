@@ -15,6 +15,14 @@ export interface ActiveTenant {
   country: string;
   /** ISO 4217. */
   currency: string;
+  /**
+   * Workspace suspenso, em leitura apenas.
+   *
+   * Chega aqui `true` porque o TenantGuard já deixou a requisição passar — só
+   * rota de leitura sobrevive à suspensão. O campo existe para que a interface
+   * possa dizer o que está acontecendo em vez de mostrar botões que falham.
+   */
+  suspended: boolean;
 }
 
 /**

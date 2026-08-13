@@ -7,6 +7,47 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Suspensão em leitura, e planos mensais · 13/08/2026
+
+Sem migration. Fecha a lacuna entre a §10.4 e o código: a decisão dizia que suspenso mantém leitura, e o `TenantGuard` bloqueava tudo.
+
+#### A regra é o método HTTP, não uma lista de rotas
+
+Suspenso lê e não escreve. Lista de rotas permitidas envelheceria em silêncio — alguém cria um endpoint, esquece de incluir, e a suspensão fica mais dura do que se decidiu sem ninguém notar. O método já separa ler de escrever em todo o produto, de graça.
+
+O furo do outro lado são **as leituras que gastam**: abrir um segmento em idioma novo dispara geração por IA, e é um `GET`. Sem tratamento, workspace inadimplente queimaria orçamento de Gemini só navegando. Daí `@ConsomeRecurso()`, hoje em `GET /segments/:id`.
+
+`GET /leads/export` fica liberado de propósito. É a rota que materializa a portabilidade, e bloqueá-la seria "pague para levar seus dados".
+
+#### Um teste antigo falhou, e estava certo em falhar
+
+`admin-panel.spec.ts` afirmava que suspender bloqueia `GET /leads`. Verdade até ontem. Reescrito para afirmar a regra nova — e ficou mais forte: prova leitura preservada e escrita cortada na mesma execução, em vez de um lado só.
+
+A reescrita está anotada no próprio teste. Sem isso, quem ler o histórico daqui a seis meses vê um teste de bloqueio virar teste de permissão e não tem como saber se foi decisão ou se alguém afrouxou a regra para a suíte passar.
+
+#### Planos: mensais, renomeados, mesmos códigos
+
+| Código | Nome | Preço | Leads | Buscas | IA |
+|---|---|---:|---:|---:|---:|
+| `FREE` | Explorar | R$ 0 | 5 | 3 | 0 |
+| `START` | Base | R$ 27 | 250 | 50 | 150 |
+| `PRO` | Impulso | R$ 47 | 600 | 120 | 400 |
+| `AGENCY` | Escala | R$ 97 | 1.500 | 250 | 1.000 |
+
+"Vitalício" saiu dos nomes: vitalício e cobrança recorrente são modelos incompatíveis, e o nome aparece na tela onde a pessoa decide pagar.
+
+**O nome mudou e o `code` não.** Código é chave técnica — enum do Postgres, `PLAN_LIMITS`, gates, testes; nome é texto de vitrine. Separar os dois fez a mudança inteira caber em quatro linhas do seed, e o front-end não precisou de uma edição porque não tinha nome de plano em lugar nenhum (regra 7: zero mock no front).
+
+Os limites do **Impulso** foram interpolados, não decididos comercialmente. Está dito em comentário no código para ninguém tratá-los como número acordado.
+
+#### Dívida registrada
+
+`AGENCY` ficou factualmente errado quando o produto passou a atender todos os segmentos. Renomear custa migration mais varredura dos gates; **o momento barato é agora**, com zero clientes pagantes — depois do primeiro checkout, mexer em `PlanCode` envolve assinaturas vivas no provedor.
+
+Também: `stripePriceId` saiu do `update` do seed. Ele é configurado uma vez por ambiente e o seed roda muitas — sobrescrever com nulo desligaria a cobrança a cada `pnpm db:seed`.
+
+---
+
 ### Cobrança — provedor, webhooks e suspensão · 13/08/2026
 
 Migration `20260813172113_cobranca_stripe`. Item 5 da sequência, decisões em `docs/strategic/lacunas-estruturais.md` §10.

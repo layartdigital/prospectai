@@ -72,10 +72,24 @@ function fingerprint(name: string, phone: string, postalCode: string | null): st
 
 async function seedPlans(): Promise<Map<string, string>> {
   const catalog = [
-    { code: 'FREE' as const, name: 'Free', priceCents: 0, sortOrder: 0 },
-    { code: 'START' as const, name: 'Start Vitalício', priceCents: 4700, sortOrder: 1 },
-    { code: 'PRO' as const, name: 'Pro Vitalício', priceCents: 6700, sortOrder: 2 },
-    { code: 'AGENCY' as const, name: 'Agência Vitalício', priceCents: 19700, sortOrder: 3 },
+    // Assinatura mensal, não vitalícia. Vitalício e cobrança recorrente são
+    // modelos incompatíveis: um cobra uma vez e entrega para sempre, o outro
+    // cobra todo mês. O nome do plano precisa dizer qual dos dois é, porque é
+    // ele que aparece na tela onde a pessoa decide pagar.
+    //
+    // Os nomes mudaram em 13/08/2026 e o `code` não. O código é chave técnica
+    // — está em enum do Postgres, em `PLAN_LIMITS`, nos testes e nos gates —,
+    // enquanto o nome é texto de vitrine. Manter os dois separados é o que
+    // permite renomear plano sem migration.
+    //
+    // `AGENCY` ficou factualmente errado quando o produto passou a atender
+    // todos os segmentos. É dívida registrada, não descuido: renomear o enum
+    // agora custa uma migration e a varredura de todos os gates, e o custo
+    // certo de pagar é antes do primeiro cliente pagante, não depois.
+    { code: 'FREE' as const, name: 'Explorar', priceCents: 0, sortOrder: 0 },
+    { code: 'START' as const, name: 'Base', priceCents: 2700, sortOrder: 1 },
+    { code: 'PRO' as const, name: 'Impulso', priceCents: 4700, sortOrder: 2 },
+    { code: 'AGENCY' as const, name: 'Escala', priceCents: 9700, sortOrder: 3 },
   ];
 
   const ids = new Map<string, string>();
@@ -87,14 +101,19 @@ async function seedPlans(): Promise<Map<string, string>> {
         code: plan.code,
         name: plan.name,
         priceCents: plan.priceCents,
+        pricesByCurrency: { BRL: plan.priceCents },
         sortOrder: plan.sortOrder,
         limits: PLAN_LIMITS[plan.code] as unknown as Prisma.InputJsonValue,
       },
       update: {
         name: plan.name,
         priceCents: plan.priceCents,
+        pricesByCurrency: { BRL: plan.priceCents },
         sortOrder: plan.sortOrder,
         limits: PLAN_LIMITS[plan.code] as unknown as Prisma.InputJsonValue,
+        // `stripePriceId` fica de fora do update de propósito: ele é
+        // configurado uma vez por ambiente e o seed roda muitas. Sobrescrever
+        // com nulo aqui desligaria a cobrança a cada `pnpm db:seed`.
       },
     });
     ids.set(plan.code, record.id);

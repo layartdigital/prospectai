@@ -209,7 +209,15 @@ describe('troca de plano', () => {
 });
 
 describe('suspensão', () => {
-  it('bloqueia o acesso ao produto de verdade', async () => {
+  /**
+   * Reescrito em 13/08/2026, quando a §10.4 passou a valer.
+   *
+   * A versão anterior afirmava que suspender bloqueia `GET /leads`. Estava
+   * certa para a regra da época e passou a estar errada — suspenso mantém
+   * leitura. O teste falhou exatamente onde a decisão mudou, que é o que se
+   * espera de um teste bom.
+   */
+  it('corta a escrita e preserva a leitura', async () => {
     const antes = await fetch(`${baseUrl}/api/v1/leads`, {
       headers: { Cookie: comum.cookie },
     });
@@ -221,17 +229,33 @@ describe('suspensão', () => {
     });
     expect(suspender.status).toBe(204);
 
-    // Sessão nova, porque suspender revoga os refresh tokens. Mesmo assim o
-    // acesso precisa cair — suspensão que só grava data é anotação no painel,
-    // e o inadimplente segue usando o produto.
+    // Sessão nova, porque suspender revoga os refresh tokens.
     const cookieNovo = await reautenticar(comum);
-    const depois = await fetch(`${baseUrl}/api/v1/leads`, {
+
+    // Continua enxergando os próprios dados: foram coletados com cota paga, e
+    // retê-los como alavanca de cobrança colide com portabilidade.
+    const leitura = await fetch(`${baseUrl}/api/v1/leads`, {
       headers: { Cookie: cookieNovo },
     });
+    expect(leitura.status).toBe(200);
 
-    expect(depois.status).toBe(403);
+    // E não gasta mais nada. Suspensão que não corta o consumo é anotação no
+    // painel — o inadimplente segue usando o produto às nossas custas.
+    const escrita = await fetch(`${baseUrl}/api/v1/prospecting/searches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookieNovo },
+      body: JSON.stringify({
+        niche: 'Dentistas',
+        city: 'São Paulo',
+        stateUf: 'SP',
+        requestedCount: 10,
+        radiusKm: 10,
+      }),
+    });
 
-    const corpo = (await depois.json()) as { code?: string };
+    expect(escrita.status).toBe(403);
+
+    const corpo = (await escrita.json()) as { code?: string };
     expect(corpo.code).toBe('TENANT_SUSPENDED');
   });
 

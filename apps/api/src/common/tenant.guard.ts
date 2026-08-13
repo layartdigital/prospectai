@@ -9,7 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { type Role, roleAtLeast } from '@propectai/types';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { IS_PUBLIC_KEY, REQUIRED_ROLE_KEY } from './decorators';
+import { CONSOME_RECURSO_KEY, IS_PUBLIC_KEY, REQUIRED_ROLE_KEY } from './decorators';
 import type { RequestWithContext } from './request-context';
 
 /**
@@ -64,10 +64,11 @@ export class TenantGuard implements CanActivate {
       throw new ForbiddenException('Sem acesso a este workspace');
     }
 
-    // Suspensão que não bloqueia é anotação no painel: o inadimplente continua
-    // usando o produto. A mensagem é específica de propósito — quem foi
-    // suspenso precisa saber o motivo para resolver, não descobrir sozinho.
-    if (membership.tenant.suspendedAt) {
+    const suspenso = Boolean(membership.tenant.suspendedAt);
+
+    if (suspenso && this.bloqueiaSuspenso(context)) {
+      // Mensagem específica de propósito: quem foi suspenso precisa saber o
+      // motivo para resolver, não descobrir sozinho.
       throw new ForbiddenException({
         message:
           membership.tenant.suspendedReason ??
@@ -83,6 +84,7 @@ export class TenantGuard implements CanActivate {
       planCode: membership.tenant.subscription?.plan.code ?? 'FREE',
       country: membership.tenant.country,
       currency: membership.tenant.currency,
+      suspended: suspenso,
     };
 
     const requiredRole = this.reflector.getAllAndOverride<Role>(REQUIRED_ROLE_KEY, [
@@ -97,5 +99,36 @@ export class TenantGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  /**
+   * O que a suspensão bloqueia.
+   *
+   * Decisão em `docs/strategic/lacunas-estruturais.md` §10.4: suspenso **perde
+   * o que gasta e mantém o que é dele**. Os leads foram coletados com cota já
+   * paga, e reter dado do cliente como alavanca de cobrança colide com o
+   * direito de portabilidade (LGPD art. 18, GDPR art. 20) além de ser hostil.
+   *
+   * A regra é o método HTTP, e não uma lista de rotas permitidas. Lista de
+   * rotas envelhece em silêncio: alguém cria um endpoint novo, esquece de
+   * incluir, e a suspensão fica mais dura do que se decidiu sem ninguém notar.
+   * O método já separa ler de escrever em todo o produto.
+   *
+   * `@ConsomeRecurso()` cobre o furo do outro lado — as leituras que gastam.
+   *
+   * Nota sobre a exportação: ela é `GET /leads/export` e continua liberada de
+   * propósito. É a rota que materializa a portabilidade, e bloqueá-la seria
+   * exatamente a alavanca que a decisão recusa.
+   */
+  private bloqueiaSuspenso(context: ExecutionContext): boolean {
+    const consome = this.reflector.getAllAndOverride<boolean>(CONSOME_RECURSO_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (consome) return true;
+
+    const metodo = context.switchToHttp().getRequest<RequestWithContext>().method;
+
+    return metodo !== 'GET' && metodo !== 'HEAD' && metodo !== 'OPTIONS';
   }
 }
