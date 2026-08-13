@@ -1,13 +1,31 @@
 import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { PreferencesView, SubscriptionResponse } from '@propectai/types';
-import { ArrayMaxSize, IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 import { CurrentTenant, CurrentUser, MinRole } from '../common/decorators';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import type { ActiveTenant, AuthenticatedUser } from '../common/request-context';
 import { TenantGuard } from '../common/tenant.guard';
 import { AccountService } from './account.service';
+
+export class SetSegmentDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  segmentId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  applyDefaults?: boolean;
+}
 
 export class UpdatePreferencesDto {
   @IsOptional()
@@ -94,6 +112,30 @@ export class AccountController {
     @Body() dto: UpdatePreferencesDto,
   ) {
     return this.account.updatePreferences(tenant.id, user.id, dto);
+  }
+
+  @Patch('settings/segment')
+  @MinRole('MANAGER')
+  @ApiOperation({
+    summary: 'Definir segmento de atuação',
+    description:
+      'Escolhe o segmento do tenant na taxonomia. Com `applyDefaults`, soma os ' +
+      'serviços e setores sugeridos aos já cadastrados — **soma, não ' +
+      'substitui**: trocar de segmento não pode apagar em silêncio a lista que ' +
+      'a pessoa ajustou à mão. Enviar `segmentId: null` desassocia.',
+  })
+  @ApiResponse({ status: 404, description: 'Segmento inexistente' })
+  async setSegment(
+    @CurrentTenant() tenant: ActiveTenant,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SetSegmentDto,
+  ): Promise<PreferencesView> {
+    return this.account.setSegment(
+      tenant.id,
+      user.id,
+      dto.segmentId ?? null,
+      dto.applyDefaults ?? false,
+    );
   }
 
   @Post('settings/onboarding/complete')

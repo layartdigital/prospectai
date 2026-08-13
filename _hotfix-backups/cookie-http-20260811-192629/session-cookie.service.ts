@@ -1,4 +1,4 @@
-﻿import { Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AUTH_COOKIES } from '@propectai/types';
 import type { CookieOptions, Response } from 'express';
@@ -64,10 +64,8 @@ export class SessionCookieService {
       // SameSite=Lax cobre o CSRF de navegação. Em produção, com front e API
       // em domínios distintos, isto vira 'none' + secure e exige token CSRF.
       sameSite: 'lax',
-      secure: (this.config.get<string>('COOKIE_SECURE') ?? (isProduction ? 'true' : 'false')).trim().toLowerCase() === 'true',
+      secure: isProduction,
       path: '/',
     };
   }
 }
-
-

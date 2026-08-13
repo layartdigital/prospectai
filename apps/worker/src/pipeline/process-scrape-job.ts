@@ -151,6 +151,14 @@ export async function processScrapeJob(
       data: { leadsFound: createdLeadIds.length, duplicatesFound: duplicates },
     });
 
+    // Veredito sobre o termo sugerido, se a busca usou um.
+    //
+    // `rawLeads.length` e o numero que importa, nao `createdLeadIds.length`:
+    // duplicado prova que o termo encontra empresas tanto quanto lead novo. Um
+    // termo bom numa base ja coletada devolveria zero novos e seria reprovado
+    // injustamente.
+    await registrarVeredito(prisma, searchId, rawLeads.length);
+
     await setStatus('COMPLETED', {
       finishedAt: new Date(),
       durationMs,
@@ -400,6 +408,68 @@ async function scoreLead(
       },
     });
   }
+}
+
+/** Mínimo de resultados para um termo sugerido deixar de ser suspeito. */
+const MIN_RESULTADOS_PARA_VALIDAR = 3;
+
+/**
+ * Registra o veredito sobre um termo sugerido pela taxonomia.
+ *
+ * A busca já rodou e já custou o que ia custar. O número de resultados
+ * responde de graça a pergunta que a geração por modelo não consegue: **esse
+ * termo existe de verdade naquele país?**
+ *
+ * Validar com scraper dedicado exigiria um job por termo — minutos por
+ * segmento, consumindo capacidade que o cliente paga.
+ *
+ * Termo `CURADO` não é rebaixado: veio de pessoa, e um resultado ruim numa
+ * cidade pequena não invalida o termo. Só o `GERADO` está em julgamento.
+ */
+async function registrarVeredito(
+  prisma: PrismaClient,
+  searchId: string,
+  resultados: number,
+): Promise<void> {
+  const search = await prisma.prospectingSearch.findUnique({
+    where: { id: searchId },
+    select: { segmentLocaleId: true },
+  });
+
+  if (!search?.segmentLocaleId) return;
+
+  const locale = await prisma.segmentLocale.findUnique({
+    where: { id: search.segmentLocaleId },
+  });
+
+  if (!locale || locale.status !== 'GERADO') return;
+
+  if (resultados >= MIN_RESULTADOS_PARA_VALIDAR) {
+    await prisma.segmentLocale.update({
+      where: { id: locale.id },
+      data: { status: 'VALIDADO', validatedAt: new Date(), resultCount: resultados },
+    });
+
+    logger.info(
+      { locale: locale.locale, termos: locale.searchTerms, resultados },
+      'Termo sugerido validado por busca real',
+    );
+    return;
+  }
+
+  // Zero resultado não apaga o termo: pode ser cidade sem esse tipo de
+  // negócio, não termo errado. Registrar a contagem deixa o padrão visível —
+  // termo que falha em várias cidades é termo inventado, e aí a evidência
+  // está no banco em vez de na intuição de alguém.
+  await prisma.segmentLocale.update({
+    where: { id: locale.id },
+    data: { resultCount: resultados },
+  });
+
+  logger.warn(
+    { locale: locale.locale, termos: locale.searchTerms, resultados },
+    'Termo sugerido devolveu poucos resultados',
+  );
 }
 
 async function currentPeriodStart(): Promise<Date> {

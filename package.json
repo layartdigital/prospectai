@@ -25,6 +25,8 @@
     "db:seed": "prisma db seed",
     "db:reset-quota": "tsx prisma/reset-quota.ts",
     "db:plan": "tsx prisma/set-plan.ts",
+    "db:admin": "tsx prisma/set-platform-admin.ts",
+    "db:segments": "tsx prisma/import-segments.ts",
     "dev:unlock": "tsx prisma/set-plan.ts agency --reset",
     "dev:lock": "tsx prisma/set-plan.ts free --reset",
     "db:studio": "prisma studio --port 5556"

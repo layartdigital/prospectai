@@ -3,6 +3,7 @@
 import {
   BRAZIL_STATES,
   SUGGESTED_NICHES,
+  type SegmentDetail,
   type SearchQuotaResponse,
   type SearchStatusResponse,
 } from '@propectai/types';
@@ -15,12 +16,28 @@ import { ClientApiError, clientApi } from '@/lib/client-api';
 
 const POLL_MS = 1500;
 
-export function SearchForm({ quota }: { quota: SearchQuotaResponse }) {
+export function SearchForm({
+  quota,
+  segmento,
+}: {
+  quota: SearchQuotaResponse;
+  segmento: SegmentDetail | null;
+}) {
   const router = useRouter();
 
   const [stateUf, setStateUf] = useState('SP');
   const [city, setCity] = useState('');
   const [niche, setNiche] = useState('');
+
+  /**
+   * Só é preenchido quando o nicho veio de um termo sugerido — e é zerado
+   * assim que a pessoa digita por cima.
+   *
+   * Sem isso, editar o termo e mesmo assim creditar o resultado à sugestão
+   * validaria um termo que ninguém usou. Validação que credita o que não
+   * aconteceu é pior que validação nenhuma.
+   */
+  const [segmentLocaleId, setSegmentLocaleId] = useState<string | null>(null);
   const [neighborhood, setNeighborhood] = useState('');
   const [radiusKm, setRadiusKm] = useState(10);
   const [requestedCount, setRequestedCount] = useState(
@@ -83,6 +100,7 @@ export function SearchForm({ quota }: { quota: SearchQuotaResponse }) {
             niche: niche.trim(),
             stateUf,
             city: city.trim(),
+            segmentLocaleId: segmentLocaleId ?? undefined,
             neighborhood: neighborhood.trim() || undefined,
             radiusKm,
             requestedCount,
@@ -179,10 +197,59 @@ export function SearchForm({ quota }: { quota: SearchQuotaResponse }) {
               required
               list="niche-suggestions"
               value={niche}
-              onChange={(event) => setNiche(event.target.value)}
+              onChange={(event) => {
+                setNiche(event.target.value);
+                // Digitou por cima: deixa de ser o termo sugerido.
+                setSegmentLocaleId(null);
+              }}
               placeholder="Buscar ou digitar nicho…"
               className={field}
             />
+
+            {/* ---- Termos do segmento ---------------------------------
+                Só aparecem quando o tenant escolheu segmento e há termos no
+                idioma dele. O rótulo de "não verificado" é o mesmo de
+                Configurações: quem clica precisa saber que o termo é palpite
+                de modelo até uma busca real provar o contrário. */}
+            {segmento && segmento.searchTerms.length > 0 ? (
+              <div className="mt-2">
+                <p className="text-[11px] text-muted">
+                  Termos de {segmento.name}
+                  {segmento.searchTermsStatus === 'GERADO' ? (
+                    <span className="ml-1 text-warning">· sugeridos, não verificados</span>
+                  ) : null}
+                  {segmento.searchTermsStatus === 'VALIDADO' ? (
+                    <span className="ml-1 text-success">· já trouxeram resultados</span>
+                  ) : null}
+                </p>
+
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {segmento.searchTerms.map((termo) => (
+                    <button
+                      key={termo}
+                      type="button"
+                      onClick={() => {
+                        setNiche(termo);
+                        // Só o GERADO está em julgamento. Creditar busca a um
+                        // termo já validado ou curado não acrescenta nada.
+                        setSegmentLocaleId(
+                          segmento.searchTermsStatus === 'GERADO'
+                            ? segmento.searchTermsLocaleId
+                            : null,
+                        );
+                      }}
+                      className={`rounded-control border px-2.5 py-1 text-[11px] transition-colors ${
+                        niche === termo
+                          ? 'border-brand-600 bg-brand-600 text-white'
+                          : 'border-line text-navy-900 hover:border-brand-600'
+                      }`}
+                    >
+                      {termo}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <datalist id="niche-suggestions">
               {SUGGESTED_NICHES.map((item) => (
                 <option key={item} value={item} />

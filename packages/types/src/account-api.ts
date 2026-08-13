@@ -28,6 +28,13 @@ export interface SubscriptionResponse {
   plans: PlanCardView[];
 }
 
+/** Resumo do segmento escolhido. O detalhe completo vem de `/segments/:id`. */
+export interface SegmentSummary {
+  id: string;
+  name: string;
+  macroSegment: string;
+}
+
 export interface PreferencesView {
   servicesSold: string[];
   targetNiches: string[];
@@ -35,6 +42,8 @@ export interface PreferencesView {
   preferredChannel: string | null;
   monthlyGoal: string | null;
   completedAt: string | null;
+  /** Nulo é legítimo: taxonomia é atalho, não pedágio. */
+  segment: SegmentSummary | null;
 }
 
 export interface UpdatePreferencesInput {

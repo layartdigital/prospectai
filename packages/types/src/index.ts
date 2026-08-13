@@ -9,6 +9,7 @@
 export * from './common';
 export * from './auth';
 export * from './account-api';
+export * from './admin-api';
 export * from './dashboard';
 export * from './lead';
 export * from './lead-api';
@@ -21,6 +22,7 @@ export * from './pricing-api';
 export * from './proposal-api';
 export * from './prospecting-api';
 export * from './score';
+export * from './segment-api';
 export * from './scoring-engine';
 export * from './system';
 export * from './team-api';

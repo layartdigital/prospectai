@@ -212,6 +212,7 @@ model User {
 
   memberships    Membership[]
   refreshTokens  RefreshToken[]
+  platformAdmin  PlatformAdmin?
   invitationsSent Invitation[]      @relation("InvitationInviter")
   auditLogs      AuditLog[]
   activities     LeadActivity[]
@@ -264,6 +265,22 @@ model Tenant {
 
   customerType CustomerType @default(PJ)
 
+  /// Segmento de atuacao do cliente.
+  ///
+  /// Define os padroes de servico e nicho no onboarding. Opcional: quem nao se
+  /// reconhece em nenhum dos 500 preenche na mao, e o produto continua
+  /// funcionando — taxonomia e atalho, nao pedagio.
+  segmentId String?
+  segment   Segment? @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+
+  /// Suspensao por inadimplencia ou abuso.
+  ///
+  /// Diferente de `deletedAt`: o dado permanece e o acesso para. O TenantGuard
+  /// recusa tenant suspenso — sem isso, suspender seria apenas uma anotacao no
+  /// painel, e inadimplente continuaria usando o produto normalmente.
+  suspendedAt     DateTime?
+  suspendedReason String?
+
   isDemo    Boolean   @default(false)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -313,6 +330,121 @@ model Membership {
   @@unique([userId, tenantId])
   @@index([tenantId])
   @@map("memberships")
+}
+
+/// Estagio de maturidade dos termos de busca de um locale.
+enum SegmentLocaleStatus {
+  /// Gerado por modelo, ainda nao verificado contra resultado real.
+  GERADO
+  /// Rodado no motor de coleta e devolveu resultado suficiente.
+  VALIDADO
+  /// Revisado por pessoa. Prevalece sobre os outros dois.
+  CURADO
+}
+
+/// Segmento de atuacao de quem USA o produto.
+///
+/// Nao confundir com a categoria do lead, que descreve quem e prospectado e
+/// vem do vocabulario do Google Places. Sao duas taxonomias com propositos
+/// diferentes, e a ponte entre elas e `SegmentLocale.searchTerms`.
+///
+/// Ate 06/08/2026 esta informacao vivia como constante TypeScript com cinco
+/// servicos de agencia digital. Taxonomia que altera o score — nicho vale +15 —
+/// nao pode viver compilada: muda sem deploy, e precisa de versao.
+///
+/// A base de origem tem 500 segmentos e nao e verdade curada: e um ponto de
+/// partida melhor que campo em branco. O tenant escolhe o segmento, recebe os
+/// valores preenchidos e ajusta. Erro numa linha vira edicao de um cliente,
+/// nao defeito de produto.
+model Segment {
+  id           String  @id @default(cuid())
+  /// Identificador da base de origem, ex.: B2B-0001. Torna a reimportacao
+  /// idempotente.
+  externalId   String  @unique
+  macroSegment String
+  name         String
+  specialty    String?
+
+  /// Serviços que este segmento vende. Vira sugestao em Configuracoes.
+  services      String[]
+  /// Setores que este segmento atende. Vira sugestao de nicho prospectado.
+  targetSectors String[]
+  /// Sinais que indicam oportunidade. Alimenta o motor de score.
+  opportunitySignals String[]
+
+  painPoints    String?
+  contractModel String?
+  recurrence    String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locales SegmentLocale[]
+  tenants Tenant[]
+
+  @@index([macroSegment])
+  @@index([isActive])
+  @@map("segments")
+}
+
+/// Termos de busca de um segmento em um idioma e pais.
+///
+/// Existe porque a coluna de palavras-chave da base **e funcional, nao
+/// textual**: ela vai literalmente ao scraper. "agencia de marketing digital
+/// em Milano" nao devolve nada no Google Maps; o termo correto e "agenzia di
+/// marketing digitale".
+///
+/// Traducao errada nao deixa a tela feia — deixa a busca vazia, e o cliente
+/// conclui que o produto nao funciona no pais dele. Dai o `status`: termo
+/// gerado por modelo so vira padrao depois de devolver resultado real.
+model SegmentLocale {
+  id        String @id @default(cuid())
+  segmentId String
+  /// BCP 47, ex.: pt-BR, it-IT.
+  locale    String
+  /// ISO 3166-1 alpha-2. Redundante com o locale de proposito: o mesmo idioma
+  /// serve paises diferentes, e o termo util muda entre eles.
+  country   String
+
+  label       String
+  searchTerms String[]
+
+  status      SegmentLocaleStatus @default(GERADO)
+  validatedAt DateTime?
+  /// Quantos resultados o termo devolveu na validacao. Zero reprova.
+  resultCount Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  segment  Segment             @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  searches ProspectingSearch[]
+
+  @@unique([segmentId, locale])
+  @@index([country, status])
+  @@map("segment_locales")
+}
+
+/// Operador da plataforma — quem administra o SaaS, nao um workspace.
+///
+/// Deliberadamente **fora** de `Membership` e de `Role`. Papel de membership e
+/// escopado a um tenant; operador de plataforma enxerga todos por definicao.
+/// Modelar isso como mais um papel colocaria o acesso irrestrito na mesma
+/// estrutura que o TenantGuard percorre a cada requisicao — e bastaria um erro
+/// de comparacao para vazar dado entre clientes.
+///
+/// Tabela separada, guarda separada, rota separada. A unica forma de virar
+/// operador e um registro aqui, criado por script fora da aplicacao.
+model PlatformAdmin {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  note      String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("platform_admins")
 }
 
 /// Convite para entrar num workspace.
@@ -467,6 +599,18 @@ model ProspectingSearch {
   /// pais para desambiguar: existe Sao Paulo no Brasil e San Paolo na Italia,
   /// e "Santiago" aparece em meia duzia deles.
   country        String   @default("BR")
+
+  /// Termos sugeridos pela taxonomia, quando a busca usou um.
+  ///
+  /// Existe para validar o termo sem custo extra: a busca ja vai rodar, e o
+  /// numero de resultados responde se o termo funciona naquele pais. Validar
+  /// com scraper dedicado exigiria um job por termo, minutos por segmento, e
+  /// consumiria capacidade que o cliente paga.
+  ///
+  /// O primeiro que usa um termo sugerido e cobaia — mas de uma busca que ele
+  /// faria de qualquer jeito, e cujo resultado vazio ele resolve redigitando.
+  segmentLocaleId String?
+  segmentLocale   SegmentLocale? @relation(fields: [segmentLocaleId], references: [id], onDelete: SetNull)
 
   /// Regiao da busca. Sigla de UF no Brasil, nome da regiao fora dele —
   /// mesma convencao de Lead.addressStateUf, e o mesmo rename adiado.

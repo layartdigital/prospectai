@@ -7,6 +7,147 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Gemini e termos por locale · 13/08/2026
+
+Migration `20260813161045_validacao_de_termos`. Item 4b da sequência de `docs/strategic/lacunas-estruturais.md`.
+
+#### Adicionado
+
+- `GeminiAIProvider`, implementando o mesmo contrato `AIProvider` do mock
+- `AIProviderFactory` — escolha por `AI_PROVIDER`, com o padrão em `mock`
+- Geração de termos de busca por locale, sob demanda, ao abrir um segmento sem tradução
+- Termos do segmento sugeridos na Nova Busca, com a procedência à vista
+- `ProspectingSearch.segmentLocaleId` e o veredito no worker
+
+#### A queda para o mock avisa
+
+`AI_PROVIDER=gemini` sem `GEMINI_API_KEY` cai no mock **e registra em log**. Ambiente que deveria gerar e não gera produz mensagens plausíveis porém genéricas — que passam despercebidas até alguém comparar a saída com o que esperava. Erro de configuração que degrada em silêncio é o pior tipo.
+
+#### Geração sob demanda, não em lote
+
+500 segmentos vezes idiomas seriam milhares de chamadas, e a maioria nunca usada: ninguém prospecta todos os setores de todos os países. Gerar quando o primeiro tenant de um país abre o segmento custa uma chamada e resolve para todos os seguintes.
+
+Lista vazia também é persistida — o modelo foi instruído a devolver vazio quando não souber, e gravar isso evita repetir a chamada para descobrir a mesma coisa.
+
+#### Validação sem custo extra
+
+O problema real dos termos gerados: **o modelo pode produzir uma expressão plausível que ninguém usa**, e busca vazia faz o cliente concluir que o produto não funciona no país dele — não que faltou validar um campo. Pedir ao modelo que admita ignorância ajuda, mas confiar nisso é confiar na peça mais fraca.
+
+Validar com scraper dedicado custaria um job por termo, minutos por segmento, consumindo capacidade que o cliente paga. A saída foi **aproveitar a primeira busca real**: ela já ia rodar, e a contagem de resultados responde de graça.
+
+| Decisão | Motivo |
+|---|---|
+| Conta resultado bruto, não lead novo | Duplicado prova que o termo encontra empresas. Contar só os novos reprovaria um termo bom numa base já coletada |
+| Zero resultado registra a contagem, não apaga o termo | Pode ser cidade sem esse tipo de negócio. Termo que falha em várias cidades vira padrão visível no banco |
+| `CURADO` não é rebaixado | Veio de pessoa; resultado ruim numa cidade pequena não invalida. Só o `GERADO` está em julgamento |
+| Digitar por cima zera o crédito | Validação que credita busca que ninguém fez com aquele termo é pior que validação nenhuma |
+
+Cinco testes novos em `scrape-pipeline.spec.ts`, rodando o pipeline de verdade. O que exige mais do que parece é o de **validar com todos os resultados duplicados**: contar leads novos em vez de resultados brutos passaria em todos os outros e falharia só nele.
+
+O bloco existe porque o custo de errar aqui não é local — o status de um `SegmentLocale` vale para o país inteiro, não para um tenant. Promover termo ruim faz todo cliente novo daquele país começar com busca vazia; rebaixar termo bom apaga curadoria humana. Nos dois casos o sintoma aparece semanas depois da causa.
+
+#### A procedência é dita, não escondida
+
+Termo gerado aparece como **"sugerido, não verificado"**; validado, como "já trouxeram resultados"; o `pt-BR` importado, como "revisado". O usuário decide sabendo de onde veio.
+
+#### Corrigido durante o trabalho
+
+Escrevi um canal `OTHER` que não existe em `OutreachChannel`. O `Record<OutreachChannel, string>` recusou — e é para isso que ele está lá em vez de um objeto solto: canal novo no tipo quebra a compilação aqui, em vez de cair num limite genérico silencioso.
+
+---
+
+### Taxonomia de segmentos · 06/08/2026
+
+Migration `taxonomia_de_segmentos`. Item 4a da sequência de `docs/strategic/lacunas-estruturais.md` — a parte de dados. O 4b (Gemini e termos por locale) vem depois.
+
+**O produto deixa de ser ferramenta de agência digital.** `SERVICE_OPTIONS` tinha cinco valores compilados — Sites, Tráfego pago, Social media, Design, Consultoria — e a lista de nichos tinha quinze. Quem não fosse agência preenchia tudo à mão, contra sugestões que não faziam sentido para ele.
+
+#### Adicionado
+
+- `Segment` e `SegmentLocale`, com 500 segmentos em 50 macro-segmentos importados da base B2B
+- `Tenant.segmentId`, opcional
+- `GET /api/v1/segments` — busca por texto e por macro, teto de 40 resultados
+- `GET /api/v1/segments/:id` — detalhe com serviços, setores e termos no locale do tenant
+- `PATCH /api/v1/settings/segment` — escolhe o segmento e, se pedido, aplica os padrões
+- Seletor em Configurações, acima das preferências
+- `pnpm db:segments <arquivo>` — importação idempotente por `externalId`
+- `ActiveTenant` ganhou `country` e `currency`
+
+#### Duas taxonomias, não uma
+
+A base tornou explícita uma distinção que o produto não tinha:
+
+| Taxonomia | Descreve | Origem |
+|---|---|---|
+| Segmento | Quem **usa** o produto e o que vende | Base de 500 |
+| Categoria do lead | Quem é **prospectado** | Vocabulário do Google Places |
+
+A ponte entre elas é `SegmentLocale.searchTerms` — o texto que vai literalmente ao scraper. Confundi-las produziria filtro que não devolve nada.
+
+#### `SegmentLocale` existe por um motivo específico
+
+Os termos de busca **são funcionais, não textuais**. `agência de marketing digital em Milano` não devolve nada no Google Maps; o termo correto é `agenzia di marketing digitale`. Tradução errada não deixa a tela feia — deixa a busca vazia, e o cliente conclui que o produto não funciona no país dele.
+
+Daí o `status`: `GERADO` por modelo, `VALIDADO` depois de devolver resultado real no scraper, `CURADO` quando revisado por pessoa. O `pt-BR` importado nasce `CURADO`, porque veio de pessoa.
+
+E daí também a regra do endpoint: **locale sem tradução devolve termos vazios, nunca os em português.** Vazio é honesto; termo errado é sabotagem silenciosa.
+
+#### Decisões de produto
+
+**A base é padrão editável, não verdade curada.** Não precisa ser perfeita — precisa ser melhor que campo em branco. O tenant escolhe, recebe preenchido e ajusta. Erro numa linha vira edição de um cliente, não defeito de produto. Curar 500 entradas antes de existir cliente seria trabalho sem retorno conhecido.
+
+**Aplicar os padrões é decisão separada da escolha**, com prévia do que será aplicado. E **soma em vez de substituir**: trocar de segmento não pode apagar em silêncio uma lista ajustada à mão durante meses.
+
+**Segmento é opcional.** Quem não se reconhece em nenhum dos 500 preenche à mão. Taxonomia é atalho, não pedágio.
+
+#### Corrigido durante o trabalho
+
+**O importador lia a coluna errada.** Confundi os números de linha exibidos pelo editor com uma coluna do arquivo, e o `slice(1)` deslocava tudo: o macro-segmento virava `externalId`, e os 500 registros colapsavam em 25, sobrescritos vinte vezes cada. O sintoma foi *"25 criados, 475 atualizados"* numa tabela vazia — import que atualiza o que não existe está lendo a coluna errada.
+
+Corrigido, e com guarda: o script agora recusa rodar se a primeira coluna não tiver o formato `B2B-0000`. Import desalinhado grava taxonomia silenciosamente errada, que é pior que não importar.
+
+**Duas construções da mesma view.** `preferences()` e o fim de `updatePreferences()` montavam `PreferencesView` separadamente, e ao acrescentar `segment` só a primeira foi atualizada. O typecheck pegou porque o campo é obrigatório — com campo opcional teria compilado, e salvar preferências faria o segmento sumir da tela até recarregar. Agora há uma construção só.
+
+---
+
+### Painel do provedor · 06/08/2026
+
+Migration `20260811212430_painel_do_provedor`. Item 3 da sequência de `docs/strategic/lacunas-estruturais.md`.
+
+**Até aqui não existia caminho para atender um cliente real.** Para saber quais tenants existiam, a resposta era consultar o banco. Para trocar o plano de alguém, `pnpm db:plan` — um script que, por desenho, **só age em tenant com `isDemo: true`**. Não havia nem a via manual.
+
+#### Adicionado
+
+- `GET /api/v1/admin/tenants` — todos os workspaces com plano, consumo do período, membros, última atividade e estado
+- `PATCH /api/v1/admin/tenants/:id/plan` — troca de plano com motivo obrigatório
+- `POST /api/v1/admin/tenants/:id/suspend` e `/reactivate`
+- `/admin` no front, com layout próprio
+- `pnpm db:admin add|remove|list` — promoção de operador
+
+#### Decisões de arquitetura
+
+**`PlatformAdmin` é tabela separada, não um papel a mais.** Papel de membership é escopado a um tenant; operador de plataforma enxerga todos por definição. Modelar como `Role` colocaria acesso irrestrito dentro da mesma estrutura que o `TenantGuard` percorre a cada requisição, e bastaria um erro de comparação para vazar dado entre clientes. A separação é física: tabela, guarda e prefixo de rota próprios.
+
+**O `AdminController` não usa `TenantGuard`, e a ausência é o ponto.** É o único controller que consulta sem `tenantId` — em qualquer outro lugar, defeito grave.
+
+**Promover operador é script, não tela.** Uma interface que promove seria o alvo mais valioso do sistema: comprometer uma senha de dono e clicar num botão daria acesso a todos os tenants. Exigir acesso ao servidor eleva o custo do ataque de "roubar uma senha" para "entrar na infraestrutura". O script também recusa remover o último operador.
+
+**O layout do painel é visivelmente diferente** — faixa escura, sem sidebar do produto, rótulo "todos os clientes". Confundir os dois planos é como se apaga o dado do cliente errado achando que se está no próprio workspace.
+
+#### Suspensão que bloqueia
+
+`Tenant.suspendedAt` e `suspendedReason`, com o bloqueio efetivo no `TenantGuard` e revogação imediata dos refresh tokens. **Suspensão que só grava data é anotação no painel, com o inadimplente usando o produto normalmente.**
+
+O teste refaz o login depois de suspender, de propósito: como suspender revoga os tokens, verificar com o cookie antigo provaria apenas que revogação funciona, não que a suspensão bloqueia.
+
+#### Motivo obrigatório
+
+Trocar plano e suspender exigem justificativa, gravada em `AuditLog`. Registro sem motivo é quase igual a não ter registro — daqui a seis meses, "por que este cliente está em AGENCY" precisa ter resposta.
+
+Nove testes cobrem a fronteira. Os dois principais: dono de workspace recebe 403 no painel, e operador da plataforma **não** lê lead de tenant onde não tem membership. A separação vale nos dois sentidos.
+
+---
+
 ### Gestão de equipe · 06/08/2026
 
 Migration `20260811204408_convites_de_equipe`. Item 2 da sequência de `docs/strategic/lacunas-estruturais.md`.

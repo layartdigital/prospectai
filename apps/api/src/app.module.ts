@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
 import { AccountModule } from './account/account.module';
+import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
@@ -13,6 +14,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ProposalsModule } from './proposals/proposals.module';
 import { ProspectingModule } from './prospecting/prospecting.module';
 import { RedisModule } from './redis/redis.module';
+import { SegmentsModule } from './segments/segments.module';
 import { SystemModule } from './system/system.module';
 import { TeamModule } from './team/team.module';
 
@@ -27,6 +29,7 @@ import { TeamModule } from './team/team.module';
     RedisModule,
     AuthModule,
     AccountModule,
+    AdminModule,
     EntitlementsModule,
     DashboardModule,
     LeadsModule,
@@ -35,6 +38,7 @@ import { TeamModule } from './team/team.module';
     PipelineModule,
     ProposalsModule,
     ProspectingModule,
+    SegmentsModule,
     SystemModule,
     TeamModule,
   ],

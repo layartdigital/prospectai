@@ -11,6 +11,10 @@ export interface ActiveTenant {
   slug: string;
   role: Role;
   planCode: PlanCode;
+  /** ISO 3166-1 alpha-2. Decide locale da taxonomia e regra de normalização. */
+  country: string;
+  /** ISO 4217. */
+  currency: string;
 }
 
 /**

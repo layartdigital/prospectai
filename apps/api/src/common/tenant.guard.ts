@@ -64,11 +64,25 @@ export class TenantGuard implements CanActivate {
       throw new ForbiddenException('Sem acesso a este workspace');
     }
 
+    // Suspensão que não bloqueia é anotação no painel: o inadimplente continua
+    // usando o produto. A mensagem é específica de propósito — quem foi
+    // suspenso precisa saber o motivo para resolver, não descobrir sozinho.
+    if (membership.tenant.suspendedAt) {
+      throw new ForbiddenException({
+        message:
+          membership.tenant.suspendedReason ??
+          'Este workspace está suspenso. Entre em contato com o suporte.',
+        code: 'TENANT_SUSPENDED',
+      });
+    }
+
     request.tenant = {
       id: membership.tenantId,
       slug: membership.tenant.slug,
       role: membership.role as Role,
       planCode: membership.tenant.subscription?.plan.code ?? 'FREE',
+      country: membership.tenant.country,
+      currency: membership.tenant.currency,
     };
 
     const requiredRole = this.reflector.getAllAndOverride<Role>(REQUIRED_ROLE_KEY, [

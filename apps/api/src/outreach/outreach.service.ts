@@ -12,16 +12,23 @@ import {
 
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { MockAIProvider } from './providers/mock-ai.provider';
+import { AIProviderFactory } from './providers/ai-provider.factory';
 
 @Injectable()
 export class OutreachService {
-  private readonly ai: AIProvider = new MockAIProvider();
+  /**
+   * Qual provider está ativo é decisão de configuração, não de código.
+   * A fábrica resolve na inicialização e registra a escolha em log.
+   */
+  private readonly ai: AIProvider;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementsService,
-  ) {}
+    aiFactory: AIProviderFactory,
+  ) {
+    this.ai = aiFactory.get();
+  }
 
   async quota(tenantId: string, planCode: PlanCode): Promise<OutreachQuotaView> {
     const limits = this.entitlements.limits(planCode);

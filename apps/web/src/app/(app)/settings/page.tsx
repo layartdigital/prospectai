@@ -5,6 +5,7 @@ import Link from 'next/link';
 
 import { PreferencesForm } from '@/components/settings/preferences-form';
 import { RestartOnboardingButton } from '@/components/settings/restart-onboarding-button';
+import { SegmentSelector } from '@/components/settings/segment-selector';
 import { PageHeader } from '@/components/ui/page-header';
 import { getSession } from '@/lib/session';
 import { serverApi } from '@/lib/server-api';
@@ -26,7 +27,12 @@ export default async function SettingsPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <PreferencesForm initial={preferences} />
+        <div className="space-y-4">
+          {/* Antes das preferências de propósito: escolher o segmento
+              preenche boa parte do que vem abaixo. */}
+          <SegmentSelector atual={preferences.segment} />
+          <PreferencesForm initial={preferences} />
+        </div>
 
         <div className="space-y-4">
           <section className="pa-card p-4">

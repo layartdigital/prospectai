@@ -154,6 +154,9 @@ export class ProspectingService implements OnModuleDestroy {
         neighborhood: dto.neighborhood ?? null,
         radiusKm: dto.radiusKm ?? 10,
         requestedCount: requested,
+        // Só quando o nicho veio de sugestão. O worker usa isto ao concluir o
+        // job para decidir se o termo sugerido se comprovou naquele país.
+        segmentLocaleId: dto.segmentLocaleId ?? null,
       },
     });
 

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   PLAN_LIMITS,
   computeScore,
@@ -63,11 +63,19 @@ export class AccountService {
   }
 
   async preferences(tenantId: string): Promise<PreferencesView> {
-    const state = await this.prisma.onboardingState.upsert({
-      where: { tenantId },
-      create: { tenantId },
-      update: {},
-    });
+    const [state, tenant] = await Promise.all([
+      this.prisma.onboardingState.upsert({
+        where: { tenantId },
+        create: { tenantId },
+        update: {},
+      }),
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: {
+          segment: { select: { id: true, name: true, macroSegment: true } },
+        },
+      }),
+    ]);
 
     return {
       servicesSold: (state.servicesSold as string[] | null) ?? [],
@@ -76,7 +84,71 @@ export class AccountService {
       preferredChannel: state.preferredChannel,
       monthlyGoal: state.monthlyGoal,
       completedAt: state.completedAt?.toISOString() ?? null,
+      segment: tenant?.segment ?? null,
     };
+  }
+
+  /**
+   * Define o segmento de atuação do tenant e aplica os padrões.
+   *
+   * `aplicarPadroes` é escolha de quem clica, não automatismo: trocar de
+   * segmento não pode apagar em silêncio uma lista de nichos que a pessoa
+   * ajustou à mão durante meses. Quando pedido, o padrão **soma** ao que já
+   * existe em vez de substituir — remover é decisão dela.
+   */
+  async setSegment(
+    tenantId: string,
+    userId: string,
+    segmentId: string | null,
+    aplicarPadroes: boolean,
+  ): Promise<PreferencesView> {
+    const segment = segmentId
+      ? await this.prisma.segment.findFirst({
+          where: { id: segmentId, isActive: true },
+        })
+      : null;
+
+    if (segmentId && !segment) {
+      throw new NotFoundException('Segmento não encontrado');
+    }
+
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { segmentId: segment?.id ?? null },
+    });
+
+    if (segment && aplicarPadroes) {
+      const atual = await this.preferences(tenantId);
+
+      const unir = (existente: string[], novo: string[]): string[] =>
+        Array.from(new Set([...existente, ...novo]));
+
+      await this.prisma.onboardingState.upsert({
+        where: { tenantId },
+        create: {
+          tenantId,
+          servicesSold: segment.services,
+          targetNiches: segment.targetSectors,
+        },
+        update: {
+          servicesSold: unir(atual.servicesSold, segment.services),
+          targetNiches: unir(atual.targetNiches, segment.targetSectors),
+        },
+      });
+    }
+
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId,
+        actorId: userId,
+        action: 'settings.segment_changed',
+        entityType: 'Tenant',
+        entityId: tenantId,
+        after: { segmentId: segment?.id ?? null, aplicarPadroes },
+      },
+    });
+
+    return this.preferences(tenantId);
   }
 
   /**
@@ -198,15 +270,13 @@ export class AccountService {
       },
     });
 
-    return {
-      servicesSold: (state.servicesSold as string[] | null) ?? [],
-      targetNiches: (state.targetNiches as string[] | null) ?? [],
-      targetRegions: (state.targetRegions as string[] | null) ?? [],
-      preferredChannel: state.preferredChannel,
-      monthlyGoal: state.monthlyGoal,
-      completedAt: state.completedAt?.toISOString() ?? null,
-      scoreAffected,
-    };
+    // Reaproveita `preferences` em vez de montar o objeto de novo.
+    //
+    // Havia duas construções da mesma view, e a segunda ficou para trás quando
+    // `segment` entrou — o typecheck pegou, mas só porque o campo é
+    // obrigatório. Campo opcional teria passado, e a tela mostraria "sem
+    // segmento" depois de salvar preferências.
+    return { ...(await this.preferences(tenantId)), scoreAffected };
   }
 
   /**
