@@ -350,3 +350,56 @@ Manter a exportação parece contraintuitivo — é justamente o que permite ir 
 A abstração decidida em §8.2 continua valendo. Concretamente, fica do lado de fora do domínio: criação de checkout, portal do cliente, leitura de assinatura, e a tradução dos webhooks para eventos internos. O domínio nunca vê um objeto do Stripe.
 
 O teste da abstração é simples: se `apps/api/src/billing/providers/` for a única pasta que importa o SDK do Stripe, ela funcionou.
+
+---
+
+## 11. O Master incompleto — 13/08/2026
+
+O painel do provedor (§3, item 3) entregou **operação**: listar clientes, suspender, reativar, trocar plano. Não entregou **administração do negócio**. Três áreas faltam, e são de dificuldades muito diferentes.
+
+| Área | Falta | Custo |
+|---|---|---|
+| Clientes / Assinaturas | ficha do cliente, estado da assinatura, consumo | baixo — os dados existem |
+| Financeiro | tudo, inclusive a tabela | médio — depende de espelhar faturas |
+| Planos | tudo, e o schema **impede** | alto — enum vira dado |
+
+### 11.1 Plano precisa deixar de ser enum
+
+`Plan.code` é `enum PlanCode { FREE START PRO AGENCY }` no Postgres. Criar um quinto plano é migration, e por isso "incluir plano" não é uma tela que falta: é uma tela **impossível de escrever** sobre o schema atual.
+
+É o mesmo defeito corrigido na taxonomia de segmentos: informação que muda por decisão comercial vivendo compilada. Lá eram cinco serviços de agência num `const`; aqui são quatro planos num enum. A pergunta que expõe os dois é a mesma — *isto muda sem deploy?* Preço, limite e nome de plano mudam mais que o código do produto.
+
+**Decisão: plano vira dado.** `code` passa a texto único e `limits` no banco vira a única fonte.
+
+O custo honesto: `PlanCode` aparece em **22 pontos**, incluindo assinaturas de método em `auth`, `team`, `admin`, `account`, `prospecting`, `leads` e `entitlements`. Não é uma migration, é uma migração.
+
+**Ordem que mantém o repositório compilando a cada passo:**
+
+1. `Plan.code` vira `String @unique`; o enum permanece no banco, sem uso
+2. `EntitlementsService.limits()` passa a ler `Plan.limits` do banco em vez de `PLAN_LIMITS`
+3. `PLAN_LIMITS` vira **semente**, não verdade: `prisma/seed.ts` o consome, o resto do código não
+4. `PlanCode` vira `string` nas assinaturas, um módulo por vez
+5. `enum PlanCode` sai do schema
+6. CRUD de planos no Master
+
+O passo 2 é o que decide se a coisa funcionou. Enquanto o gate ler constante compilada, editar um limite na tela não muda o comportamento do produto — e tela que mente é pior que tela ausente.
+
+**`AGENCY` some no caminho.** O código ficou factualmente errado quando o produto passou a atender todos os segmentos, e este é o trabalho que já mexe em todos os pontos onde ele aparece. Pagar essa dívida em separado seria fazer a mesma varredura duas vezes.
+
+### 11.2 Financeiro espelha, não consulta
+
+Model `Invoice` alimentado por `invoice.paid` e `invoice.payment_failed`, com reconciliação periódica.
+
+Consultar o Stripe a cada abertura de tela seria mais simples de escrever e pior em tudo o mais: lento, sujeito a rate limit, indisponível quando eles caem. E some com a pergunta que o Financeiro existe para responder — *quanto entrou este mês* —, que vira paginação na API de terceiros em vez de um `SUM`.
+
+O espelho guarda estado, valor, moeda, vencimento, data de pagamento e o link da fatura hospedada. O PDF e a segunda via continuam sendo do provedor: gerar documento fiscal não é problema que valha a pena reimplementar.
+
+**A reconciliação não é opcional.** Webhook perdido é normal — endpoint fora do ar, deploy no momento errado. Sem uma varredura periódica, o espelho diverge para sempre e o Financeiro passa a mentir. É a mesma razão do `sincronizarPrecos()` de §10.
+
+### 11.3 O que os prints do FARO confirmam
+
+O modal de bloqueio abre ao carregar a página, sem ação do usuário — o que a **regra 5** do `CLAUDE.md` proíbe. E lista "Construtor de sites profissionais em 1 clique", que a **regra 2** proíbe.
+
+Registrado aqui porque a referência visual continua sendo usada como parâmetro, e a semelhança de layout não pode arrastar essas duas coisas junto.
+
+Os prints mostram também um seletor **Português/English** no topo. Internacionalização da interface não existe no PropectAI e não está em nenhuma fase — é trabalho grande e independente destes três. Continua como pergunta aberta em §9.2.

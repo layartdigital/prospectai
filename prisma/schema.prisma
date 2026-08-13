@@ -30,6 +30,14 @@ enum Role {
   VIEWER
 }
 
+/// **Em remocao.** Mantido apenas enquanto `prisma/set-plan.ts` e as
+/// assinaturas de metodo dos services migram para `string` — ver
+/// `docs/strategic/lacunas-estruturais.md` §11.1, passos 4 e 5.
+///
+/// `Plan.code` deixou de usa-lo em 13/08/2026: plano precisa ser criado e
+/// excluido pelo Master, e enum do Postgres torna isso migration. Mesmo
+/// defeito da taxonomia de segmentos — informacao que muda por decisao
+/// comercial vivendo compilada.
 enum PlanCode {
   FREE
   START
@@ -526,7 +534,16 @@ model RefreshToken {
 
 model Plan {
   id          String   @id @default(cuid())
-  code        PlanCode @unique
+  /// Identificador estavel do plano, em maiusculas: FREE, START, PRO, AGENCY.
+  ///
+  /// Texto e nao enum de proposito. O Master cria e desativa plano, e enum do
+  /// Postgres transformaria cada plano novo em migration mais deploy — o que
+  /// tornaria a tela de planos impossivel de escrever, nao apenas ausente.
+  ///
+  /// **E chave, nao rotulo.** O nome de vitrine vive em `name` e muda quando o
+  /// marketing quiser; o `code` aparece em log, auditoria e integracao, e
+  /// muda-lo quebra historico. Renomear plano nao toca aqui.
+  code        String   @unique
   name        String
   description String?
   /// Preco de exibicao padrao. Vale para plano sem cobranca (gratuito, demo,

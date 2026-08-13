@@ -7,6 +7,38 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Plano vira dado — passos 1 e 2 · 13/08/2026
+
+Migration `20260813192737_plano_vira_dado`. Primeiros dois dos seis passos de `docs/strategic/lacunas-estruturais.md` §11.1.
+
+#### Passo 1 — `Plan.code` deixa de ser enum
+
+Texto único no lugar de `enum PlanCode`. "Incluir plano" não era uma tela que faltava: era uma tela **impossível de escrever** sobre o schema antigo, porque cada plano novo seria migration mais deploy.
+
+`enum PlanCode` continua declarado, órfão, com a nota do passo que o remove. Enum órfão sem essa nota vira permanente.
+
+#### Passo 2 — os limites vêm do banco
+
+`EntitlementsService` carrega `Plan.limits` num cache e recarrega a cada minuto. É o passo que decide se a mudança serviu: enquanto o gate lesse `PLAN_LIMITS` compilado, editar um limite na tela do Master não mudaria o comportamento do produto — e tela que mente é pior que tela ausente.
+
+Cache e não consulta por chamada porque `limits()` roda dentro de laços: mascarar telefone é chamado uma vez por lead da listagem. Um minuto de defasagem num limite não machuca ninguém; uma query por lead, sim.
+
+**O fallback é o mais restritivo, não o do FREE.** Plano ausente do cache zera tudo. FREE é decisão comercial que muda; isto é rede de segurança, e errar para o lado generoso entrega recurso pago de graça sem dar sinal.
+
+#### Duas lições caras desta rodada
+
+**Migration aplicada não se edita, se substitui.** Editei o arquivo de uma migration que já tinha falhado ao aplicar; o Prisma detectou o checksum diferente e a única saída que ele conhece é recriar o schema. Custou os dados de demonstração e um `db:seed`. Em produção teria custado a base. O certo era apagar a pasta e gerar outra.
+
+**A migration que o Prisma gerou era destrutiva e só falhou por sorte.** `DROP COLUMN "code"` seguido de `ADD COLUMN "code" TEXT NOT NULL` quebra em tabela populada — mas passaria limpo em tabela vazia, apagando o `code` de todos os planos e desligando cada assinatura da sua linha. O cast `USING "code"::text` foi escrito à mão.
+
+Efeito colateral do reset: o `ALTER TABLE` rodou contra tabela vazia, então **o cast não foi exercitado contra dado real**. Vale confirmar numa cópia da base antes de produção.
+
+#### Também
+
+`ts-jest` transpila sem checar tipos: os 59 testes passaram com dois erros de tipo no repositório. Verde na suíte não substitui `pnpm typecheck`.
+
+---
+
 ### Suspensão em leitura, e planos mensais · 13/08/2026
 
 Sem migration. Fecha a lacuna entre a §10.4 e o código: a decisão dizia que suspenso mantém leitura, e o `TenantGuard` bloqueava tudo.

@@ -54,7 +54,7 @@ export class BillingService {
   async criarCheckout(tenantId: string, planCode: string): Promise<{ url: string }> {
     const [tenant, plan] = await Promise.all([
       this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } }),
-      this.prisma.plan.findUnique({ where: { code: planCode as never } }),
+      this.prisma.plan.findUnique({ where: { code: planCode } }),
     ]);
 
     if (!plan) throw new NotFoundException('Plano não encontrado');

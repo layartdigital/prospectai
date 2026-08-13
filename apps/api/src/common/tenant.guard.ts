@@ -10,7 +10,7 @@ import { type Role, roleAtLeast } from '@propectai/types';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { CONSOME_RECURSO_KEY, IS_PUBLIC_KEY, REQUIRED_ROLE_KEY } from './decorators';
-import type { RequestWithContext } from './request-context';
+import type { ActiveTenant, RequestWithContext } from './request-context';
 
 /**
  * Resolve e valida o tenant ativo.
@@ -81,7 +81,16 @@ export class TenantGuard implements CanActivate {
       id: membership.tenantId,
       slug: membership.tenant.slug,
       role: membership.role as Role,
-      planCode: membership.tenant.subscription?.plan.code ?? 'FREE',
+      // O cast é ponte temporária do passo 2 para o passo 4 de
+      // `docs/strategic/lacunas-estruturais.md` §11.1: `Plan.code` já é texto
+      // livre no banco, mas `ActiveTenant.planCode` ainda é a união de quatro
+      // valores, e alargá-la agora arrastaria as assinaturas de sete services
+      // no mesmo commit.
+      //
+      // Não há risco de runtime hoje — `EntitlementsService.limits()` já
+      // recebe `string` e resolve pelo banco. O que o cast esconde é apenas a
+      // tipagem, e some quando o passo 4 alargar o campo.
+      planCode: (membership.tenant.subscription?.plan.code ?? 'FREE') as ActiveTenant['planCode'],
       country: membership.tenant.country,
       currency: membership.tenant.currency,
       suspended: suspenso,
