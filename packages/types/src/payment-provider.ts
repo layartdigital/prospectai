@@ -84,6 +84,37 @@ export interface RemotePrice {
   amountsByCurrency: Record<string, number>;
 }
 
+export type RemoteInvoiceStatus =
+  | 'DRAFT'
+  | 'OPEN'
+  | 'PAID'
+  | 'UNCOLLECTIBLE'
+  | 'VOID';
+
+export interface RemoteInvoice {
+  externalId: string;
+  customerId: string;
+  subscriptionId: string | null;
+  status: RemoteInvoiceStatus;
+  /**
+   * Valor cobrado e valor pago, separados.
+   *
+   * Diferem em pagamento parcial e em reembolso. Somar o cobrado como receita
+   * esconderia os dois — e "quanto entrou" é a pergunta que o Financeiro
+   * existe para responder.
+   */
+  amountCents: number;
+  amountPaidCents: number;
+  currency: string;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  dueDate: Date | null;
+  paidAt: Date | null;
+  attemptCount: number;
+  hostedInvoiceUrl: string | null;
+  pdfUrl: string | null;
+}
+
 /**
  * Evento do provedor, já traduzido.
  *
@@ -99,13 +130,17 @@ export interface RemotePrice {
 export type BillingEvent =
   | { kind: 'SUBSCRIPTION_CHANGED'; subscription: RemoteSubscription }
   | { kind: 'PRICE_CHANGED'; price: RemotePrice }
-  | {
-      kind: 'PAYMENT_FAILED';
-      customerId: string;
-      subscriptionId: string | null;
-      /** Página de pagamento da fatura, para o aviso na interface. */
-      hostedInvoiceUrl: string | null;
-    }
+  /**
+   * Fatura criada, paga, falhada ou anulada.
+   *
+   * Um caso só para todos os estados de fatura, e não um por evento. O que o
+   * domínio faz é sempre o mesmo — espelhar o estado atual —, e a decisão de
+   * suspender ou não pertence à assinatura, que chega por outro caminho.
+   *
+   * Cobrança recusada, em particular, **não** altera acesso: é o começo do
+   * ciclo de tentativas do provedor, não o fim.
+   */
+  | { kind: 'INVOICE_CHANGED'; invoice: RemoteInvoice }
   /**
    * Recebido, verificado, sem ação. Continua sendo gravado: saber que um
    * evento chegou e foi ignorado de propósito é diferente de não saber nada.

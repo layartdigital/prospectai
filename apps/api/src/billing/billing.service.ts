@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { RemotePrice, RemoteSubscription } from '@propectai/types';
+import type { RemoteInvoice, RemotePrice, RemoteSubscription } from '@propectai/types';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentProviderFactory } from './providers/payment-provider.factory';
@@ -214,15 +214,8 @@ export class BillingService {
         await this.aplicarPreco(evento.price);
         return;
 
-      case 'PAYMENT_FAILED':
-        // Sem ação sobre o acesso, de propósito. A falha de uma cobrança é o
-        // começo do ciclo de tentativas do provedor, não o fim — suspender
-        // aqui cancelaria cliente por cartão vencido. Quem decide é a
-        // transição para UNPAID, que chega como SUBSCRIPTION_CHANGED.
-        this.logger.warn(
-          { customerId: evento.customerId },
-          'Cobrança recusada; aguardando o ciclo de tentativas do provedor',
-        );
+      case 'INVOICE_CHANGED':
+        await this.aplicarFatura(evento.invoice);
         return;
 
       case 'IGNORED':
@@ -359,6 +352,64 @@ export class BillingService {
     });
 
     return pelaConta?.id ?? null;
+  }
+
+  // --------------------------------------------------------------- faturas
+
+  /**
+   * Espelha a fatura no banco.
+   *
+   * Sem efeito sobre o acesso, de propósito. Fatura recusada é o **começo** do
+   * ciclo de tentativas do provedor, não o fim — suspender aqui cancelaria
+   * cliente por cartão vencido. Quem decide acesso é a transição da assinatura
+   * para `UNPAID`, que chega por `SUBSCRIPTION_CHANGED`.
+   *
+   * Upsert e não create: o mesmo `in_...` chega várias vezes ao longo da vida
+   * da fatura — criada, emitida, tentada, paga. É a mesma fatura mudando de
+   * estado, não quatro faturas.
+   */
+  private async aplicarFatura(fatura: RemoteInvoice): Promise<void> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { stripeCustomerId: fatura.customerId },
+      select: { id: true },
+    });
+
+    if (!tenant) {
+      // Acontece de verdade: o `invoice.created` do primeiro checkout pode
+      // chegar antes de `customer.subscription.created`, que é o evento que
+      // grava o `stripeCustomerId`. Lançar faz o provedor reentregar, e aí o
+      // tenant já existe — é a ordenação se resolvendo sozinha pela repetição.
+      throw new Error(
+        `Fatura ${fatura.externalId} sem tenant para o cliente ${fatura.customerId}`,
+      );
+    }
+
+    const dados = {
+      tenantId: tenant.id,
+      externalSubscriptionId: fatura.subscriptionId,
+      status: fatura.status,
+      amountCents: fatura.amountCents,
+      amountPaidCents: fatura.amountPaidCents,
+      currency: fatura.currency,
+      periodStart: fatura.periodStart,
+      periodEnd: fatura.periodEnd,
+      dueDate: fatura.dueDate,
+      paidAt: fatura.paidAt,
+      attemptCount: fatura.attemptCount,
+      hostedInvoiceUrl: fatura.hostedInvoiceUrl,
+      pdfUrl: fatura.pdfUrl,
+    };
+
+    await this.prisma.invoice.upsert({
+      where: {
+        provider_externalId: {
+          provider: this.provider.name,
+          externalId: fatura.externalId,
+        },
+      },
+      create: { provider: this.provider.name, externalId: fatura.externalId, ...dados },
+      update: dados,
+    });
   }
 
   // ---------------------------------------------------------------- preços

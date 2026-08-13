@@ -5,6 +5,8 @@ import type {
   CheckoutInput,
   CheckoutSession,
   PaymentProvider,
+  RemoteInvoice,
+  RemoteInvoiceStatus,
   RemotePrice,
   RemoteSubscription,
   RemoteSubscriptionStatus,
@@ -175,15 +177,16 @@ export class StripePaymentProvider implements PaymentProvider {
           ),
         };
 
-      case 'invoice.payment_failed': {
-        const invoice = event.data.object as Stripe.Invoice;
+      case 'invoice.created':
+      case 'invoice.finalized':
+      case 'invoice.paid':
+      case 'invoice.payment_failed':
+      case 'invoice.marked_uncollectible':
+      case 'invoice.voided':
         return {
-          kind: 'PAYMENT_FAILED',
-          customerId: idDe(invoice.customer) ?? '',
-          subscriptionId: assinaturaDaFatura(invoice),
-          hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+          kind: 'INVOICE_CHANGED',
+          invoice: this.traduzirFatura(event.data.object as Stripe.Invoice),
         };
-      }
 
       case 'price.updated':
       case 'price.created':
@@ -218,6 +221,36 @@ export class StripePaymentProvider implements PaymentProvider {
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
       canceledAt: emData(sub.canceled_at),
       metadata: sub.metadata ?? {},
+    };
+  }
+
+  private traduzirFatura(invoice: Stripe.Invoice): RemoteInvoice {
+    const bruta = invoice as unknown as {
+      period_start?: number;
+      period_end?: number;
+      due_date?: number;
+      status_transitions?: { paid_at?: number };
+      attempt_count?: number;
+      invoice_pdf?: string;
+    };
+
+    return {
+      externalId: invoice.id ?? '',
+      customerId: idDe(invoice.customer) ?? '',
+      subscriptionId: assinaturaDaFatura(invoice),
+      status: traduzirStatusFatura(invoice.status),
+      // `amount_due` e não `total`: é o que o cliente tem a pagar depois de
+      // crédito aplicado. Registrar o total mostraria dívida que não existe.
+      amountCents: invoice.amount_due ?? 0,
+      amountPaidCents: invoice.amount_paid ?? 0,
+      currency: (invoice.currency ?? 'brl').toUpperCase(),
+      periodStart: emData(bruta.period_start),
+      periodEnd: emData(bruta.period_end),
+      dueDate: emData(bruta.due_date),
+      paidAt: emData(bruta.status_transitions?.paid_at),
+      attemptCount: bruta.attempt_count ?? 0,
+      hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+      pdfUrl: bruta.invoice_pdf ?? null,
     };
   }
 
@@ -304,6 +337,29 @@ function assinaturaDaFatura(invoice: Stripe.Invoice): string | null {
   });
 
   return idDe(parent.parent?.subscription_details?.subscription ?? parent.subscription);
+}
+
+/**
+ * Estado da fatura.
+ *
+ * `null` vira `DRAFT`: o Stripe devolve nulo em fatura recém-criada, e tratar
+ * isso como pendente colocaria dívida inexistente no relatório.
+ */
+function traduzirStatusFatura(
+  status: Stripe.Invoice.Status | null | undefined,
+): RemoteInvoiceStatus {
+  switch (status) {
+    case 'paid':
+      return 'PAID';
+    case 'open':
+      return 'OPEN';
+    case 'uncollectible':
+      return 'UNCOLLECTIBLE';
+    case 'void':
+      return 'VOID';
+    default:
+      return 'DRAFT';
+  }
 }
 
 /**

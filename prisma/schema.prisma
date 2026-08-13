@@ -310,6 +310,8 @@ model Tenant {
   /// registros — e o dia em que alguem pedir a segunda via seria um problema.
   stripeCustomerId String? @unique
 
+  invoices Invoice[]
+
   isDemo    Boolean   @default(false)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -633,6 +635,85 @@ model PlanUsage {
   @@unique([tenantId, periodStart])
   @@index([tenantId])
   @@map("plan_usages")
+}
+
+/// Espelha os estados de fatura do provedor. Mesma razao do
+/// `SubscriptionStatus`: vocabulario proprio criaria a pergunta impossivel de
+/// responder — "esta pago pelo nosso criterio ou pelo deles?".
+enum InvoiceStatus {
+  /// Ainda nao emitida. Nao cobra, nao vence, nao aparece em relatorio.
+  DRAFT
+  /// Emitida e aguardando pagamento. E o "pendente" da tela.
+  OPEN
+  PAID
+  /// Dada como perdida apos o ciclo de tentativas. Diferente de VOID: houve
+  /// cobranca legitima que nao foi paga, e isso conta como inadimplencia.
+  UNCOLLECTIBLE
+  /// Cancelada antes de virar divida. Erro de emissao, duplicata, teste.
+  VOID
+}
+
+/// Fatura, espelhada do provedor de pagamento.
+///
+/// **Espelho, nao fonte.** A verdade fiscal e do provedor — ele emite, ele
+/// guarda o PDF, ele responde por segunda via. Esta tabela existe para que o
+/// Financeiro consiga responder *quanto entrou este mes* com um `SUM`, em vez
+/// de paginar a API de terceiros a cada abertura de tela.
+///
+/// Consultar ao vivo seria mais simples de escrever e pior em tudo o mais:
+/// lento, sujeito a rate limit, indisponivel quando eles caem, e sem historico
+/// local para filtrar por periodo.
+///
+/// **A reconciliacao nao e opcional.** Webhook perdido e normal — endpoint
+/// fora do ar, deploy no momento errado. Sem uma varredura periodica o espelho
+/// diverge para sempre e o Financeiro passa a mentir, que e pior que nao ter
+/// Financeiro nenhum.
+///
+/// Tem `tenantId`, diferente do `BillingEvent`: fatura pertence a um cliente
+/// desde o instante em que existe.
+model Invoice {
+  id       String @id @default(cuid())
+  tenantId String
+
+  provider String @default("stripe")
+  /// Id no provedor, ex.: in_1P... . Chave de idempotencia do espelho.
+  externalId String
+  /// Assinatura que originou a fatura, no provedor. Nulo em cobranca avulsa.
+  externalSubscriptionId String?
+
+  status     InvoiceStatus @default(DRAFT)
+  /// Em centavos, na moeda da fatura. Nunca recalculado por nos: e o valor que
+  /// o cliente viu e pagou.
+  amountCents Int          @default(0)
+  /// Quanto foi efetivamente pago. Difere de `amountCents` em pagamento
+  /// parcial e em reembolso — somar o valor da fatura como receita esconderia
+  /// os dois.
+  amountPaidCents Int      @default(0)
+  currency   String        @default("BRL")
+
+  periodStart DateTime?
+  periodEnd   DateTime?
+  dueDate     DateTime?
+  paidAt      DateTime?
+
+  /// Quantas vezes o provedor tentou cobrar. Torna visivel o cliente que paga
+  /// sempre na terceira tentativa — informacao comercial, nao so tecnica.
+  attemptCount Int @default(0)
+
+  /// Pagina de pagamento e PDF, hospedados pelo provedor. Guardamos o link,
+  /// nao o arquivo: gerar documento fiscal nao e problema que valha reimplementar.
+  hostedInvoiceUrl String?
+  pdfUrl           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalId])
+  @@index([tenantId, status])
+  @@index([status, dueDate])
+  @@map("invoices")
 }
 
 /// Webhook recebido do provedor de pagamento.
