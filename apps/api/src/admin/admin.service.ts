@@ -1,13 +1,25 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { PLAN_LIMITS, type AdminTenantList, type AdminTenantView, type PlanCode } from '@propectai/types';
+import { type AdminTenantList, type AdminTenantView, type PlanCode } from '@propectai/types';
 
+import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * Planos considerados na estatística por plano.
+ *
+ * Ainda fixo. Vira consulta ao banco no passo 4 de
+ * `docs/strategic/lacunas-estruturais.md` §11.1, junto com o alargamento de
+ * `PlanCode` — enquanto ninguém consegue criar plano, uma lista fixa não
+ * esconde nada. Depois da tela do Master, esconderia.
+ */
 const PLANOS: PlanCode[] = ['FREE', 'START', 'PRO', 'AGENCY'];
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly entitlements: EntitlementsService,
+  ) {}
 
   /**
    * Lista todos os tenants da plataforma.
@@ -46,7 +58,7 @@ export class AdminService {
 
     const items: AdminTenantView[] = tenants.map((tenant) => {
       const planCode = (tenant.subscription?.plan.code ?? 'FREE') as PlanCode;
-      const limits = PLAN_LIMITS[planCode];
+      const limits = this.entitlements.limits(planCode);
       const uso = usoPorTenant.get(tenant.id);
 
       return {

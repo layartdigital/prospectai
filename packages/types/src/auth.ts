@@ -56,6 +56,22 @@ export interface PlanLimits {
   pipelineEnabled: boolean;
 }
 
+/**
+ * Limites iniciais de cada plano.
+ *
+ * **Semente, não verdade.** Desde 13/08/2026 quem responde "qual é o limite
+ * deste plano" é `Plan.limits` no banco, lido pelo `EntitlementsService` — ver
+ * `docs/strategic/lacunas-estruturais.md` §11.1, passo 3.
+ *
+ * Esta constante existe para que `prisma/seed.ts` tenha o que gravar num banco
+ * vazio. **Nenhum código de produto pode lê-la.** Um gate que consultasse aqui
+ * ignoraria a edição feita na tela do Master, e o operador veria o valor novo
+ * na interface enquanto o produto aplicasse o antigo — tela que mente é pior
+ * que tela ausente.
+ *
+ * Os números aqui envelhecem sem consequência: depois do primeiro seed, quem
+ * manda é o banco.
+ */
 export const PLAN_LIMITS: Record<PlanCode, PlanLimits> = {
   FREE: {
     leadsIncluded: 5,

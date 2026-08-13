@@ -7,7 +7,7 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
-### Plano vira dado — passos 1 e 2 · 13/08/2026
+### Plano vira dado — passos 1, 2 e 3 · 13/08/2026
 
 Migration `20260813192737_plano_vira_dado`. Primeiros dois dos seis passos de `docs/strategic/lacunas-estruturais.md` §11.1.
 
@@ -24,6 +24,22 @@ Texto único no lugar de `enum PlanCode`. "Incluir plano" não era uma tela que 
 Cache e não consulta por chamada porque `limits()` roda dentro de laços: mascarar telefone é chamado uma vez por lead da listagem. Um minuto de defasagem num limite não machuca ninguém; uma query por lead, sim.
 
 **O fallback é o mais restritivo, não o do FREE.** Plano ausente do cache zera tudo. FREE é decisão comercial que muda; isto é rede de segurança, e errar para o lado generoso entrega recurso pago de graça sem dar sinal.
+
+#### Passo 3 — `PLAN_LIMITS` vira semente
+
+Nenhum código de produto lê mais a constante. Ela sobrou em `prisma/seed.ts`, para ter o que gravar num banco vazio, com um bloco no próprio arquivo dizendo que é proibido lê-la em outro lugar — constante exportada de pacote compartilhado é um convite.
+
+Os três usos pediram coisas diferentes:
+
+| Onde | O que era | O que virou |
+|---|---|---|
+| `account.service` | `plan.limits ?? PLAN_LIMITS[code]` | só o banco |
+| `admin.service` | `PLAN_LIMITS[code]` | `EntitlementsService` |
+| `auth.service` | `planLimits()` | apagado |
+
+O `??` do `account.service` era a mentira em miniatura: `limits` é coluna obrigatória, e plano com limite vazio está mal cadastrado — a tela precisa mostrar isso, não disfarçar com um valor que ninguém configurou.
+
+O `planLimits()` do `auth.service` não tinha chamador. Método público sem uso é passivo: alguém o encontra depois, assume que é o jeito certo de ler limite, e reintroduz a constante por conta própria.
 
 #### Duas lições caras desta rodada
 

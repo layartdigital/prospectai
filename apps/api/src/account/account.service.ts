@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
-  PLAN_LIMITS,
   computeScore,
   type PlanCardView,
   type PlanCode,
@@ -55,7 +54,10 @@ export class AccountService {
         name: plan.name,
         priceCents: plan.priceCents,
         currency: plan.currency,
-        limits: (plan.limits as unknown as PlanLimits) ?? PLAN_LIMITS[plan.code as PlanCode],
+        // Sem fallback para constante compilada. `limits` é coluna obrigatória
+        // — se estiver vazia, o plano está mal cadastrado e a tela precisa
+        // mostrar isso, não disfarçar com um valor que ninguém configurou.
+        limits: plan.limits as unknown as PlanLimits,
         isCurrent: plan.code === planCode,
         sortOrder: plan.sortOrder,
       })),

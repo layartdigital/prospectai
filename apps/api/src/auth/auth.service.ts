@@ -9,7 +9,6 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
 import {
-  PLAN_LIMITS,
   type AuthTenant,
   type PlanCode,
   type Role,
@@ -279,10 +278,6 @@ export class AuthService {
         activeMembership?.tenant.onboardingState?.completedAt,
       ),
     };
-  }
-
-  planLimits(planCode: PlanCode) {
-    return PLAN_LIMITS[planCode];
   }
 
   // ---------------------------------------------------------------------------
