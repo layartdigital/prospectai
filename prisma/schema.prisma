@@ -37,10 +37,22 @@ enum PlanCode {
   AGENCY
 }
 
+/// Espelha os estados do Stripe de proposito.
+///
+/// Traduzir para um vocabulario proprio pareceria mais limpo e criaria a
+/// pergunta impossivel de responder as tres da manha: "o cliente esta bloqueado
+/// porque o nosso estado diz X ou porque o do Stripe diz Y?". Mesmo nome,
+/// mesma coisa, uma verdade so.
+///
+/// `INCOMPLETE` e o checkout que comecou e nao terminou — existe porque o
+/// Stripe cria a assinatura antes da confirmacao do pagamento, e sem este
+/// estado ela apareceria como TRIALING para quem nunca pagou.
 enum SubscriptionStatus {
+  INCOMPLETE
   TRIALING
   ACTIVE
   PAST_DUE
+  UNPAID
   CANCELED
 }
 
@@ -281,6 +293,15 @@ model Tenant {
   suspendedAt     DateTime?
   suspendedReason String?
 
+  /// Cliente no provedor de pagamento.
+  ///
+  /// Fica no Tenant e nao na Subscription porque o cliente sobrevive ao
+  /// contrato: quem cancela e volta seis meses depois tem o mesmo cartao, o
+  /// mesmo historico de faturas e o mesmo dado fiscal. Criar um cliente novo
+  /// a cada assinatura espalharia as faturas da mesma empresa por varios
+  /// registros — e o dia em que alguem pedir a segunda via seria um problema.
+  stripeCustomerId String? @unique
+
   isDemo    Boolean   @default(false)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -508,8 +529,25 @@ model Plan {
   code        PlanCode @unique
   name        String
   description String?
+  /// Preco de exibicao padrao. Vale para plano sem cobranca (gratuito, demo,
+  /// seed) e como fallback quando `stripePriceId` e nulo.
   priceCents  Int      @default(0)
   currency    String   @default("BRL")
+
+  /// Identificadores no provedor de pagamento.
+  ///
+  /// `stripePriceId` e o que vai ao checkout. Nenhum valor calculado por esta
+  /// aplicacao e enviado ao Stripe — a aplicacao diz *qual* preco, nunca
+  /// *quanto*. E o que faz cache desatualizado ser constrangimento visual em
+  /// vez de cobranca errada.
+  stripePriceId   String? @unique
+  stripeProductId String?
+
+  /// Cache dos `currency_options` do Price, em centavos: { "BRL": 14900 }.
+  ///
+  /// Sincronizado pelos webhooks `price.updated` e `product.updated`. Cache,
+  /// nao verdade: divergiu, o valor cobrado continua sendo o do Stripe.
+  pricesByCurrency Json @default("{}")
   /// Limites como JSON: leadsIncluded, searchesPerMonth, aiGenerationsPerMonth,
   /// maxUsers, exportFormats, retentionDays. Lido apenas pelo EntitlementService.
   limits      Json
@@ -533,6 +571,20 @@ model Subscription {
   currentPeriodEnd   DateTime?
   trialEndsAt        DateTime?
   cancelledAt        DateTime?
+
+  /// Assinatura no provedor. Nulo em plano gratuito e no seed de demonstracao.
+  stripeSubscriptionId String? @unique
+  /// Moeda efetivamente cobrada, decidida no checkout. Fica aqui e nao no
+  /// Tenant porque e propriedade do contrato, nao da empresa: trocar de plano
+  /// pode trocar de moeda, e a fatura antiga continua valendo na moeda dela.
+  currency             String  @default("BRL")
+  /// Cancelamento agendado para o fim do periodo pago.
+  ///
+  /// Diferente de `cancelledAt`: aqui o cliente ja pediu para sair mas ainda
+  /// tem acesso comprado. Tratar os dois como a mesma coisa cortaria acesso
+  /// que foi pago.
+  cancelAtPeriodEnd    Boolean @default(false)
+
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
@@ -564,6 +616,42 @@ model PlanUsage {
   @@unique([tenantId, periodStart])
   @@index([tenantId])
   @@map("plan_usages")
+}
+
+/// Webhook recebido do provedor de pagamento.
+///
+/// **Existe para idempotencia, nao para historico.** O Stripe reentrega evento
+/// quando a resposta demora ou falha, e reentrega o mesmo `id`. Processar
+/// `invoice.paid` duas vezes creditaria cota duas vezes; processar
+/// `subscription.deleted` fora de ordem suspenderia quem acabou de renovar.
+/// A chave unica em `externalId` e o que torna reprocessar inofensivo.
+///
+/// **Sem `tenantId`, deliberadamente.** O evento chega antes de sabermos de
+/// quem e — descobrir o tenant e parte do processamento, e evento de preco nem
+/// pertence a tenant nenhum. Gravar primeiro e resolver depois e o que permite
+/// responder 200 rapido: o Stripe considera lentidao como falha e reentrega.
+///
+/// `error` preenchido com `processedAt` nulo e a fila de conserto manual. Sem
+/// isso, webhook que falha some, e o cliente que pagou fica sem acesso sem que
+/// ninguem saiba.
+model BillingEvent {
+  id         String @id @default(cuid())
+  provider   String @default("stripe")
+  /// Id do evento no provedor, ex.: evt_1P... . E o que torna a entrega unica.
+  externalId String
+  type       String
+  payload    Json
+
+  processedAt DateTime?
+  error       String?
+  attempts    Int       @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([provider, externalId])
+  @@index([type])
+  @@index([processedAt])
+  @@map("billing_events")
 }
 
 model OnboardingState {

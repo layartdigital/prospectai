@@ -17,6 +17,7 @@ export * from './lead-source';
 export * from './normalize';
 export * from './notification-api';
 export * from './outreach-api';
+export * from './payment-provider';
 export * from './pipeline-api';
 export * from './pricing-api';
 export * from './proposal-api';

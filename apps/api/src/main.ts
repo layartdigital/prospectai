@@ -10,7 +10,11 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  // `rawBody` preserva o corpo original da requisicao ao lado do JSON ja
+  // parseado. O webhook de cobranca precisa dele: a assinatura do Stripe cobre
+  // os bytes exatos, e a reserializacao que o parser faz — ordem de chaves,
+  // espacos, escape de unicode — invalida a verificacao sem mudar o conteudo.
+  const app = await NestFactory.create(AppModule, { bufferLogs: false, rawBody: true });
   const config = app.get(ConfigService);
 
   const port = Number(config.get('API_PORT') ?? 3101);
@@ -68,6 +72,7 @@ async function bootstrap(): Promise<void> {
     .addTag('ai', 'Geracao de abordagem. Nada e enviado automaticamente')
     .addTag('notifications', 'Avisos do tenant e marcacao de leitura')
     .addTag('proposals', 'Propostas, itens e contratos')
+    .addTag('Cobranca', 'Checkout, portal do cliente e assinatura')
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);

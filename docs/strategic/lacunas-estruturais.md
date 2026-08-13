@@ -295,3 +295,58 @@ O `customerType` é o que **tira a decisão comercial do caminho crítico técni
 2. **Quais idiomas na largada?** A interface em pt-BR mais inglês cobre a maioria dos mercados iniciais; a taxonomia precisa do idioma **local** de cada país onde houver cliente, que é problema diferente e maior
 3. **Quem é o primeiro cliente pagante real, e de que país?** Define quanto do painel do provedor e quanta localização precisam existir antes da primeira cobrança
 4. **Preço por país.** Plano único convertido pela cotação do dia trata Brasil e Suíça como o mesmo mercado. Preço por região é prática corrente em SaaS e depende de decisão comercial, não técnica — o `currency` no schema já deixa a porta aberta
+
+---
+
+## 10. Item 5 — decisões de cobrança · 13/08/2026
+
+Três perguntas mudam o schema e são caras de reverter. Decididas aqui para não travarem a implementação.
+
+### 10.1 O número exibido nunca é o número cobrado
+
+`Plan` ganha `stripePriceId`. O valor mostrado na tela também fica no banco, mas como **cache**, sincronizado pelos webhooks `price.updated` e `product.updated`.
+
+Parece redundância e não é. As duas alternativas puras falham em pontos opostos:
+
+| | Falha |
+|---|---|
+| Só o preço no banco | Alguém muda no painel do Stripe e a tela mente até o próximo deploy |
+| Só o Stripe, consultado a cada render | A tela de planos fica indisponível quando o Stripe fica |
+
+O que torna o cache seguro é que **o checkout usa o `stripePriceId`, nunca o número em cache**. Se a sincronização atrasar, o cliente vê um valor velho e é cobrado o valor certo — divergência visual, constrangedora, corrigível. O desenho inverso, em que a aplicação envia um valor calculado por ela, transforma bug de sincronização em cobrança errada. Essa assimetria decide sozinha.
+
+### 10.2 Multi-currency no mesmo Price, não conversão automática
+
+Um `Price` do Stripe aceita `currency_options`: valores fixos por moeda sob um único id. É o que atende os dois lados — um `stripePriceId` por plano, e o valor de cada moeda escolhido por nós.
+
+Adaptive Pricing converteria pela cotação e produziria preços instáveis e feios: R$ 149 vira € 24,37 hoje e € 24,91 na semana que vem. Preço de SaaS é sinal de posicionamento; número quebrado que muda sozinho diz que ninguém pensou nele.
+
+Largada com **BRL, USD e EUR**, e USD como padrão para o resto. Moeda nova é edição no painel do Stripe, sem deploy — e é aqui que a §9.4 (preço por região) vai ser respondida quando houver dado para respondê-la.
+
+### 10.3 Suspensão segue o Stripe, não um contador nosso
+
+O Stripe já faz *dunning* — Smart Retries espalha as tentativas por cerca de duas semanas, no horário com maior chance de aprovação. Reimplementar isso criaria duas lógicas de retry divergindo em silêncio.
+
+O PropectAI reage ao estado, não ao calendário:
+
+| Estado da assinatura | O que acontece |
+|---|---|
+| `past_due` | Aviso na interface. Nada bloqueia |
+| `unpaid` ou `canceled` | `suspendedAt` preenchido, com `suspendedReason` |
+
+Suspender no primeiro erro cancelaria cliente por cartão vencido, que é a causa mais comum e a mais banal.
+
+### 10.4 Suspenso perde o que gasta, mantém o que é dele
+
+Suspensão **não** é bloqueio total:
+
+- **Perde:** busca nova, geração por IA, qualquer coisa que consuma cota ou chame serviço pago
+- **Mantém:** leitura dos leads, pipeline, e **exportação CSV**
+
+Manter a exportação parece contraintuitivo — é justamente o que permite ir embora sem pagar. Mas os leads foram coletados com cota que o cliente já pagou, e reter dado do cliente como alavanca de cobrança é hostil, além de colidir com o direito de portabilidade (LGPD art. 18, GDPR art. 20). Cobrança que segura dado refém não é cobrança, é sequestro — e não é assim que este produto ganha cliente.
+
+### 10.5 O que fica atrás do `PaymentProvider`
+
+A abstração decidida em §8.2 continua valendo. Concretamente, fica do lado de fora do domínio: criação de checkout, portal do cliente, leitura de assinatura, e a tradução dos webhooks para eventos internos. O domínio nunca vê um objeto do Stripe.
+
+O teste da abstração é simples: se `apps/api/src/billing/providers/` for a única pasta que importa o SDK do Stripe, ela funcionou.

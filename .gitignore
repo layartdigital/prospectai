@@ -53,3 +53,7 @@ e2e-saida.txt
 # saidas de execucao local
 worker-test.txt
 e2e-saida.txt
+
+# Copias feitas antes de hotfix. O git ja e o backup — manter cópia velha de
+# codigo de autenticacao versionada e convidar alguem a abrir a errada.
+_hotfix-backups/

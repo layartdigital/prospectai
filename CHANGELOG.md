@@ -7,6 +7,62 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Cobrança — provedor, webhooks e suspensão · 13/08/2026
+
+Migration `20260813172113_cobranca_stripe`. Item 5 da sequência, decisões em `docs/strategic/lacunas-estruturais.md` §10.
+
+#### Adicionado
+
+- `PaymentProvider` em `@propectai/types` — terceiro contrato de provedor, ao lado de `LeadSourceProvider` e `AIProvider`
+- `StripePaymentProvider` e `MockPaymentProvider`, escolhidos por `PAYMENT_PROVIDER`
+- `POST /billing/checkout`, `POST /billing/portal`, `POST /billing/webhook`
+- `BillingEvent` — envelope de webhook, com chave única por evento
+- Suspensão e reativação automáticas por estado da assinatura
+- Sete testes em `billing-rules.spec.ts`
+
+#### A aplicação diz qual preço, nunca quanto
+
+`Plan.stripePriceId` vai ao checkout; `pricesByCurrency` é cache sincronizado por webhook. As duas alternativas puras falham em pontos opostos — só o banco mente quando alguém mexe no painel, só o Stripe derruba a tela de planos quando o Stripe cai.
+
+O que torna o cache seguro é a assimetria: cache velho vira **constrangimento visual**, enquanto enviar um valor calculado por nós viraria **cobrança errada**. Não são erros da mesma categoria.
+
+#### Suspensão segue o provedor, não um contador nosso
+
+| Estado | Efeito |
+|---|---|
+| `PAST_DUE` | Nada. É o provedor ainda tentando, e a causa mais comum é cartão vencido |
+| `UNPAID` / `CANCELED` | Suspende, com `billing:inadimplencia` em `suspendedReason` |
+
+O marcador existe para que **pagar não desfaça suspensão manual**. Sem ele, tenant suspenso por abuso voltaria sozinho na primeira fatura paga, e quem o suspendeu não saberia.
+
+Suspenso perde busca e IA; mantém leitura, pipeline e exportação. Os leads foram coletados com cota já paga, e reter dado como alavanca de cobrança colide com portabilidade (LGPD art. 18, GDPR art. 20).
+
+#### Reler em vez de confiar no payload
+
+Webhook de assinatura relê o estado atual no provedor. A entrega não é ordenada, e um `updated` antigo chegando depois de um `deleted` reativaria quem cancelou. Reler custa uma chamada e **elimina a classe inteira de bug de ordenação**: não há estado anterior a comparar, só o atual.
+
+#### Idempotência antes de processamento
+
+O evento é gravado antes de ser processado. Se o processamento falhar, ele fica com `error` preenchido e `processedAt` nulo — visível e reprocessável. Processar primeiro perderia exatamente os eventos que deram errado, que são os únicos que interessam.
+
+A falha propaga de propósito: o provedor reentrega, e a chave única torna a reentrega inofensiva.
+
+#### Dois campos que o Stripe mudou de lugar
+
+`current_period_start/end` saiu da assinatura para o item da assinatura, e `invoice.subscription` virou `invoice.parent.subscription_details.subscription`. Ler só o campo antigo devolveria `null` em silêncio — e `currentPeriodEnd` é a data que decide quando o acesso termina.
+
+`currency_options` só vem com `expand`. Sem isso o cache nasceria com uma moeda só, sem erro e sem log, até um cliente europeu ver preço em real.
+
+#### O mock recusa, não simula
+
+Toda operação que moveria dinheiro lança com mensagem dizendo qual variável falta. Um mock que devolvesse "assinatura ativa" faria a tela de planos parecer funcionar sem Stripe, e o defeito apareceria no primeiro cliente real.
+
+#### Ainda sem interface
+
+Nenhuma tela chama estes endpoints. Está registrado aqui em vez de ficar implícito: é código sem caminho de uso, exatamente o que este projeto trata como defeito. A tela de assinatura é o passo seguinte.
+
+---
+
 ### Gemini e termos por locale · 13/08/2026
 
 Migration `20260813161045_validacao_de_termos`. Item 4b da sequência de `docs/strategic/lacunas-estruturais.md`.

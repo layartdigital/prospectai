@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AccountModule } from './account/account.module';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
+import { BillingModule } from './billing/billing.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
 import { LeadsModule } from './leads/leads.module';
@@ -30,6 +31,7 @@ import { TeamModule } from './team/team.module';
     AuthModule,
     AccountModule,
     AdminModule,
+    BillingModule,
     EntitlementsModule,
     DashboardModule,
     LeadsModule,
