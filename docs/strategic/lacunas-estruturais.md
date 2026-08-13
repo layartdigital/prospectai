@@ -384,6 +384,29 @@ O custo honesto: `PlanCode` aparece em **22 pontos**, incluindo assinaturas de m
 
 O passo 2 é o que decide se a coisa funcionou. Enquanto o gate ler constante compilada, editar um limite na tela não muda o comportamento do produto — e tela que mente é pior que tela ausente.
 
+**Estado em 13/08/2026:** passos 1, 2 e 3 concluídos e no repositório. Editar `Plan.limits` no banco já muda o comportamento do produto.
+
+#### Mapa do passo 4
+
+Varredura mecânica, sem decisão nova. `PlanCode` sai das assinaturas e vira `string`:
+
+| Arquivo | O que muda |
+|---|---|
+| `common/request-context.ts` | `ActiveTenant.planCode` vira `string` |
+| `common/tenant.guard.ts` | **remove o cast-ponte** deixado no passo 2 |
+| `admin/admin.service.ts` | `const PLANOS` vira consulta ao banco; `byPlan` deixa de ser `Record<PlanCode, number>` |
+| `account/account.service.ts` | assinatura e `plan.code as PlanCode` |
+| `auth/auth.service.ts` | `as PlanCode` na montagem da sessão |
+| `team/team.service.ts` | dois parâmetros |
+| `prospecting/prospecting.service.ts` | dois parâmetros |
+| `leads/leads.service.ts` | três parâmetros |
+| `packages/types/src/{auth,admin-api,account-api}.ts` | campos `planCode` e `code` |
+| `prisma/set-plan.ts` | valida contra o banco, não contra lista fixa |
+
+O cast em `tenant.guard.ts` é o marcador: enquanto ele existir, o passo 4 não terminou.
+
+**`AGENCY` morre aqui.** O código ficou factualmente errado quando o produto passou a atender todos os segmentos, e esta é a varredura que já toca todos os pontos onde ele aparece. `SCALE` no lugar. Fazer em separado seria repetir o mesmo trabalho.
+
 **`AGENCY` some no caminho.** O código ficou factualmente errado quando o produto passou a atender todos os segmentos, e este é o trabalho que já mexe em todos os pontos onde ele aparece. Pagar essa dívida em separado seria fazer a mesma varredura duas vezes.
 
 ### 11.2 Financeiro espelha, não consulta
