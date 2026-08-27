@@ -29,6 +29,13 @@ export class OutreachService {
     this.ai = aiFactory.get();
   }
 
+  /**
+   * Só entitlements — nenhuma leitura direta do Prisma acontece aqui.
+   *
+   * O `EntitlementsService` usa o próprio client e por isso fica de fora de
+   * qualquer bloco; ele é um dos três casos especiais da fase A (precisa
+   * receber o `tx` por parâmetro) e será tratado na fatia 8.
+   */
   async quota(tenantId: string, planCode: string): Promise<OutreachQuotaView> {
     const limits = this.entitlements.limits(planCode);
     const usage = await this.entitlements.currentUsage(tenantId);
@@ -43,11 +50,13 @@ export class OutreachService {
   }
 
   async list(tenantId: string, leadId: string): Promise<OutreachMessageView[]> {
-    const messages = await this.prisma.outreachMessage.findMany({
-      where: { tenantId, leadId },
-      orderBy: { createdAt: 'desc' },
-      include: { author: true },
-    });
+    const messages = await this.prisma.comTenant(tenantId, (tx) =>
+      tx.outreachMessage.findMany({
+        where: { tenantId, leadId },
+        orderBy: { createdAt: 'desc' },
+        include: { author: true },
+      }),
+    );
 
     return messages.map((message) => this.toView(message));
   }
@@ -57,6 +66,19 @@ export class OutreachService {
    *
    * O gate de plano é verificado AQUI, dentro de uma ação explícita do
    * usuário. Nenhuma tela chama este método ao carregar.
+   *
+   * **Dois blocos, não um.** A chamada ao provider de IA fica entre a leitura
+   * e a escrita, e ela é I/O externo: rede, latência de segundos, e um
+   * fornecedor que pode simplesmente não responder. Mantê-la dentro da
+   * transação seguraria uma conexão do pool — e o `timeout` de 10 s do
+   * `comTenant` — durante toda a espera. É a mesma forma usada em
+   * `process-audit-job.ts`, pela mesma razão.
+   *
+   * O que se perde no corte: entre ler o lead e gravar a mensagem, o lead
+   * pode ter sido apagado. Já era assim antes — as quatro chamadas eram
+   * soltas — e o custo do erro é uma mensagem órfã, não uma cobrança errada.
+   * O que **passou** a ser atômico é o grupo de escrita: mensagem, consumo de
+   * cota e atividade agora vivem ou morrem juntos.
    */
   async generate(
     tenantId: string,
@@ -78,18 +100,22 @@ export class OutreachService {
       });
     }
 
-    const lead = await this.prisma.lead.findFirst({
-      where: { id: leadId, tenantId, deletedAt: null },
-      include: {
-        digitalPresence: true,
-        score: { include: { reasons: { orderBy: { weight: 'desc' }, take: 3 } } },
-      },
-    });
-    if (!lead) throw new NotFoundException('Lead não encontrado');
+    // Bloco 1 — leitura do contexto.
+    const { lead, onboarding } = await this.prisma.comTenant(tenantId, async (tx) => {
+      const lead = await tx.lead.findFirst({
+        where: { id: leadId, tenantId, deletedAt: null },
+        include: {
+          digitalPresence: true,
+          score: { include: { reasons: { orderBy: { weight: 'desc' }, take: 3 } } },
+        },
+      });
 
-    const onboarding = await this.prisma.onboardingState.findUnique({
-      where: { tenantId },
+      const onboarding = await tx.onboardingState.findUnique({ where: { tenantId } });
+
+      return { lead, onboarding };
     });
+
+    if (!lead) throw new NotFoundException('Lead não encontrado');
 
     const context: OutreachLeadContext = {
       name: lead.name,
@@ -112,50 +138,63 @@ export class OutreachService {
 
     const prompt = this.buildPrompt(context, { ...input, serviceOffered });
 
+    // I/O externo — fora de qualquer transação, de propósito.
     const generated = await this.ai.generateOutreach({
       prompt,
       channel: input.channel,
       tone: input.tone,
     });
 
-    const previousCount = await this.prisma.outreachMessage.count({
-      where: { tenantId, leadId },
-    });
+    // Bloco 2 — escrita.
+    const message = await this.prisma.comTenant(tenantId, async (tx) => {
+      /**
+       * A contagem entrou no mesmo bloco da criação de propósito: `version`
+       * sai dela. Ler fora e gravar depois deixava a janela escancarada para
+       * duas gerações simultâneas nascerem com o mesmo número.
+       *
+       * A transação estreita a janela; não a fecha — só um índice único em
+       * `(tenantId, leadId, version)` fecharia, e isso é mudança de schema,
+       * fora do escopo desta fase.
+       */
+      const previousCount = await tx.outreachMessage.count({ where: { tenantId, leadId } });
 
-    const message = await this.prisma.outreachMessage.create({
-      data: {
-        tenantId,
-        leadId,
-        authorId: userId,
-        channel: input.channel as never,
-        tone: input.tone as never,
-        serviceOffered,
-        objective: input.objective ?? null,
-        callToAction: input.callToAction ?? null,
-        extraNotes: input.extraNotes ?? null,
-        prompt,
-        content: generated.content,
-        provider: this.ai.name,
-        model: this.ai.model,
-        tokensEstimated: generated.tokensEstimated,
-        version: previousCount + 1,
-      },
-      include: { author: true },
-    });
+      const message = await tx.outreachMessage.create({
+        data: {
+          tenantId,
+          leadId,
+          authorId: userId,
+          channel: input.channel as never,
+          tone: input.tone as never,
+          serviceOffered,
+          objective: input.objective ?? null,
+          callToAction: input.callToAction ?? null,
+          extraNotes: input.extraNotes ?? null,
+          prompt,
+          content: generated.content,
+          provider: this.ai.name,
+          model: this.ai.model,
+          tokensEstimated: generated.tokensEstimated,
+          version: previousCount + 1,
+        },
+        include: { author: true },
+      });
 
-    await this.prisma.planUsage.update({
-      where: { tenantId_periodStart: { tenantId, periodStart: usage.periodStart } },
-      data: { aiGenerationsCount: { increment: 1 } },
-    });
+      await tx.planUsage.update({
+        where: { tenantId_periodStart: { tenantId, periodStart: usage.periodStart } },
+        data: { aiGenerationsCount: { increment: 1 } },
+      });
 
-    await this.prisma.leadActivity.create({
-      data: {
-        tenantId,
-        leadId,
-        actorId: userId,
-        type: 'OUTREACH_GENERATED',
-        metadata: { channel: input.channel, tone: input.tone, provider: this.ai.name },
-      },
+      await tx.leadActivity.create({
+        data: {
+          tenantId,
+          leadId,
+          actorId: userId,
+          type: 'OUTREACH_GENERATED',
+          metadata: { channel: input.channel, tone: input.tone, provider: this.ai.name },
+        },
+      });
+
+      return message;
     });
 
     return this.toView(message);
@@ -167,15 +206,17 @@ export class OutreachService {
     messageId: string,
     content: string,
   ): Promise<OutreachMessageView> {
-    const existing = await this.prisma.outreachMessage.findFirst({
-      where: { id: messageId, tenantId },
-    });
-    if (!existing) throw new NotFoundException('Mensagem não encontrada');
+    const message = await this.prisma.comTenant(tenantId, async (tx) => {
+      const existing = await tx.outreachMessage.findFirst({
+        where: { id: messageId, tenantId },
+      });
+      if (!existing) throw new NotFoundException('Mensagem não encontrada');
 
-    const message = await this.prisma.outreachMessage.update({
-      where: { id: messageId },
-      data: { content },
-      include: { author: true },
+      return tx.outreachMessage.update({
+        where: { id: messageId },
+        data: { content },
+        include: { author: true },
+      });
     });
 
     return this.toView(message);
@@ -186,38 +227,45 @@ export class OutreachService {
    *
    * O envio é sempre feito pelo humano, fora do produto. Aqui apenas
    * registramos que aconteceu — a v0.1.1 não dispara nada automaticamente.
+   *
+   * As três escritas num bloco só: marcar a mensagem sem gravar o contato
+   * deixava o histórico do lead mentindo sobre o que aconteceu.
    */
   async markAsSent(
     tenantId: string,
     messageId: string,
     userId: string,
   ): Promise<OutreachMessageView> {
-    const existing = await this.prisma.outreachMessage.findFirst({
-      where: { id: messageId, tenantId },
-    });
-    if (!existing) throw new NotFoundException('Mensagem não encontrada');
+    const message = await this.prisma.comTenant(tenantId, async (tx) => {
+      const existing = await tx.outreachMessage.findFirst({
+        where: { id: messageId, tenantId },
+      });
+      if (!existing) throw new NotFoundException('Mensagem não encontrada');
 
-    const message = await this.prisma.outreachMessage.update({
-      where: { id: messageId },
-      data: { isSent: true, sentAt: new Date() },
-      include: { author: true },
-    });
+      const message = await tx.outreachMessage.update({
+        where: { id: messageId },
+        data: { isSent: true, sentAt: new Date() },
+        include: { author: true },
+      });
 
-    await this.prisma.leadContactRecord.create({
-      data: {
-        tenantId,
-        leadId: existing.leadId,
-        authorId: userId,
-        channel: existing.channel,
-        direction: 'SENT',
-        outcome: 'Abordagem gerada por IA enviada',
-        outreachId: messageId,
-      },
-    });
+      await tx.leadContactRecord.create({
+        data: {
+          tenantId,
+          leadId: existing.leadId,
+          authorId: userId,
+          channel: existing.channel,
+          direction: 'SENT',
+          outcome: 'Abordagem gerada por IA enviada',
+          outreachId: messageId,
+        },
+      });
 
-    await this.prisma.lead.update({
-      where: { id: existing.leadId },
-      data: { lastContactedAt: new Date() },
+      await tx.lead.update({
+        where: { id: existing.leadId },
+        data: { lastContactedAt: new Date() },
+      });
+
+      return message;
     });
 
     return this.toView(message);
