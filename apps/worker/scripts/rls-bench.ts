@@ -197,10 +197,64 @@ async function main(): Promise<void> {
       ]),
     );
 
+    // --- forma 3: doze consultas independentes, como o dashboard faz ---
+    //
+    // **Esta e a forma que a regra de escopo do passo 3 nao previu.**
+    //
+    // Aquela regra — "envolva o escopo mais amplo, o custo e por chamada" —
+    // saiu de um benchmark que media consulta a consulta. Ela ignora que uma
+    // transacao do Prisma roda tudo numa conexao so: envolver doze consultas
+    // paralelas num `comTenant` **serializa as doze**.
+    //
+    // O `dashboard.service.ts` faz exatamente isso, com doze. Os tres bracos
+    // abaixo medem as tres formas de escrever a mesma tela:
+    //
+    //   solto        as doze em paralelo, sem contexto (como hoje)
+    //   um_bloco     as doze dentro de UM comTenant  -> 1x overhead, serial
+    //   doze_blocos  doze comTenant em paralelo      -> 12x overhead, paralelo
+    //
+    // Nao ha resposta obvia, e e por isso que ela e medida em vez de deduzida.
+    const doze = <T>(f: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      Array.from({ length: 12 }, () => f);
+
+    const consulta = (tx: Prisma.TransactionClient): Promise<unknown> =>
+      tx.lead.count({ where: { tenantId } });
+
+    imprimir(
+      'doze consultas independentes',
+      await medir([
+        {
+          nome: 'solto',
+          executar: () => Promise.all(doze(consulta).map((f) => f(prisma))),
+        },
+        {
+          nome: 'controle',
+          executar: () => Promise.all(doze(consulta).map((f) => f(prisma))),
+        },
+        {
+          nome: 'um_bloco',
+          executar: () =>
+            comTenant(prisma, tenantId, (tx) =>
+              Promise.all(doze(consulta).map((f) => f(tx))),
+            ),
+        },
+        {
+          nome: 'doze_blocos',
+          executar: () =>
+            Promise.all(
+              doze(consulta).map((f) => comTenant(prisma, tenantId, (tx) => f(tx))),
+            ),
+        },
+      ]),
+    );
+
     console.log(
       '\nRLS esta DESLIGADO nesta medicao. O que se ve aqui e so o custo da\n' +
         'transacao e do set_config — o custo da politica vem no passo 4, e so\n' +
-        'da para separar os dois porque este numero foi tirado antes.',
+        'da para separar os dois porque este numero foi tirado antes.\n' +
+        '\nNa terceira forma, repare no pool: `doze_blocos` abre doze transacoes\n' +
+        'simultaneas. Se ele for o mais rapido, o numero e verdadeiro e o custo\n' +
+        'aparece em outro lugar — com varios usuarios ao mesmo tempo, nao com um.',
     );
   } finally {
     // O `finally` e a razao do `audit:e2e` existir. Mesma regra: terminar

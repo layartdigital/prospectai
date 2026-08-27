@@ -14,7 +14,7 @@ import {
   type SessionResponse,
 } from '@propectai/types';
 
-import { PrismaService } from '../prisma/prisma.service';
+import { declararTenant, PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload } from '../common/request-context';
 
 /** Etapas padrão criadas junto com todo tenant novo. */
@@ -93,6 +93,25 @@ export class AuthService {
       const tenant = await tx.tenant.create({
         data: { name: input.tenantName.trim(), slug },
       });
+
+      /**
+       * **O contexto e declarado aqui, no meio, e nao na abertura.**
+       *
+       * Este e o unico lugar do produto onde o tenant nasce dentro da propria
+       * transacao que o usa. Nao havia como embrulhar com `comTenant`: na
+       * abertura o `tenant.id` ainda nao existe.
+       *
+       * Tudo o que vem acima toca tabelas sem politica — `users` e `tenants` sao
+       * globais por natureza, porque a pessoa existe antes do workspace e o
+       * workspace e o proprio sujeito da regra. Tudo o que vem abaixo e
+       * escopado, e passa a enxergar o contexto certo.
+       *
+       * **Foi exatamente esta linha que faltou** quando a familia Pipeline foi
+       * ligada em 27/08: o `pipelineStage.createMany` logo abaixo virou
+       * "new row violates row-level security policy", o registro passou a
+       * responder 500, e 45 testes cairam junto.
+       */
+      await declararTenant(tx, tenant.id);
 
       await tx.membership.create({
         data: { userId: user.id, tenantId: tenant.id, role: 'OWNER', isDefault: true },
@@ -232,6 +251,23 @@ export class AuthService {
   // Sessão
   // ---------------------------------------------------------------------------
 
+  /**
+   * **Atravessa tenants de proposito, e nao recebe `comTenant`.**
+   *
+   * Esta consulta lista os workspaces de uma pessoa — e a pergunta e sobre ela,
+   * nao sobre um deles. Nao existe um tenant a declarar aqui; o proposito e
+   * justamente enumera-los.
+   *
+   * Terceiro caso de travessia deliberada do repositorio, junto com o
+   * `AdminService` e o `PrivacyService`. Quando a familia 6 puser politica em
+   * `memberships`, esta leitura devolve zero e **o login para de listar
+   * workspace nenhum** — precisa do papel que atravessa tenants, o mesmo
+   * `propectai_admin` dos outros dois.
+   *
+   * E repare como ele chega la: `memberships` vem por `include` a partir de
+   * `user`, que nao e tabela escopada. **Varredura por delegate nao encontra
+   * este caminho** — ver a nota de metodo no `PLANO-RLS-PASSO6-v1.md`.
+   */
   async getSession(userId: string, activeTenantId?: string): Promise<SessionResponse> {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },

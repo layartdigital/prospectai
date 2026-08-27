@@ -41,13 +41,24 @@ Contei sobre uma cópia local do repositório que estava desatualizada: faltavam
 
 E `dashboard` (12) e `notifications` (7) não apareciam em análise nenhuma de chamadores.
 
-### Os três casos que não recebem `comTenant`
+### Nota de método: 193 é um piso, não um total
+
+A varredura conta **chamadas de delegate** — `.lead.findMany(`, `.membership.create(`. Ela não encontra tabela escopada alcançada por **`include` a partir de uma raiz não escopada**.
+
+O caso que revelou isso é o `getSession` do `AuthService`: ele consulta `user.findUniqueOrThrow` e traz `memberships` — com o tenant, a assinatura e o plano — por `include` aninhado. O delegate é `user`, que não tem `tenantId`; `memberships` tem. Sob política em `memberships`, essa leitura devolve zero e **o login para de listar workspace nenhum.**
+
+Antes da família 6, é preciso uma segunda varredura, por `include` e não por delegate. Enquanto ela não existir, o número acima é o que se sabe, não o que há.
+
+### Os casos que não recebem `comTenant`
 
 Saíram do levantamento e precisam de tratamento próprio:
 
 - **`admin.service.ts` (7)** — atravessa tenants de propósito. É o caso do papel `propectai_admin` já descrito acima; embrulhar em `comTenant` quebraria a funcionalidade.
 - **`tenant.guard.ts` (1)** — roda **antes** de o tenant ser conhecido: é ele quem o resolve. Não há contexto para declarar.
 - **`entitlements.service.ts` (1)** — é chamado de dentro do bloco dos outros, com client próprio. O conserto é receber o `tx` por parâmetro, não abrir bloco próprio.
+- **`auth.service.ts` → `getSession`** — lista os workspaces de uma pessoa. Não há um tenant a declarar: enumerá-los é o propósito. Terceiro caso de travessia deliberada, junto com `AdminService` e `PrivacyService`, e o terceiro a precisar do papel `propectai_admin`.
+
+**Três caminhos atravessam tenants por desenho, e os três apareceram um de cada vez** — o painel administrativo no levantamento, o `PrivacyService` ao implementar a D4, e o `getSession` ao converter o `auth`. Nenhum foi previsto. Vale assumir que existe um quarto e procurá-lo antes da família 6, em vez de esperar que ele se apresente devolvendo zero em produção.
 
 ### A ordem da fase A
 

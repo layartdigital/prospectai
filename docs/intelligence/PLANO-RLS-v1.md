@@ -171,11 +171,21 @@ Isso importa para a D2. A alternativa recusada — extensão do client injetando
 
 A explicação é que a "lista de 50" não é uma consulta cara: são 3,7 ms contra 3,0 ms da leitura por chave, 0,7 ms de trabalho a mais. As duas formas são baratas, e o overhead é **fixo, entre 5 e 6 ms**. A hipótese da diluição não foi refutada — **não foi testada**, porque o benchmark não tem nenhuma consulta lenta o bastante para testá-la. Fica como está: sem evidência.
 
-### A regra de uso que sai daí
+### A regra de uso que sai daí — e a ressalva que ela não tinha
 
 O custo é **por chamada de `comTenant`, não por requisição**. Uma rota que chama o helper cinco vezes paga cinco vezes; as mesmas cinco consultas dentro de um `comTenant` só pagam o `BEGIN`/`COMMIT`/`set_config` uma vez.
 
 **Envolva o escopo mais amplo que fizer sentido, não cada consulta.** Com a ressalva já escrita no helper: nada de I/O externo lá dentro, o que na prática limita o escopo ao bloco de trabalho de banco.
+
+> **Correção de 27/08: a regra acima vale para trabalho sequencial, e pode estar errada para leitura paralela.**
+>
+> Ela foi deduzida de um benchmark que mede consulta a consulta, e ignora que **uma transação do Prisma roda tudo numa conexão só**. Envolver um `Promise.all` de doze consultas num `comTenant` não paga o overhead uma vez em vez de doze: paga uma vez **e serializa as doze**, que hoje correm em paralelo pelo pool.
+>
+> O `dashboard.service.ts` é exatamente esse caso — doze consultas independentes numa chamada só. Aplicar a regra ali, do jeito como estava escrita, trocaria ~8 ms por algo na casa dos 40 ms.
+>
+> **Não há resposta óbvia**, porque a alternativa — doze `comTenant` em paralelo — abre doze transações simultâneas e move o custo para o pool, onde ele só aparece com vários usuários ao mesmo tempo. Por isso o `rls:bench` ganhou um terceiro bloco que mede as três formas, e a regra definitiva sai de lá.
+>
+> Foi a segunda vez no mesmo dia que uma regra minha veio de raciocínio e não de medição — a primeira foi a previsão de que o custo se diluiria em consulta maior, que também estava errada.
 
 O código de hoje está dentro da regra — `criar` usa duas transações porque a conferência de saldo mora entre elas, `detalhe` usa uma, e o `processAuditJob` usa duas num job que leva 300 ms. **Onde isso vai doer é no passo 6**: telas de listagem e o dashboard, que fazem várias consultas por requisição, precisam ser envolvidas de uma vez, não consulta a consulta.
 

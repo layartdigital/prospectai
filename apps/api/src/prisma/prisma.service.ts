@@ -38,6 +38,34 @@ function urlDaAplicacao(): string | undefined {
   return url;
 }
 
+/**
+ * Declara o tenant numa transacao **que ja existe**.
+ *
+ * O `comTenant` abaixo cobre o caso normal: abrir transacao e declarar de uma
+ * vez. Esta funcao existe para o caso que ele nao cobre — **o tenant nasce
+ * dentro da transacao.**
+ *
+ * O registro de conta e o exemplo: `AuthService.register` cria usuario, tenant,
+ * membership, assinatura, etapas do pipeline e o log numa transacao so. Nao ha
+ * como declarar o contexto na abertura, porque na abertura o tenant ainda nao
+ * existe. Declara-se no meio, logo depois do `tenant.create`, e tudo o que vier
+ * abaixo passa a enxergar o contexto certo.
+ *
+ * **Nao abre transacao, e nao deve.** Chamada fora de uma, o `set_config` com
+ * `is_local` morre no proprio statement — nao falha, nao faz nada. Por isso o
+ * parametro e um `TransactionClient` e nao um client qualquer: o tipo diz onde
+ * ela pode ser usada.
+ */
+export async function declararTenant(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+): Promise<void> {
+  const id = validarTenantId(tenantId);
+  // Parametrizado, e nao interpolado. `set_config` e funcao e aceita parametro;
+  // `SET LOCAL app.tenant_id = $1` nao compila, e dai viria a injecao.
+  await tx.$executeRaw`SELECT set_config(${TENANT_SETTING}, ${id}, true)`;
+}
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
@@ -106,15 +134,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     tenantId: string,
     fn: (tx: Prisma.TransactionClient) => Promise<T>,
   ): Promise<T> {
-    const id = validarTenantId(tenantId);
-
     return this.$transaction(
       async (tx) => {
-        // Parametrizado, e nao interpolado. `set_config` e funcao, entao aceita
-        // parametro no protocolo estendido; `SET LOCAL app.tenant_id = $1` nao
-        // compila, o que obrigaria a concatenar o id na string. E dai viria a
-        // injecao.
-        await tx.$executeRaw`SELECT set_config(${TENANT_SETTING}, ${id}, true)`;
+        await declararTenant(tx, tenantId);
         return fn(tx);
       },
       { maxWait: TX_MAX_WAIT_MS, timeout: TX_TIMEOUT_MS },
