@@ -10,20 +10,38 @@ Cada uma traz a pergunta real, a tensão que a criou, as opções com consequên
 
 ## Resumo
 
-| # | Decisão | Bloqueia | Urgência | Reversível? |
-|---|---|---|---|---|
-| **D1** | Privacidade do link social | Fase 3 → PDF (eixo comercial v0.2) | **Alta — prazo não é seu** | Sim, antes de coletar |
-| **D2** | Isolamento na leitura: RLS ou Prisma | — | ✅ **decidida e executada em 27/08** | — |
-| **D3** | Quarentena sem store | Nada | Baixa — só ratificar | Sim |
-| **D4** | `AuditLog` vs. LGPD art. 18 VI | Nada hoje | Média — antes de ter volume | Caro depois |
-| **D5** | ADR-004 Parte 2 | Nada | **Bloqueada** — produção não existe | — |
-| **D6** | Retenção das medições | Nada | Baixa | Sim |
+| # | Decisão | Situação |
+|---|---|---|
+| **D1** | Privacidade do link social | ✅ **decidida em 27/08** — coleta estrita agora, classificação pelo tenant depois |
+| **D2** | Isolamento na leitura: RLS ou Prisma | ✅ **decidida e executada em 27/08** |
+| **D3** | Quarentena sem store | ✅ **ratificada em 27/08** |
+| **D4** | `AuditLog` vs. LGPD art. 18 VI | ✅ **decidida em 27/08** — pseudonimizar o ator |
+| **D5** | ADR-004 Parte 2 | ⛔ **bloqueada** — produção não existe |
+| **D6** | Retenção das medições | ✅ **decidida em 27/08** — 180 dias, e virou fatia de trabalho |
 
-**A leitura que importa:** só a **D1** tem relógio próprio, e ela está aberta desde 24/08 — três dias em que o relógio de quem dá o parecer nem começou a correr. D3 e D6 são ratificação de minutos. D5 não pode ser respondida. D4 é a que custa caro se decidida errado, e é da mesma conversa que a D1.
+**As cinco que podiam ser respondidas foram.** Restam consequências, não decisões: a D1 gera trabalho em duas etapas, a D4 gera uma migration, e a D6 virou uma fatia com quatro peças. A D5 continua esperando o primeiro deploy, e isso está correto.
+
+**O parecer jurídico da D1 e da D4 continua valendo a pena** — só não bloqueia mais nada. O desenho escolhido nas duas reduz exposição e sobrevive a qualquer resposta: se o parecer afrouxar, afrouxa-se; se apertar, a `observedUrl` diz exatamente quais linhas apagar.
 
 ---
 
-## D1 — O link de rede social é dado comercial ou pessoal?
+## D1 — O link de rede social é dado comercial ou pessoal? · ✅ decidida
+
+> **Resolvida em 27/08.** Classificação aceita: **perfil de pessoa física é dado pessoal; de pessoa jurídica não é.** Mas o sistema **não consegue distinguir os dois**, e isso não é limitação de esforço — é medição:
+>
+> - o nome não diz (`dra.maria.silva` pode ser o handle oficial da clínica);
+> - o Gate 0 mediu que o Instagram serve a **mesma página de login** para perfil existente e inexistente — 623.282 bytes contra 623.778. Sem autenticar não dá para confirmar nem que o perfil existe, muito menos ler se é conta comercial;
+> - olhar o conteúdo do perfil para classificar já seria processar o dado em questão.
+>
+> Então a regra **não vira um `if`**. O que se decidiu foi separar **coletar** de **usar**:
+>
+> **Etapa 1 — agora, sem interface.** Coleta apenas a URL e a página de origem (`observedUrl`). Nada de nome, foto, seguidores ou bio. **Não pontua no score.** O link fica visível só para o tenant, marcado `NAO_CLASSIFICADO`, e não sai do workspace.
+>
+> **Etapa 2 — quando a tela existir.** O tenant classifica: comercial, pessoal, ou não sei. **Só `comercial` entra no relatório entregue.** Os outros dois continuam visíveis para ele e ficam de fora do artefato que sai.
+>
+> **Por que assim:** não bloqueia a Fase 3 nem o PDF, que era a urgência inteira desta decisão; põe o julgamento humano onde ele muda o resultado, em vez de pedir classificação para depois não usar; e o padrão é o lado seguro — não classificado nunca sai. É a regra 4 aplicada à privacidade: o silêncio erra para o lado certo.
+>
+> **O enum `SiteCheck` só ganha os valores novos com esta decisão escrita.** Enquanto não estivesse, o bloqueio era código e não intenção — agora está, e os valores podem entrar.
 
 ### A pergunta
 
@@ -110,7 +128,9 @@ Antes de S8 e S9 de F0 — os testes de isolamento na leitura mudam de forma con
 
 ---
 
-## D3 — Quarentena sem store · ratificação
+## D3 — Quarentena sem store · ✅ ratificada em 27/08
+
+> Mantida como está: sem armazenamento de payload suspeito, detecção de desvio por assinatura de forma calculada **depois** da sanitização.
 
 ### A pergunta
 
@@ -128,7 +148,25 @@ O que ficou no lugar: detecção de desvio por **assinatura de forma**, calculad
 
 ---
 
-## D4 — `AuditLog` append-only vs. direito à eliminação
+## D4 — `AuditLog` append-only vs. direito à eliminação · ✅ decidida
+
+> **Resolvida em 27/08: pseudonimizar o ator.** O `userId` vira uma lápide irreversível; o evento, a data e o efeito permanecem.
+>
+> **O argumento que decidiu é o escopo.** O `AuditLog` guarda id de **membros da equipe do cliente**, não de leads — dado de terceiro mora em `leads`, e a regra 6 já cuida dele. O que se perde apagando a linha inteira é grande e concreto: é o `AuditLog` que responde "quem trocou o plano", "quem suspendeu", "quem pediu esta auditoria", em suporte, em disputa de cobrança e nos eventos de segurança. O que se perde pseudonimizando é uma coisa só — ligar uma ação antiga a uma pessoa nomeada —, que é exatamente o que ela tem direito de remover.
+>
+> ### Duas descobertas ao ir implementar
+>
+> **1. Não existe fluxo de eliminação nenhum.** O `removeMember` do `TeamService` faz *soft delete* do `Membership` (`deletedAt`), e a linha de `User` permanece intacta. Nenhum caminho do produto apaga um usuário. Ou seja, **o conflito que a D4 resolve ainda não aconteceu** — o que ela faz é decidir a forma antes de existir a pressão.
+>
+> **2. O schema já tem metade da resposta, e a metade errada.** `AuditLog.actor` está com `onDelete: SetNull`. Se um dia alguém apagar um `User`, o `actorId` vira NULL sozinho: o registro sobrevive e **a identidade some por inteiro** — inclusive a capacidade de agrupar "todas as ações daquela mesma pessoa removida", que é o que importa ao investigar um incidente depois que ela saiu.
+>
+> ### A forma escolhida
+>
+> Coluna `actorPseudonym` na `AuditLog`. Na eliminação, um rótulo **aleatório** é gerado uma vez por pessoa, escrito em todas as linhas dela, e o `actorId` é anulado. Aleatório porque é irreversível por construção — não há hash a quebrar; estável porque é escrito de uma vez em todas as linhas, então o agrupamento sobrevive.
+>
+> **Onde `SetNull` basta, `SetNull` fica.** `Lead.notes.authorId`, `LeadContactRecord.authorId`, `PipelineCard.ownerId`, `DigitalPresenceAudit.requestedById` — nenhum deles é append-only, e apagar o vínculo ali não destrói propriedade nenhuma. A lápide existe só onde o registro perderia o sentido sem ela.
+>
+> **O gatilho fica em aberto**, e é decisão de produto, não de código: quem pode pedir a eliminação, como se confirma, e se o pedido apaga o `User` ou só o desliga.
 
 ### A pergunta
 
@@ -176,7 +214,27 @@ Foi justamente isso que destravou o F0: a Parte 1 do ADR (`FETCHER_MODE=inline`,
 
 ---
 
-## D6 — Retenção das medições · nasceu hoje
+## D6 — Retenção das medições · ✅ decidida em 27/08, e virou fatia de trabalho
+
+> **180 dias confirmados.** Mas a decisão veio com três pedidos que não são configuração — são produto. E ao ir escrevê-los apareceu uma quarta peça, que faltava:
+>
+> **Hoje o `retentionUntil` é decorativo.** Ele é gravado em toda checagem e **nada o lê**. Não existe rotina de expurgo. Os 180 dias são uma promessa que ninguém cumpre — pior que não ter prazo, porque o campo dá a impressão de que há controle.
+>
+> ### As quatro peças
+>
+> **1. Mostrar o prazo.** `retentionUntil` na resposta de `GET /audits/:id`, e a tela diz até quando as medições ficam disponíveis. Uma linha na API, uma na interface.
+>
+> **2. Exportar.** `GET /audits/:id/export`, auditoria e checagens em CSV ou JSON. **O PDF não serve para isto** — ele é Fase 3 e depende da D1. O export cru serve hoje e usa o mesmo argumento de portabilidade que mantém o `GET /leads/export` liberado mesmo sob suspensão (§10.4).
+>
+> **3. Avisar antes — 15 dias, pela tabela `Notification`**, que já existe com serviço próprio, gerado por um job diário no worker. E-mail fica para quando houver mecanismo de envio; propor agora seria propor infraestrutura inexistente.
+>
+> Por que 15: perto o bastante para a pessoa agir, longe o bastante para caber um fim de semana. Trinta vira ruído que ninguém lê; sete não sobrevive a férias.
+>
+> **4. Apagar — e só depois de ter avisado.**
+>
+> Esta é a peça que dá sentido às outras três. **O expurgo não apaga checagem cuja notificação não foi registrada — ele adia.** Sem essa trava, um defeito no notificador vira perda silenciosa de dado: o cliente descobre que o relatório sumiu no dia em que foi procurá-lo, e nós descobrimos junto com ele.
+>
+> É a mesma forma do `decidirExecucao` do worker: a ação destrutiva exige **prova** de que a condição anterior aconteceu, não confiança de que aconteceu.
 
 ### A pergunta
 
@@ -212,5 +270,20 @@ Manter **180 dias** até haver dado de uso real, e revisitar quando existir hist
    → Nada feito, como planejado.
 
 **A ordem não mudou, e o item 1 subiu de importância pelo simples fato de ter esperado.** O trabalho de engenharia avançou cinco passos enquanto a única decisão com prazo externo ficou parada — o que é exatamente o padrão que faz uma fase inteira travar no fim, por um parecer que podia ter sido pedido na primeira semana.
+
+---
+
+## Fechamento — 27/08/2026
+
+Cinco das seis decidas no mesmo dia, e a lição das duas primeiras horas de conversa vale registrar: **nenhuma delas era difícil.** O que as segurava era não estarem formuladas com as consequências à vista.
+
+A D1 destravou quando parou de ser "isto é dado pessoal?" e virou "coletar e usar são momentos diferentes". A D4 destravou quando o escopo apareceu — são membros da equipe do cliente, não leads. A D6 parecia ratificação de um minuto e revelou que o campo de retenção não era lido por ninguém.
+
+**Duas foram além do que a pergunta pedia**, e as duas viraram trabalho:
+
+- a **D1** virou duas etapas de implementação, e desbloqueou o enum `SiteCheck`;
+- a **D6** virou uma fatia de quatro peças, incluindo a rotina de expurgo que não existia.
+
+O que continua aberto não é decisão: é o **parecer jurídico** da D1 e da D4, que vale pedir e não bloqueia mais nada, e a **D5**, que espera o primeiro deploy.
 
 `F:\drmind` não foi modificado.
