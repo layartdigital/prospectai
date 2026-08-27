@@ -1435,6 +1435,22 @@ model AuditLog {
   id         String   @id @default(cuid())
   tenantId   String?
   actorId    String?
+  /// Lápide do ator eliminado — decisão D4.
+  ///
+  /// O `AuditLog` é append-only por integridade, e o art. 18 VI da LGPD dá ao
+  /// titular o direito à eliminação. As duas coisas convivem assim: o
+  /// identificador sai, o evento fica.
+  ///
+  /// **O rótulo é aleatório, não derivado.** Um hash do `userId` seria
+  /// reversível por força bruta contra a tabela de usuários; um valor sorteado
+  /// não tem o que quebrar. E é escrito de uma vez em todas as linhas da
+  /// pessoa, o que preserva a única propriedade que importa depois dela sair:
+  /// agrupar tudo o que aquele mesmo ator fez.
+  ///
+  /// Só existe aqui. Em `notes.authorId`, `contactRecords.authorId`,
+  /// `pipelineCard.ownerId` e `requestedById` o `SetNull` basta — nenhum deles
+  /// é append-only, e apagar o vínculo ali não destrói propriedade nenhuma.
+  actorPseudonym String?
   action     String
   entityType String
   entityId   String?

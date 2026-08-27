@@ -13,6 +13,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { OutreachModule } from './outreach/outreach.module';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { PrivacyModule } from './privacy/privacy.module';
 import { ProposalsModule } from './proposals/proposals.module';
 import { ProspectingModule } from './prospecting/prospecting.module';
 import { RedisModule } from './redis/redis.module';
@@ -40,6 +41,7 @@ import { TeamModule } from './team/team.module';
     NotificationsModule,
     OutreachModule,
     PipelineModule,
+    PrivacyModule,
     ProposalsModule,
     ProspectingModule,
     SegmentsModule,

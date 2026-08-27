@@ -9,7 +9,7 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ### O RLS ligado, e o teste que passou a mentir menos · 27/08/2026
 
-Migrations `20260826230000_rls_papeis` e `20260827140000_rls_canario_auditoria`. Passos 1 a 5 do `PLANO-RLS-v1.md`. **321 testes** — 48 nos tipos, 71 na API e 202 no worker — mais 7 pausados, da família Pipeline que subiu e desceu no mesmo dia.
+Migrations `20260826230000_rls_papeis`, `20260827140000_rls_canario_auditoria` e `20260827192121_f4_auditlog_pseudonimo`. Passos 1 a 5 do `PLANO-RLS-v1.md`, e cinco das seis decisões de produto fechadas. **326 testes** — 48 nos tipos, 76 na API e 202 no worker — mais 7 pausados, da família Pipeline que subiu e desceu no mesmo dia.
 
 **O isolamento de `digital_presence_audits` e `digital_presence_checks` deixou de depender do código.** Um `where` esquecido, um `$queryRaw` descuidado ou um id de outro tenant não alcançam mais nada: o banco recusa.
 
@@ -247,6 +247,34 @@ O `comTenant` do `pipeline.service.ts` ficou. Com a política desligada ele é n
 `pnpm test` passou 321 com o `typecheck:all` falhando — `TS2339` numa desestruturação de índice sob `noUncheckedIndexedAccess`, no teste novo. O vitest transpila sem checar tipos, então as duas coisas eram verdade ao mesmo tempo: o comportamento estava certo e o tipo estava errado.
 
 A recomendação de rodar `typecheck:all` antes de `test` em CI está registrada desde 24/08 e continua sem dono. Sete ocorrências é o argumento.
+
+#### Cinco decisões de produto fechadas, e duas viraram trabalho
+
+D1, D3, D4 e D6 respondidas — a D2 já tinha sido decidida e executada mais cedo. Restou a D5, que continua bloqueada por ausência de produção, e isso está correto.
+
+**Nenhuma delas era difícil.** O que as segurava era não estarem formuladas com as consequências à vista.
+
+**A D1 destravou quando parou de ser "isto é dado pessoal?".** A classificação aceita é que perfil de pessoa física é dado pessoal e de jurídica não — mas o sistema **não consegue distinguir os dois**, e isso é medição, não falta de esforço: o nome não diz, o Gate 0 provou que o Instagram serve a mesma página de login para perfil existente e inexistente (623.282 bytes contra 623.778), e olhar o conteúdo para classificar já seria processar o dado em questão.
+
+A saída foi separar **coletar** de **usar**. Coleta estrita agora, sem interface: só a URL, a página de origem, sem pontuar no score, visível apenas para o tenant e marcada `NAO_CLASSIFICADO`. Classificação pelo tenant depois, e **só `comercial` entra no relatório entregue**. Não bloqueia a Fase 3, põe o julgamento humano onde ele muda o resultado, e o padrão é o lado seguro — é a regra 4 aplicada à privacidade.
+
+**A D6 parecia ratificação de um minuto e revelou um campo morto.** Os 180 dias ficam, mas o `retentionUntil` é gravado em toda checagem e **nada o lê**. Não existe rotina de expurgo: os 180 dias são uma promessa que ninguém cumpre — pior que não ter prazo, porque o campo dá a impressão de que há controle. Virou fatia de quatro peças: mostrar o prazo, exportar antes, avisar com 15 dias pela tabela `Notification`, e **apagar só depois de ter avisado** — o expurgo adia quando não encontra o registro do aviso. Mesma forma do `decidirExecucao`: a ação destrutiva exige prova da condição anterior, não confiança nela.
+
+#### A lápide do ator, e o que o `SetNull` não fazia
+
+`AuditLog.actorPseudonym`, migration `20260827192121_f4_auditlog_pseudonimo`. Executa a D4: o identificador do ator sai, o evento fica.
+
+**Duas descobertas ao abrir o código.** A primeira: **não existe fluxo de eliminação nenhum.** O `removeMember` faz soft delete do `Membership`; a linha de `User` permanece. O conflito que a D4 resolve ainda não aconteceu — o que ela faz é decidir a forma antes de existir a pressão, que é o barato.
+
+A segunda: **o schema já tinha metade da resposta, na versão errada.** `AuditLog.actor` está com `onDelete: SetNull`. Apagar um `User` anularia o `actorId` sozinho e o registro sobreviveria — mas a identidade sumiria **por inteiro**, junto com a capacidade de responder "o que aquela mesma pessoa fez antes de sair". É a pergunta de quem investiga um incidente depois, e é a única das três propriedades que o `SetNull` não entrega. Por isso a coluna existe: sem essa terceira, `SetNull` bastaria.
+
+**O rótulo é sorteado, não derivado.** Um hash do `userId` seria reversível por força bruta contra a tabela de usuários — o espaço de busca é o número de contas, não 2^256. Escrito de uma vez em todas as linhas da pessoa, é o que mantém o agrupamento vivo.
+
+E onde `SetNull` basta, `SetNull` fica: `notes.authorId`, `contactRecords.authorId`, `pipelineCard.ownerId`, `requestedById`. Nenhum é append-only. A lápide existe só onde o registro perderia o sentido sem ela.
+
+**Três omissões deliberadas**, todas anotadas no código: o módulo não tem controller, porque a D4 fechou a forma e não o gatilho — expor rota agora seria inventar um fluxo de exclusão que ninguém especificou; o serviço não é escopado por tenant, e é o único assim, porque o pedido é da pessoa e não de um workspace; e o log da operação registra o pseudônimo e a contagem, **nunca o `userId`** — registrar o id ali recriaria, no arquivo de log, exatamente o vínculo que a operação existe para desfazer.
+
+**E uma dívida com o passo 6:** quando a família 7 puser política em `audit_logs`, esta operação passa a enxergar zero linhas com o papel da aplicação, porque atravessa tenants por desenho. Vai precisar do mesmo `propectai_admin` que o painel administrativo já exige. Está escrito no serviço — o que não pode acontecer é descobrir isso quando o método devolver `linhas: 0` sem erro.
 
 ---
 
