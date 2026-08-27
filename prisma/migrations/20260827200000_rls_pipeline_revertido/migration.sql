@@ -1,0 +1,51 @@
+-- Reverte a `20260827180000_rls_familia_pipeline`.
+--
+-- **Motivo:** a familia foi ligada com a varredura de chamadores incompleta.
+-- Tres modulos escrevem nas tabelas de pipeline — `auth.service.ts` (etapas
+-- padrao no registro), `pipeline.service.ts` e `leads.service.ts` —, e so o
+-- segundo tinha sido convertido. O registro passou a responder 500 e derrubou
+-- 45 testes da API.
+--
+-- O `findOne` do `leads.service.ts` era pior que isso e nao apareceu em teste
+-- nenhum: ele traz o card por `include` aninhado, e sob a politica sem contexto
+-- o card volta **null**, sem erro. A tela do lead mostraria "sem etapa" para
+-- todos.
+--
+-- ---
+--
+-- **`DISABLE`, e nao `NO FORCE`.**
+--
+-- A migration do canario e o `PLANO-RLS-v1.md` dizem que o revert e
+-- `ALTER TABLE ... NO FORCE ROW LEVEL SECURITY`. **Esta errado, e vale para o
+-- canario tambem.** `FORCE` so estende a politica ao *dono* da tabela; o
+-- `propectai_app` nao e dono, entao `ENABLE` sozinho ja o alcanca, e tirar o
+-- `FORCE` nao devolve acesso nenhum a ele.
+--
+-- O que realmente reverte e `DISABLE ROW LEVEL SECURITY` — ou apagar a linha
+-- `DATABASE_URL_APP` do `.env`, que devolve a aplicacao ao dono superusuario.
+-- Essa segunda continua valendo.
+--
+-- ---
+--
+-- **As politicas ficam definidas, e inertes.** `DISABLE` desliga a aplicacao
+-- delas sem apaga-las: quando a familia voltar, o `ENABLE` + `FORCE` basta, e o
+-- texto da politica nao precisa ser reescrito nem revisado de novo.
+
+ALTER TABLE "pipeline_stages"      DISABLE ROW LEVEL SECURITY;
+ALTER TABLE "pipeline_cards"       DISABLE ROW LEVEL SECURITY;
+ALTER TABLE "pipeline_transitions" DISABLE ROW LEVEL SECURITY;
+
+-- O que precisa acontecer antes de religar, na ordem:
+--
+--   1. `comTenant` em TODOS os chamadores — `auth.service.ts` inclusive, onde o
+--      contexto precisa ser declarado no meio da transacao de registro, porque
+--      o tenant nasce ali dentro.
+--   2. `leads.service.ts`: `filtros`, `findOne` e `changeStage`.
+--   3. So entao `ENABLE` + `FORCE` de novo, e o `rls-pipeline.spec.ts` sai do
+--      `skip`.
+--
+-- E a licao que muda o `PLANO-RLS-PASSO6-v1.md`: **envolver os chamadores e
+-- ligar a politica sao duas etapas, nao uma.** A primeira e neutra em
+-- comportamento (medido no passo 3) e pode varrer o codigo inteiro em varios
+-- commits seguros. A segunda so fica independente por familia depois que a
+-- primeira terminou.

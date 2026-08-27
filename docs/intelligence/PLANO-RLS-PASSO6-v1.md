@@ -59,7 +59,7 @@ O conserto é o mesmo padrão em qualquer serviço compartilhado: **receber o `t
 | # | família | tabelas | quem escreve | estado |
 |---|---|---|---|---|
 | 1 | Auditoria | 2 | `AuditsService`, `processAuditJob` | ✅ feito |
-| 2 | Pipeline | 3 | `PipelineService` | **próxima** |
+| 2 | Pipeline | 3 | `PipelineService`, **`AuthService`, `LeadsService`** | ⏸ revertida — ver acima |
 | 3 | Coleta | 2 | `processScrapeJob`, `ProspectingService` | |
 | 4 | Atividade do lead | 6 | `LeadsService`, `OutreachService` | |
 | 5 | Leads núcleo | 7 | `LeadsService`, `processScrapeJob` | |
@@ -77,17 +77,38 @@ E há um motivo extra: a família Pipeline já estava na lista de pendências po
 
 ---
 
-## A receita por família
+## Correção de 27/08: envolver e ligar são duas fases, não uma
 
-Cinco passos, iguais para todas. O canário é o gabarito.
+**A primeira tentativa da família Pipeline foi revertida no mesmo dia.** Vale escrever por quê, porque o erro estava neste documento e não na execução.
 
-1. **Varrer os chamadores.** Quem toca essas tabelas, e quem chama serviço compartilhado de dentro do bloco. `$queryRaw`/`$executeRaw` incluídos.
-2. **`comTenant` nos serviços**, envolvendo o escopo mais amplo que fizer sentido — nunca consulta a consulta, e nunca com I/O externo dentro.
-3. **Fixtures para o `criarPrismaAdmin()`** nos specs que tocam essas tabelas. É o trabalho que o passo 2 recortou para dois arquivos, e ele volta aqui, uma família por vez.
-4. **Migration**: `ENABLE` + `FORCE` + `acesso_base` permissiva + `tenant_isolamento` restritiva, com `USING` e `WITH CHECK`.
-5. **Teste de isolamento** no molde do `rls-canario.spec.ts`: `current_user` como pré-condição, leitura sem contexto devolvendo zero **com denominador**, leitura cruzada devolvendo zero, e `WITH CHECK` recusando escrita no vizinho.
+O plano dizia "uma família por vez", e família era definida por **tabela**. Mas os chamadores atravessam famílias: as três tabelas de pipeline são escritas por **três módulos** — `pipeline.service.ts`, `auth.service.ts` (que cria as etapas padrão no registro) e `leads.service.ts` (que tem *sete* usos, mais que o próprio módulo Pipeline). Converti um dos três e liguei a política. O registro passou a responder 500 e 45 testes caíram.
 
-**A ordem entre 3 e 4 não é negociável.** Ligar a política antes de mover as fixtures quebra tudo de uma vez, e aí não se sabe se o problema é a política ou o cenário.
+**O módulo com o nome da tabela não é o dono dela.** Num monólito modular, a fronteira de módulo não é a fronteira de dado.
+
+Pior que a quebra barulhenta: o `findOne` do `leads.service.ts` traz o card por `include` aninhado. Sob a política sem contexto, o card volta **null** — sem erro, sem teste falhando, com a tela do lead mostrando "sem etapa" para todos.
+
+### A ordem certa
+
+**Fase A — envolver todos os chamadores, com as políticas desligadas.**
+Neutra em comportamento; medido no passo 3. Pode varrer o código inteiro em vários commits, cada um verificável, nenhum arriscado. Termina quando `grep` por delegate de tabela com `tenantId` não achar mais nada fora de um `comTenant`.
+
+**Fase B — ligar as políticas, uma família por vez.**
+Só aqui a decomposição por tabela volta a fazer sentido, porque não sobra chamador para descobrir.
+
+Eu generalizei o canário de uma amostra de dois: aquelas duas tabelas tinham exatamente dois chamadores, e eu conhecia os dois.
+
+---
+
+## A receita por família (fase B)
+
+1. **Varrer os chamadores** — `grep` pelo delegate em **todo** `apps/*/src`, não no módulo de mesmo nome. `$queryRaw`/`$executeRaw` incluídos. Conferir que todos já estão em `comTenant` pela fase A.
+2. **Fixtures para o `criarPrismaAdmin()`** nos specs que tocam essas tabelas.
+3. **Migration**: `ENABLE` + `FORCE` + `acesso_base` permissiva + `tenant_isolamento` restritiva, com `USING` e `WITH CHECK`.
+4. **Teste de isolamento** no molde do `rls-canario.spec.ts`: `current_user` como pré-condição, leitura sem contexto devolvendo zero **com denominador**, leitura cruzada devolvendo zero, e `WITH CHECK` recusando escrita no vizinho.
+
+**A ordem entre 2 e 3 não é negociável.** Ligar a política antes de mover as fixtures quebra tudo de uma vez, e aí não se sabe se o problema é a política ou o cenário.
+
+**E reverter é `DISABLE ROW LEVEL SECURITY`, não `NO FORCE`** — ver a correção no `PLANO-RLS-v1.md`.
 
 ---
 

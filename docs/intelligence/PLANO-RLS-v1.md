@@ -135,7 +135,20 @@ Com (b), quem esquece de embrulhar recebe **zero linhas**, que é ruidoso e loca
 → O que o canário deixou pronto para esta etapa, e que não estava previsto aqui: a **regra de escopo** medida no passo 3 (o custo é por chamada de `comTenant`, não por requisição — telas de listagem e dashboard precisam ser envolvidas de uma vez), e o trabalho de fixtures que o passo 2 recortou para dois arquivos. Os outros specs com banco entram aqui, junto com as tabelas que eles tocam.
 → E o `EntitlementsService`, que usa o próprio client e portanto fica fora do `tx` de quem o chama. Sem efeito hoje — `plan_usage` e `subscriptions` não estão no canário —, e é a primeira coisa a resolver quando entrarem.
 
-Os passos 1 a 3 não mudam comportamento. O passo 4 é o único com risco, e ele reverte apagando a linha `DATABASE_URL_APP` do `.env` — sem tocar no banco. O `ALTER TABLE ... NO FORCE` continua disponível, mas deixou de ser o primeiro recurso.
+Os passos 1 a 3 não mudam comportamento. O passo 4 é o único com risco, e ele reverte apagando a linha `DATABASE_URL_APP` do `.env` — sem tocar no banco.
+
+### Correção: `NO FORCE` **não** reverte. `DISABLE` reverte.
+
+Este documento e o comentário da migration do canário dizem que o passo 4 se desfaz com `ALTER TABLE ... NO FORCE ROW LEVEL SECURITY`. **É falso**, e só apareceu em 27/08, ao ter de reverter a família Pipeline de verdade.
+
+`FORCE` estende a política ao **dono** da tabela. O `propectai_app` não é dono — por decisão do passo 1, e é a mesma decisão que este erro atravessa. Para ele, `ENABLE` sozinho já basta, e tirar o `FORCE` não devolve acesso nenhum.
+
+As duas reversões que funcionam:
+
+- `ALTER TABLE ... DISABLE ROW LEVEL SECURITY` — desliga a aplicação da política sem apagá-la. As políticas ficam definidas e inertes, e religar é `ENABLE` + `FORCE` sem reescrever nada.
+- Apagar a linha `DATABASE_URL_APP` do `.env` — a aplicação volta a conectar como o dono superusuário, que ignora RLS. Essa parte do texto sempre esteve certa.
+
+O comentário da migration `20260827140000_rls_canario_auditoria` continua com a versão errada e assim fica: ela está aplicada, e editar o arquivo quebra o checksum. Mesmo caso da migration de papéis, e o mesmo remédio — a correção mora aqui.
 
 ---
 

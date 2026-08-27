@@ -9,7 +9,7 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ### O RLS ligado, e o teste que passou a mentir menos · 27/08/2026
 
-Migrations `20260826230000_rls_papeis` e `20260827140000_rls_canario_auditoria`. Passos 1 a 5 do `PLANO-RLS-v1.md`. **321 testes**, 48 nos tipos, 71 na API e 202 no worker.
+Migrations `20260826230000_rls_papeis` e `20260827140000_rls_canario_auditoria`. Passos 1 a 5 do `PLANO-RLS-v1.md`. **321 testes** — 48 nos tipos, 71 na API e 202 no worker — mais 7 pausados, da família Pipeline que subiu e desceu no mesmo dia.
 
 **O isolamento de `digital_presence_audits` e `digital_presence_checks` deixou de depender do código.** Um `where` esquecido, um `$queryRaw` descuidado ou um id de outro tenant não alcançam mais nada: o banco recusa.
 
@@ -217,6 +217,30 @@ O conserto tem duas partes:
 - **Denominador na contagem.** Conta o total real como superusuário antes de assumir o papel da aplicação. `total > 0` com `visíveis = 0` prova; `total = 0` **declara que não prova**, em vez de deixar o leitor concluir sozinho.
 
 O padrão é o mesmo das outras duas vezes: um número correto respondendo a pergunta errada. Aqui a pergunta certa não era "quantas linhas vejo?", era "comparado a quantas existem?".
+
+#### A família Pipeline foi ligada e revertida no mesmo dia
+
+Migrations `20260827180000_rls_familia_pipeline` e `20260827200000_rls_pipeline_revertido`. O segundo commit desfaz o primeiro em quarenta minutos, e o que ele deixa é mais útil que o que ele tirou.
+
+**Varri o módulo, não o dado.** Conferi que nenhum spec tocava as tabelas de pipeline, conferi o worker, converti o `pipeline.service.ts` e liguei a política. Três módulos escrevem nessas tabelas:
+
+```
+auth/auth.service.ts        1   ← cria as etapas padrão no registro
+pipeline/pipeline.service.ts 5
+leads/leads.service.ts       7   ← mais que o próprio módulo Pipeline
+```
+
+`POST /auth/register` passou a responder 500 e derrubou 45 testes da API.
+
+**E eu tinha o número na mão.** Rodei uma contagem de usos por modelo antes de começar; ela dizia **4 `PipelineStage`**, e o `pipeline.service.ts` tem 2. Li "4, é pouco" em vez de "onde estão os outros 2". Mesmo padrão da verificação tautológica de mais cedo: um número correto respondendo à pergunta errada.
+
+**O que quebrou foi a parte barulhenta, e ela não era a pior.** O `findOne` do `leads.service.ts` traz o card do pipeline por `include` aninhado — sob a política sem contexto, ele volta **null**, sem erro. A tela do lead mostraria "sem etapa" para todo mundo, e nenhum teste falharia, porque nenhum teste chegou lá. A falha alta foi sorte de ordenação.
+
+**A lição corrige o plano do passo 6**: envolver os chamadores e ligar a política são **duas fases**, não uma. Envolver é neutro em comportamento — medido no passo 3 — e pode varrer o código inteiro em commits seguros. Só depois disso a decomposição por família volta a fazer sentido, porque não sobra chamador para descobrir. Generalizei o canário de uma amostra de dois: aquelas duas tabelas tinham exatamente dois chamadores, e eu conhecia os dois.
+
+**E o revert descobriu que o revert documentado não funcionava.** A migration do canário e o `PLANO-RLS-v1.md` dizem que se desfaz com `ALTER TABLE ... NO FORCE`. É falso: `FORCE` estende a política ao **dono**, e o `propectai_app` não é dono — por decisão do passo 1. Para ele, `ENABLE` sozinho já basta. O que reverte é `DISABLE ROW LEVEL SECURITY`, ou apagar o `DATABASE_URL_APP` do `.env`. Corrigido no plano; a migration fica como está, por causa do checksum.
+
+O `comTenant` do `pipeline.service.ts` ficou. Com a política desligada ele é neutro, e é um terço da fase A já feito. O `rls-pipeline.spec.ts` ficou também, pausado numa chave só — teste apagado é teste esquecido, teste pulado aparece na contagem de toda execução.
 
 #### E o typecheck vermelho com a suíte verde, pela sétima vez
 
