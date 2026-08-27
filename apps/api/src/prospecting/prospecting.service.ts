@@ -135,53 +135,121 @@ export class ProspectingService implements OnModuleDestroy {
       .digest('hex')
       .slice(0, 32);
 
-    const existing = await this.prisma.scrapeJob.findUnique({
-      where: { tenantId_idempotencyKey: { tenantId, idempotencyKey } },
-    });
+    const existing = await this.prisma.comTenant(tenantId, (tx) =>
+      tx.scrapeJob.findUnique({
+        where: { tenantId_idempotencyKey: { tenantId, idempotencyKey } },
+      }),
+    );
 
     if (existing) {
       return { searchId: existing.searchId, jobId: existing.id };
     }
 
-    const search = await this.prisma.prospectingSearch.create({
-      data: {
-        tenantId,
-        createdById: userId,
-        niche: dto.niche,
-        stateUf: dto.stateUf.toUpperCase(),
-        city: dto.city,
-        neighborhood: dto.neighborhood ?? null,
-        radiusKm: dto.radiusKm ?? 10,
-        requestedCount: requested,
-        // Só quando o nicho veio de sugestão. O worker usa isto ao concluir o
-        // job para decidir se o termo sugerido se comprovou naquele país.
-        segmentLocaleId: dto.segmentLocaleId ?? null,
-      },
-    });
+    /**
+     * O `periodStart` sai daqui de propósito.
+     *
+     * Antes ele era calculado **dentro** do `where` do `planUsage.update`, com
+     * um `await this.entitlements.currentUsage(...)` embutido na cláusula. O
+     * `EntitlementsService` usa o próprio client, então essa chamada nunca
+     * estaria dentro do bloco de qualquer forma — deixá-la ali só escondia isso.
+     */
+    const { periodStart } = await this.entitlements.currentUsage(tenantId);
 
-    const job = await this.prisma.scrapeJob.create({
-      data: {
-        tenantId,
-        searchId: search.id,
-        status: 'QUEUED',
-        idempotencyKey,
-        keyword,
-        queuedAt: new Date(),
-      },
-    });
+    /**
+     * Busca, job, reserva de cota e registro — num bloco só.
+     *
+     * Eram quatro escritas soltas: se a reserva de cota falhasse, a busca e o
+     * job já estavam gravados e o cliente ficava com uma busca que nunca cobrou
+     * e nunca rodaria direito. Agora vivem ou morrem juntas.
+     *
+     * O `queue.add` fica **fora**, depois do commit: Redis não entra em
+     * transação do Postgres. A ordem — grava, depois publica — é a mesma de
+     * antes e a mesma do `AuditsService`.
+     */
+    let search: { id: string };
+    let job: { id: string };
 
-    await this.prisma.planUsage.update({
-      where: {
-        tenantId_periodStart: {
-          tenantId,
-          periodStart: (await this.entitlements.currentUsage(tenantId)).periodStart,
-        },
-      },
-      data: {
-        leadsReserved: { increment: requested },
-        searchesCount: { increment: 1 },
-      },
-    });
+    try {
+      ({ search, job } = await this.prisma.comTenant(tenantId, async (tx) => {
+        const search = await tx.prospectingSearch.create({
+          data: {
+            tenantId,
+            createdById: userId,
+            niche: dto.niche,
+            stateUf: dto.stateUf.toUpperCase(),
+            city: dto.city,
+            neighborhood: dto.neighborhood ?? null,
+            radiusKm: dto.radiusKm ?? 10,
+            requestedCount: requested,
+            // Só quando o nicho veio de sugestão. O worker usa isto ao concluir o
+            // job para decidir se o termo sugerido se comprovou naquele país.
+            segmentLocaleId: dto.segmentLocaleId ?? null,
+          },
+        });
+
+        const job = await tx.scrapeJob.create({
+          data: {
+            tenantId,
+            searchId: search.id,
+            status: 'QUEUED',
+            idempotencyKey,
+            keyword,
+            queuedAt: new Date(),
+          },
+        });
+
+        await tx.planUsage.update({
+          where: { tenantId_periodStart: { tenantId, periodStart } },
+          data: {
+            leadsReserved: { increment: requested },
+            searchesCount: { increment: 1 },
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            tenantId,
+            actorId: userId,
+            action: 'prospecting.search.created',
+            entityType: 'ProspectingSearch',
+            entityId: search.id,
+            after: { keyword, requested },
+          },
+        });
+
+        return { search, job };
+      }));
+    } catch (erro) {
+      /**
+       * **Corrida perdida na chave de idempotência.**
+       *
+       * A conferência lá em cima não fecha a janela: entre ler e escrever cabe
+       * outro pedido idêntico, e o único árbitro confiável é o índice único
+       * `(tenantId, idempotencyKey)`. Sem este `catch`, dois cliques simultâneos
+       * na mesma busca faziam o segundo estourar `P2002` sem tratamento — **500
+       * na cara do usuário**, por uma busca que já existia.
+       *
+       * Mesmo defeito que o `AuditsService` tinha e que foi consertado em
+       * 25/08. Aqui ele sobreviveu porque ninguém tinha olhado.
+       *
+       * **A cota não é cobrada duas vezes**: a reserva acontece dentro da
+       * transação que o `P2002` aborta, então ela volta atrás junto.
+       *
+       * A leitura de recuperação abre **outra** transação de propósito — a
+       * anterior morreu com o erro, e o Postgres recusa qualquer comando numa
+       * transação abortada.
+       */
+      if ((erro as { code?: string }).code !== 'P2002') throw erro;
+
+      const existente = await this.prisma.comTenant(tenantId, (tx) =>
+        tx.scrapeJob.findFirstOrThrow({
+          where: { tenantId, idempotencyKey },
+          select: { id: true, searchId: true },
+        }),
+      );
+
+      return { searchId: existente.searchId, jobId: existente.id };
+    }
 
     await this.queue.add(
       'scrape',
@@ -196,25 +264,16 @@ export class ProspectingService implements OnModuleDestroy {
       { jobId: job.id },
     );
 
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId,
-        actorId: userId,
-        action: 'prospecting.search.created',
-        entityType: 'ProspectingSearch',
-        entityId: search.id,
-        after: { keyword, requested },
-      },
-    });
-
     return { searchId: search.id, jobId: job.id };
   }
 
   async status(tenantId: string, searchId: string): Promise<SearchStatusResponse> {
-    const job = await this.prisma.scrapeJob.findFirst({
-      where: { tenantId, searchId },
-      orderBy: { createdAt: 'desc' },
-    });
+    const job = await this.prisma.comTenant(tenantId, (tx) =>
+      tx.scrapeJob.findFirst({
+        where: { tenantId, searchId },
+        orderBy: { createdAt: 'desc' },
+      }),
+    );
 
     if (!job) throw new NotFoundException('Busca não encontrada');
 

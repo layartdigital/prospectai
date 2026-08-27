@@ -33,52 +33,73 @@ export class DashboardService {
       overdueFollowUps,
       searches,
       stages,
-    ] = await Promise.all([
-      this.prisma.lead.count({ where: activeLeads }),
+    ] = await this.prisma.comTenant(tenantId, (tx) =>
+      /**
+       * **Um bloco só para as doze, e a razão é medida.**
+       *
+       * Uma transacao do Prisma roda tudo numa conexao, entao envolver aqui
+       * **serializa** as doze consultas que hoje correm em paralelo. Parecia
+       * motivo para nao envolver. O `rls:bench` disse o contrario:
+       *
+       *   solto (paralelo, sem contexto)      13,3 ms p50
+       *   um bloco (1 comTenant, serial)      37,4 ms
+       *   doze blocos (12 comTenant)          52,1 ms
+       *
+       * Doze transacoes concorrentes custam mais que doze consultas em fila, e
+       * ainda disputam o pool entre si — o que piora com usuarios simultaneos,
+       * nao melhora.
+       *
+       * O preco esta registrado: esta tela sai de 13 ms para 37 ms de p50. E
+       * abre um trabalho que antes nao valia a pena — varias destas contagens
+       * sao sobre `leads` com filtros diferentes e cabem numa consulta so com
+       * agregacao condicional. Serializadas, reduzir doze para quatro compensa.
+       */
+      Promise.all([
+      tx.lead.count({ where: activeLeads }),
 
-      this.prisma.lead.count({
+      tx.lead.count({
         where: { ...activeLeads, createdAt: { gte: startOfMonth } },
       }),
 
-      this.prisma.lead.count({
+      tx.lead.count({
         where: { ...activeLeads, score: { value: { gte: 70 } } },
       }),
 
       // "Ativo" exclui as etapas terminais: fechado e perdido não estão
       // em acompanhamento, estão resolvidos.
-      this.prisma.pipelineCard.count({
+      tx.pipelineCard.count({
         where: { tenantId, stage: { isTerminal: false } },
       }),
 
-      this.prisma.leadScore.aggregate({
+      tx.leadScore.aggregate({
         where: { tenantId, lead: { deletedAt: null } },
         _avg: { value: true },
       }),
 
-      this.prisma.lead.count({
+      tx.lead.count({
         where: { ...activeLeads, websiteStatus: 'SEM_SITE' },
       }),
 
-      this.prisma.lead.count({
+      tx.lead.count({
         where: { ...activeLeads, websiteStatus: 'SITE_PRECARIO' },
       }),
 
-      this.prisma.lead.count({
+      tx.lead.count({
         where: {
           ...activeLeads,
           digitalPresence: { whatsappStatus: { in: ['LIKELY', 'VERIFIED'] } },
         },
       }),
 
-      this.prisma.leadFollowUp.count({
+      tx.leadFollowUp.count({
         where: { tenantId, status: 'PENDING' },
       }),
 
-      this.prisma.leadFollowUp.count({
+      tx.leadFollowUp.count({
         where: { tenantId, status: 'OVERDUE' },
       }),
 
-      this.prisma.prospectingSearch.findMany({
+      tx.prospectingSearch.findMany({
         where: { tenantId, deletedAt: null },
         orderBy: { createdAt: 'desc' },
         take: 5,
@@ -88,12 +109,13 @@ export class DashboardService {
         },
       }),
 
-      this.prisma.pipelineStage.findMany({
+      tx.pipelineStage.findMany({
         where: { tenantId },
         orderBy: { order: 'asc' },
         include: { _count: { select: { cards: true } } },
       }),
-    ]);
+      ]),
+    );
 
     return {
       kpis: {

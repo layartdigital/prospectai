@@ -20,15 +20,19 @@ export class NotificationsService {
       ...(options.onlyUnread ? { readAt: null } : {}),
     };
 
-    const [items, total, unreadCount] = await Promise.all([
-      this.prisma.notification.findMany({
-        where,
-        orderBy: [{ readAt: 'asc' }, { createdAt: 'desc' }],
-        take: options.take ?? 50,
-      }),
-      this.prisma.notification.count({ where: { tenantId } }),
-      this.prisma.notification.count({ where: { tenantId, readAt: null } }),
-    ]);
+    // Um bloco para as tres. Ver a nota do `dashboard.service.ts`: serializar
+    // custa menos que abrir uma transacao por consulta.
+    const [items, total, unreadCount] = await this.prisma.comTenant(tenantId, (tx) =>
+      Promise.all([
+        tx.notification.findMany({
+          where,
+          orderBy: [{ readAt: 'asc' }, { createdAt: 'desc' }],
+          take: options.take ?? 50,
+        }),
+        tx.notification.count({ where: { tenantId } }),
+        tx.notification.count({ where: { tenantId, readAt: null } }),
+      ]),
+    );
 
     return {
       items: items.map((item) => this.toView(item)),
@@ -38,32 +42,43 @@ export class NotificationsService {
   }
 
   async unreadCount(tenantId: string): Promise<{ count: number }> {
-    const count = await this.prisma.notification.count({
-      where: { tenantId, readAt: null },
-    });
+    const count = await this.prisma.comTenant(tenantId, (tx) =>
+      tx.notification.count({ where: { tenantId, readAt: null } }),
+    );
     return { count };
   }
 
   async markRead(tenantId: string, id: string): Promise<NotificationView> {
-    const existing = await this.prisma.notification.findFirst({
-      where: { id, tenantId },
-    });
-    if (!existing) throw new NotFoundException('Aviso não encontrado');
+    /**
+     * Ler e escrever no mesmo bloco.
+     *
+     * Aqui o `comTenant` nao e so contexto: as duas operacoes viram atomicas, e
+     * some a janela entre conferir que o aviso e deste tenant e grava-lo. O
+     * `update` abaixo usa `where: { id }` puro — hoje isso e seguro porque o
+     * `findFirst` acima ja conferiu o tenant, e sob a politica passa a ser
+     * seguro pelo banco.
+     */
+    const updated = await this.prisma.comTenant(tenantId, async (tx) => {
+      const existing = await tx.notification.findFirst({ where: { id, tenantId } });
+      if (!existing) throw new NotFoundException('Aviso não encontrado');
 
-    const updated = await this.prisma.notification.update({
-      where: { id },
-      // Idempotente: reler um aviso já lido não muda a data original.
-      data: { readAt: existing.readAt ?? new Date() },
+      return tx.notification.update({
+        where: { id },
+        // Idempotente: reler um aviso já lido não muda a data original.
+        data: { readAt: existing.readAt ?? new Date() },
+      });
     });
 
     return this.toView(updated);
   }
 
   async markAllRead(tenantId: string): Promise<{ updated: number }> {
-    const result = await this.prisma.notification.updateMany({
-      where: { tenantId, readAt: null },
-      data: { readAt: new Date() },
-    });
+    const result = await this.prisma.comTenant(tenantId, (tx) =>
+      tx.notification.updateMany({
+        where: { tenantId, readAt: null },
+        data: { readAt: new Date() },
+      }),
+    );
 
     return { updated: result.count };
   }
