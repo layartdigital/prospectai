@@ -108,14 +108,17 @@ Com (b), quem esquece de embrulhar recebe **zero linhas**, que é ruidoso e loca
 
 **1. Papéis.** ✅ *feito em 26/08 — migration `20260826230000_rls_papeis`.* `propectai_migrator` com `BYPASSRLS`, `propectai_app` sem nada. Grants nas tabelas existentes e nas futuras (`ALTER DEFAULT PRIVILEGES`).
 → *Nada muda.* Ninguém usa os papéis novos ainda.
-→ Verificado com `docs/intelligence/gate0/verificacoes-rls-passo1.sql`: 5 de 5 consultas com o resultado esperado, 43 de 43 tabelas alcançáveis pelo `propectai_app`, `rolbypassrls` falso nele, zero conexões usando os papéis novos.
+→ Verificado com `gate0/verificacoes-rls-passo1.sql`: 5 de 5 consultas com o resultado esperado, 43 de 43 tabelas alcançáveis pelo `propectai_app`, `rolbypassrls` falso nele, zero conexões usando os papéis novos.
 
 **2. Fixtures de teste no `propectai_migrator`.** ✅ *feito em 27/08.* Variável de ambiente própria (`DATABASE_URL_MIGRATOR`); os specs que tocam as tabelas do canário passam a montar cenário com ela.
 → *Nada muda.* `BYPASSRLS` sem RLS ligado é igual a hoje. **Este passo é o que torna o passo 4 reversível** — sem ele, ligar RLS quebra tudo de uma vez e não dá para saber se o problema é a política ou a fixture.
 → Recorte em relação ao que este plano previa: **dois arquivos, não dez.** O canário do passo 4 são duas tabelas, então só `audits-http.spec.ts` e `audit-pipeline.spec.ts` precisam da separação agora. Os demais specs entram no passo 6, junto com as tabelas que eles tocam.
 
-**3. `comTenant` no `PrismaService`, e o `AuditsService` e o `processAuditJob` usando.** RLS ainda desligado.
+**3. `comTenant` no `PrismaService`, e o `AuditsService` e o `processAuditJob` usando.** ✅ *feito em 27/08.* RLS ainda desligado.
 → *Nada muda no resultado*; só aparecem transações onde antes havia consultas soltas. Aqui se mede o custo real de latência no ambiente de vocês, com RLS fora do caminho — que é a única forma de separar o custo do round trip do custo da política.
+→ **A medição não saiu.** A variação da própria suíte (o `scrape-pipeline.spec.ts`, que não toca em `comTenant`, triplicou sozinho de 50s para 150s na mesma rodada) é maior que o efeito que se quer medir. Os `+159%` do spike continuam sem confirmação neste ambiente, e depois do passo 4 os dois custos ficam somados. **Fica como pendência antes do passo 4**, com um benchmark isolado — não pela suíte.
+→ Duas armadilhas encontradas ao envolver código existente em transação, ambas de escrita silenciosamente perdida: `.catch()` em torno de `update` (o Postgres aborta a transação e o `COMMIT` vira `ROLLBACK` sem lançar) e recuperação de `P2002` lendo o banco dentro da mesma transação que falhou. Detalhe no `CHANGELOG.md` de 27/08.
+→ Varredura por `$queryRaw`/`$executeRaw` feita: só o `SELECT 1` do healthcheck e os dois `set_config`. **Nenhum caminho solto**, que era o pré-requisito do passo 4.
 
 **4. `ENABLE` + `FORCE` + política nas duas tabelas de auditoria. App aponta para `propectai_app`.**
 → *Agora muda.* A suíte inteira roda. `audit:e2e` roda. Se algo enxergar zero linhas, é um caminho que esqueceu o `comTenant` — e o erro é local.

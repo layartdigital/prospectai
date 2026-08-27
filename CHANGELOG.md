@@ -7,9 +7,11 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
-### Os papéis do banco, e o teste que passou a mentir menos · 27/08/2026
+### Os papéis do banco, o contexto de tenant, e o teste que passou a mentir menos · 27/08/2026
 
-Migration `20260826230000_rls_papeis`. Passos 1 e 2 do `PLANO-RLS-v1.md`. **Nenhum teste novo, e é esse o ponto**: os 300 continuam 300, mas dois arquivos passaram a falar com o banco por um papel diferente do que exercitam.
+Migration `20260826230000_rls_papeis`. Passos 1, 2 e 3 do `PLANO-RLS-v1.md`. **311 testes**, 48 nos tipos, 71 na API e 192 no worker.
+
+Os três passos não mudam nada que o usuário veja. É o objetivo declarado deles: só o passo 4 liga a política, e ele precisa poder ser desligado com um comando.
 
 #### Um papel que ignora RLS, outro que nunca poderá
 
@@ -31,7 +33,7 @@ Isso foi verificado contra um Postgres 16 real com um shadow de nome diferente a
 
 #### A migration diz que os comandos rodaram, não que o estado ficou certo
 
-`docs/intelligence/gate0/verificacoes-rls-passo1.sql` — cinco consultas, cada uma respondendo a uma pergunta que "aplicada com sucesso" não responde. A mais importante é a primeira: **`rolbypassrls` verdadeiro no `propectai_app` seria o pior resultado possível do conjunto**, porque o passo 4 ligaria a política e ela não protegeria nada — sem erro, sem sintoma, com tudo verde.
+`gate0/verificacoes-rls-passo1.sql` — cinco consultas, cada uma respondendo a uma pergunta que "aplicada com sucesso" não responde. A mais importante é a primeira: **`rolbypassrls` verdadeiro no `propectai_app` seria o pior resultado possível do conjunto**, porque o passo 4 ligaria a política e ela não protegeria nada — sem erro, sem sintoma, com tudo verde.
 
 Resultado: 5 de 5 como previsto, 43 de 43 tabelas alcançáveis pelo papel da aplicação, `TRUNCATE` e `CREATE` no schema negados a ele, privilégio padrão registrado para as tabelas que ainda não existem, e zero conexões usando os papéis novos — que é o que confirma que o passo 1 não mudou comportamento.
 
@@ -66,6 +68,76 @@ A `DATABASE_URL` do ambiente carrega senha. Eu nunca li o `.env` — de propósi
 Não pode porque a migration já está aplicada, e editar o arquivo muda o checksum: o Prisma passa a recusar toda migration seguinte com *"migration modified after being applied"*. Um comentário impreciso custa menos que um repositório que não migra. A correção ficou no `PLANO-RLS-v1.md`, com o `ALTER ROLE ... PASSWORD` por ambiente e o item de checklist que o passo 4 herda.
 
 **O modo de falha, esse, foi o certo** — e vale registrar porque foi projetado. O helper avisa e cai para a `DATABASE_URL` quando a variável não existe, mas com a variável presente e a senha errada ele estoura alto, nomeando o papel, e o `audit-pipeline.spec.ts` **pulou seus 14 testes em vez de passar em silêncio**. Um fallback mudo teria deixado tudo verde hoje para quebrar no passo 4, com a causa três arquivos de distância.
+
+#### `set_config` solto não falha: ele não faz nada
+
+O passo 3 é o `comTenant` — abre transação, declara o tenant ao Postgres, roda o trabalho. Antes de escrevê-lo, subi um Postgres 16 descartável e medi três coisas. As duas primeiras mudaram o desenho.
+
+**A primeira:**
+
+```
+set_config('app.tenant_id','fora-de-tx', true)   ->  fora-de-tx
+current_setting('app.tenant_id', true)           ->  (vazio)
+```
+
+O terceiro argumento é `is_local`, e com ele o valor vale até o fim da transação corrente. Sem `BEGIN` explícito, cada statement **é** a sua própria transação: o valor morre no mesmo comando que o definiu. Não há erro, não há aviso — o comando devolve o que foi passado e some.
+
+É por isso que não existe uma versão "define o tenant nesta conexão". O outro lado da mesma moeda é o que torna o `is_local` obrigatório: sem ele o valor ficaria colado na **conexão**, e o pool entregaria essa conexão ao tenant seguinte com o contexto do anterior. Um vazamento entre clientes, não um defeito de consulta.
+
+**A segunda:**
+
+```
+ERROR:  duplicate key value violates unique constraint
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ROLLBACK
+```
+
+Depois de um erro, o Postgres recusa todo comando seguinte — e o `COMMIT` **vira `ROLLBACK` sem lançar nada**. Isso transforma em armadilha dois trechos que hoje estão corretos justamente por rodarem fora de transação:
+
+- `devolverCota` fazia `update(...).catch(() => {})` para o caso de não haver período registrado. Dentro da transação, esse catch faria as checagens e o desfecho da auditoria sumirem em silêncio por causa de um período que nem precisava existir. Virou `updateMany`, que devolve zero em vez de estourar.
+- A recuperação do `P2002` no `AuditsService` lia o registro existente logo após capturar o erro. Ali dentro, a leitura responderia `current transaction is aborted`. Passou a abrir uma segunda transação.
+
+Nenhum dos dois apareceria em teste: os dois caminhos são de exceção, e o sintoma seria perda silenciosa de escrita.
+
+**A terceira:** `set_config` aceita parâmetro no protocolo estendido; `SET LOCAL app.tenant_id = $1` não compila. Confirma a escolha do spike — o id nunca é concatenado na string.
+
+#### A forma do código foi ditada pela transação
+
+O `process-audit-job.ts` virou **duas transações com a medição no meio**, e não uma só. `provider.auditar()` é uma conexão com o site do lead que pode levar 30 segundos; uma transação aberta nesse intervalo prenderia uma conexão do pool pelo tempo de uma requisição HTTP externa e, com RLS ligado, um snapshot junto. Mesma razão para o `queue.add` sair de dentro no lado da API: Redis não entra em transação do Postgres.
+
+De brinde, a atomicidade: checagens, estado final, devolução de cota e `AuditLog` agora vivem ou morrem juntos. Sumiu o estado intermediário em que a auditoria constava `COMPLETED` sem registro.
+
+**Explícito, e não interceptado.** A alternativa era uma extensão do client com `AsyncLocalStorage`, embrulhando tudo automaticamente. O argumento contra está escrito no próprio `tenant.guard.ts` desde antes: *"lista envelhece em silêncio: alguém cria um endpoint novo, esquece de incluir, e a regra fica diferente do que se decidiu sem ninguém notar"*. Interceptação tem a mesma propriedade. Com o helper explícito, quem esquece de embrulhar recebe zero linhas no passo 4 — barulhento e local.
+
+#### O que se compartilha, e o que se duplica
+
+O invólucro de dez linhas existe duas vezes, na API e no worker: os apps não dependem um do outro, e unificar exigiria um pacote `@propectai/db` novo — tsconfig, entrada no turbo, build — para hospedar dez linhas.
+
+O que **não** foi duplicado é o que poderia divergir sem ninguém ver: `TENANT_SETTING` e `validarTenantId` moram em `@propectai/types`. O nome do parâmetro precisa bater em três lugares — o `set_config` da API, o do worker e o `current_setting` dentro da política. Divergir por uma letra daria zero linhas sem erro; um invólucro divergente, ao contrário, falha no typecheck ou na primeira execução.
+
+`validarTenantId` recusa vazio e nada mais, e há teste afirmando que **não** há validação de formato. Injeção não é o risco aqui — o valor entra por parâmetro. Um regex de cuid só criaria um jeito novo de recusar id legítimo.
+
+#### A varredura que o plano pedia
+
+Antes do passo 4, era preciso saber se algum caminho fala com o banco por SQL cru fora do `comTenant`. Saíram exatamente três linhas: o `SELECT 1` do healthcheck, sem tenant, e os dois `set_config`. Nenhum `$queryRaw` solto.
+
+#### A medição que eu não consegui fazer
+
+O passo 3 existe, entre outras coisas, para medir o custo do round trip **antes** de a política entrar. Não consegui o número.
+
+O worker foi de 135s para 242s, mas o `scrape-pipeline.spec.ts` — que não toca em `comTenant` — triplicou sozinho, de 50s para 150s. No caminho que de fato mudou, o `audit-pipeline.spec.ts` ficou **mais rápido**, 16,9s para 12,1s. Os dois números são ruído de máquina.
+
+Dizer "não houve regressão" seria ler ruído como resultado, que é o mesmo erro do `durationMs` baixo do mock. Fica registrado como pendência: os `+159%` do spike continuam sem confirmação neste ambiente, e uma vez ligada a política o custo do round trip e o custo do RLS ficam somados e não se separam mais.
+
+#### Um dump de banco entrou num commit, e a instrução era minha
+
+`git add -A` num repositório cujo `git status` eu não tinha olhado. Os commits anteriores da semana usaram caminhos explícitos, então quase todo o trabalho de 24 a 27/08 estava fora do controle de versão — e entrou de uma vez, junto com o que não devia: `gate0/pre-f0.dump` (141 KB de dump do banco de desenvolvimento), `gate0/cnpjs.txt` e dois CSVs de medição sobre negócios reais. O `.gitignore` não cobria nenhum deles.
+
+Nada tinha sido empurrado, então o conserto foi um `git reset --mixed`, os ignores e um commit novo.
+
+**A parte que vale guardar é a segunda.** Bloqueado o dado bruto, a varredura seguinte achou o mesmo problema em prosa: o `docs/technical/gate0-resultado.md` nomeava seis perfis de profissionais reais da amostra e, na seção de erro silencioso, um lead pelo nome próprio com um perfil de outra pessoa ao lado e a especulação de que seria "sócia". Nada disso era necessário — a evidência do documento é a contagem de bytes (623.282 contra 623.778), não a identidade de quem foi medido. Foi pseudonimizado, com nota no topo explicando por quê, para ninguém "restaurar" os nomes depois achando que melhora o relato.
+
+Eu tinha revisado a categoria errada: perguntei *quais arquivos são dados* quando a pergunta era *quais arquivos falam de terceiros*. Um relatório de medição carrega o mesmo dado que um CSV, só que em texto corrido — e texto corrido não dispara alarme nenhum.
 
 ---
 
