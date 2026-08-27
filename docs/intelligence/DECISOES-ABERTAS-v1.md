@@ -1,6 +1,6 @@
 # Decisões abertas — as que pertencem ao Product Owner
 
-**Versão 1 · 24/08/2026**
+**Versão 1 · 24/08/2026 · situação revista em 27/08/2026**
 
 Seis decisões que o código não pode tomar sozinho. Cinco vinham arrastadas desde a `SECURITY-EGRESS-POLICY-v3.md`; a sexta nasceu hoje, com a migration de auditoria.
 
@@ -13,13 +13,13 @@ Cada uma traz a pergunta real, a tensão que a criou, as opções com consequên
 | # | Decisão | Bloqueia | Urgência | Reversível? |
 |---|---|---|---|---|
 | **D1** | Privacidade do link social | Fase 3 → PDF (eixo comercial v0.2) | **Alta — prazo não é seu** | Sim, antes de coletar |
-| **D2** | Isolamento na leitura: RLS ou Prisma | S8, S9 de F0 | Média — merece medição | Caro depois |
+| **D2** | Isolamento na leitura: RLS ou Prisma | — | ✅ **decidida e executada em 27/08** | — |
 | **D3** | Quarentena sem store | Nada | Baixa — só ratificar | Sim |
 | **D4** | `AuditLog` vs. LGPD art. 18 VI | Nada hoje | Média — antes de ter volume | Caro depois |
 | **D5** | ADR-004 Parte 2 | Nada | **Bloqueada** — produção não existe | — |
 | **D6** | Retenção das medições | Nada | Baixa | Sim |
 
-**A leitura que importa:** só a **D1** tem relógio próprio. D3 e D6 são ratificação de minutos. D5 não pode ser respondida. D2 e D4 são as que custam caro se decididas errado, e as duas ficam mais baratas com um experimento antes.
+**A leitura que importa:** só a **D1** tem relógio próprio, e ela está aberta desde 24/08 — três dias em que o relógio de quem dá o parecer nem começou a correr. D3 e D6 são ratificação de minutos. D5 não pode ser respondida. D4 é a que custa caro se decidida errado, e é da mesma conversa que a D1.
 
 ---
 
@@ -64,7 +64,13 @@ O argumento de (b) é o mais forte disponível: o dado foi publicado pelo titula
 
 ---
 
-## D2 — Isolamento na leitura: convenção ou restrição?
+## D2 — Isolamento na leitura: convenção ou restrição? · ✅ decidida e executada
+
+> **Resolvida em 27/08.** Escolha: **(b) RLS**, com o `comTenant` explícito no lugar da extensão. O spike de meio dia sugerido abaixo foi feito (`SPIKE-RLS-v1.md`), virou plano em seis passos (`PLANO-RLS-v1.md`), e os cinco primeiros estão entregues — política ligada em `digital_presence_audits` e `digital_presence_checks`, com S8 e S9 provados pelo banco em `apps/worker/test/rls-canario.spec.ts`. Falta o passo 6, que é espalhar para as demais famílias de tabelas.
+>
+> **O que a medição acrescentou ao argumento**, e que não estava previsto aqui: o custo é de ~5 ms por chamada de `comTenant` (+168% numa consulta barata, medido com braço de controle a 0,2% de ruído), e **dois terços dele são a transação, não o `set_config`**. Ou seja, o preço de adotar RLS não é a variável de sessão: é a transação que ela obriga a existir — e a extensão do Prisma, que não precisa de transação, não pagaria nada. A escolha continua sendo a mesma, agora com o número na mesa.
+>
+> O texto original fica abaixo, sem edição, porque a recomendação e a razão dela continuam corretas.
 
 ### A pergunta
 
@@ -192,10 +198,19 @@ Manter **180 dias** até haver dado de uso real, e revisitar quando existir hist
 
 ## O que eu faria nesta semana
 
+*Escrito em 24/08. Situação em 27/08 ao lado de cada item.*
+
 1. **Hoje:** mandar a D1 para quem for dar o parecer. É a única com relógio externo.
+   → **Não foi feita.** Três dias, e é o único item da lista cujo atraso não se recupera trabalhando mais rápido depois.
 2. **Hoje, cinco minutos:** ratificar D3 e D6.
+   → Pendente. Continua sendo cinco minutos.
 3. **Meio dia, quando couber:** o spike de RLS da D2 — a única onde medir muda a resposta.
+   → ✅ Feito, e virou os passos 1 a 5 do `PLANO-RLS-v1.md`.
 4. **Junto com a D1**, se houver consulta jurídica: incluir a D4, que é a mesma conversa.
+   → Pendente, junto com a D1.
 5. **D5:** não fazer nada. Está bloqueada por ausência de produção, e isso está correto.
+   → Nada feito, como planejado.
+
+**A ordem não mudou, e o item 1 subiu de importância pelo simples fato de ter esperado.** O trabalho de engenharia avançou cinco passos enquanto a única decisão com prazo externo ficou parada — o que é exatamente o padrão que faz uma fase inteira travar no fim, por um parecer que podia ter sido pedido na primeira semana.
 
 `F:\drmind` não foi modificado.
