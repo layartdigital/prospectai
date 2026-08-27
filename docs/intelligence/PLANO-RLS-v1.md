@@ -120,15 +120,22 @@ Com (b), quem esquece de embrulhar recebe **zero linhas**, que é ruidoso e loca
 → Duas armadilhas encontradas ao envolver código existente em transação, ambas de escrita silenciosamente perdida: `.catch()` em torno de `update` (o Postgres aborta a transação e o `COMMIT` vira `ROLLBACK` sem lançar) e recuperação de `P2002` lendo o banco dentro da mesma transação que falhou. Detalhe no `CHANGELOG.md` de 27/08.
 → Varredura por `$queryRaw`/`$executeRaw` feita: só o `SELECT 1` do healthcheck e os dois `set_config`. **Nenhum caminho solto**, que era o pré-requisito do passo 4.
 
-**4. `ENABLE` + `FORCE` + política nas duas tabelas de auditoria. App aponta para `propectai_app`.**
-→ *Agora muda.* A suíte inteira roda. `audit:e2e` roda. Se algo enxergar zero linhas, é um caminho que esqueceu o `comTenant` — e o erro é local.
+**4. `ENABLE` + `FORCE` + política nas duas tabelas de auditoria. App conecta como `propectai_app`.** ✅ *feito em 27/08 — migration `20260827140000_rls_canario_auditoria`.*
+→ *Agora muda.* A suíte inteira roda. Se algo enxergar zero linhas, é um caminho que esqueceu o `comTenant` — e o erro é local.
+→ **Correção ao que este plano dizia.** A frase original era "app aponta para `propectai_app`", e a leitura óbvia seria trocar o `DATABASE_URL`. **Isso quebraria o `prisma migrate`**: o Prisma CLI lê essa variável, e `migrate`, `db:seed`, `db:studio` e os scripts de `prisma/` passariam a conectar como um papel sem DDL. `directUrl` resolveria o `migrate` e deixaria o seed e os scripts no mesmo problema. O que foi feito: **`DATABASE_URL_APP`**, lido só por quem executa a aplicação (`PrismaService` na API, `criarPrismaApp()` no worker). O `DATABASE_URL` continua sendo o dono. Reverter o passo 4 é apagar essa linha do `.env`.
+→ **A política de tenant é `RESTRICTIVE`**, com uma permissiva mínima ao lado. Permissivas se combinam por OR: uma política futura com `USING (true)` anularia o isolamento para todo mundo, sem erro. Restritivas se combinam por AND.
+→ **O dono do banco é superusuário**, e superusuário ignora RLS mesmo com `FORCE`. A proteção inteira depende de a aplicação não conectar com ele — daí o primeiro teste do canário ser `SELECT current_user`.
 
-**5. S8 e S9**, com o client do papel da aplicação: leitura cruzada devolve zero.
+**5. S8 e S9**, com o client do papel da aplicação: leitura cruzada devolve zero. ✅ *feito em 27/08 — `apps/worker/test/rls-canario.spec.ts`, 10 testes.*
 → **Só depois deles o RLS pode ser considerado ligado.** Os três modos de falha do spike são silenciosos; sem um teste que prove isolamento, RLS é pior que uma extensão do Prisma, porque *parece* mais seguro.
+→ A diferença em relação ao S13 do `audit-pipeline.spec.ts`: lá o código sob teste sempre passa `tenantId` na chave composta, então o que se prova é a chave. Aqui as consultas são escritas **sem filtro de tenant nenhum** — quem recusa é a política, ou não há política.
+→ Verificação de catálogo em `gate0/verificacoes-rls-passo4.sql`. **Suas consultas 5 e 6 nasceram tautológicas** — mediam "zero visível" contra uma tabela que a suíte deixa vazia, e aquele zero sairia igual sem política nenhuma. Refeitas: `EXPLAIN` (que mostra o `Filter` da política independentemente de haver dado) e contagem com denominador.
 
 **6. Espalhar para as demais tabelas**, uma família por vez, com o mesmo teste replicado.
+→ O que o canário deixou pronto para esta etapa, e que não estava previsto aqui: a **regra de escopo** medida no passo 3 (o custo é por chamada de `comTenant`, não por requisição — telas de listagem e dashboard precisam ser envolvidas de uma vez), e o trabalho de fixtures que o passo 2 recortou para dois arquivos. Os outros specs com banco entram aqui, junto com as tabelas que eles tocam.
+→ E o `EntitlementsService`, que usa o próprio client e portanto fica fora do `tx` de quem o chama. Sem efeito hoje — `plan_usage` e `subscriptions` não estão no canário —, e é a primeira coisa a resolver quando entrarem.
 
-Os passos 1 a 3 não mudam comportamento. O passo 4 é o único com risco, e ele reverte com um `ALTER TABLE ... NO FORCE`.
+Os passos 1 a 3 não mudam comportamento. O passo 4 é o único com risco, e ele reverte apagando a linha `DATABASE_URL_APP` do `.env` — sem tocar no banco. O `ALTER TABLE ... NO FORCE` continua disponível, mas deixou de ser o primeiro recurso.
 
 ---
 

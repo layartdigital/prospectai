@@ -7,11 +7,13 @@ Versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
-### Os papéis do banco, o contexto de tenant, e o teste que passou a mentir menos · 27/08/2026
+### O RLS ligado, e o teste que passou a mentir menos · 27/08/2026
 
-Migration `20260826230000_rls_papeis`. Passos 1, 2 e 3 do `PLANO-RLS-v1.md`. **311 testes**, 48 nos tipos, 71 na API e 192 no worker.
+Migrations `20260826230000_rls_papeis` e `20260827140000_rls_canario_auditoria`. Passos 1 a 5 do `PLANO-RLS-v1.md`. **321 testes**, 48 nos tipos, 71 na API e 202 no worker.
 
-Os três passos não mudam nada que o usuário veja. É o objetivo declarado deles: só o passo 4 liga a política, e ele precisa poder ser desligado com um comando.
+**O isolamento de `digital_presence_audits` e `digital_presence_checks` deixou de depender do código.** Um `where` esquecido, um `$queryRaw` descuidado ou um id de outro tenant não alcançam mais nada: o banco recusa.
+
+Os passos 1, 2 e 3 não mudaram nada que o usuário veja — era o objetivo declarado deles. O 4 mudou, e o 5 é o que autoriza chamar o 4 de pronto.
 
 #### Um papel que ignora RLS, outro que nunca poderá
 
@@ -155,6 +157,72 @@ Nada tinha sido empurrado, então o conserto foi um `git reset --mixed`, os igno
 **A parte que vale guardar é a segunda.** Bloqueado o dado bruto, a varredura seguinte achou o mesmo problema em prosa: o `docs/technical/gate0-resultado.md` nomeava seis perfis de profissionais reais da amostra e, na seção de erro silencioso, um lead pelo nome próprio com um perfil de outra pessoa ao lado e a especulação de que seria "sócia". Nada disso era necessário — a evidência do documento é a contagem de bytes (623.282 contra 623.778), não a identidade de quem foi medido. Foi pseudonimizado, com nota no topo explicando por quê, para ninguém "restaurar" os nomes depois achando que melhora o relato.
 
 Eu tinha revisado a categoria errada: perguntei *quais arquivos são dados* quando a pergunta era *quais arquivos falam de terceiros*. Um relatório de medição carrega o mesmo dado que um CSV, só que em texto corrido — e texto corrido não dispara alarme nenhum.
+
+#### A política de tenant é RESTRICTIVE, e isso não é preciosismo
+
+Duas políticas por tabela, e a diferença entre elas é o que sobrevive à próxima edição.
+
+Políticas permissivas se combinam por **OR**. Uma única política de isolamento funciona hoje e desaparece no dia em que alguém acrescentar `CREATE POLICY leitura_admin ... USING (true)` para uma tela nova: o OR anula o isolamento **para todo mundo**, sem erro e sem sintoma. Restritivas se combinam por **AND**, e AND não se anula por adição.
+
+Então a regra de tenant é `RESTRICTIVE`, e uma permissiva mínima (`USING (true)`) existe só para dar a base — tabela sem nenhuma permissiva não mostra linha nenhuma. Qualquer política futura, de qualquer tipo, continua obrigada a passar pelo filtro de tenant.
+
+É o mesmo argumento de o `propectai_app` não ser dono de tabela: defender contra a edição de daqui a seis meses, não só contra o estado de hoje.
+
+E `WITH CHECK` não é redundante com `USING`: `USING` decide o que se vê, `WITH CHECK` decide o que se grava. Sem ele um INSERT gravaria linha com o `tenantId` do vizinho — invisível para quem escreveu, bem visível para ele. Tem teste próprio, e ele passa recusando.
+
+#### O plano dizia para trocar o `DATABASE_URL`. Teria quebrado o `prisma migrate`.
+
+O `PLANO-RLS-v1.md` escrevia o passo 4 como *"app aponta para `propectai_app`"*, e a forma óbvia seria trocar o `DATABASE_URL`. Só que o Prisma CLI lê exatamente essa variável: `migrate`, `db:seed`, `db:studio` e os scripts de `prisma/` passariam todos a conectar como um papel sem DDL. A migration seguinte falharia, e o seed junto.
+
+`directUrl` no schema resolveria o `migrate` e deixaria o `seed.ts` e os scripts no mesmo problema. A correção foi outra: **`DATABASE_URL_APP`, lido só por quem executa a aplicação.** O `DATABASE_URL` continua sendo o dono, e o Prisma CLI segue intocado.
+
+De brinde, reverter o passo 4 virou apagar uma linha do `.env` — sem `ALTER TABLE`.
+
+O defeito só apareceu porque fui olhar o bloco `datasource` antes de escrever. Estava a uma linha de distância o tempo todo.
+
+#### O dono do banco é superusuário, e superusuário ignora RLS
+
+`propectai` tem `rolsuper = true`. Superusuário ignora a política **independentemente de `FORCE`** — ou seja, a proteção inteira depende de a aplicação não conectar com ele, e isso é decidido por uma linha do `.env`.
+
+Por isso o primeiro teste do `rls-canario.spec.ts` não é sobre isolamento:
+
+```ts
+const linhas = await app.$queryRaw`SELECT current_user AS usuario`;
+expect(linhas[0]?.usuario).toBe('propectai_app');
+```
+
+Sem ele, os outros nove passariam de graça com o `DATABASE_URL_APP` ausente — o `criarPrismaApp` cairia no `DATABASE_URL`, a política sairia do caminho, e **tudo continuaria funcionando**. O aviso no console existe, mas aviso em suíte de 321 testes ninguém lê.
+
+#### A promessa do passo 2 se cumpriu em uma linha
+
+No `audit-pipeline.spec.ts`, a única mudança do passo 4 foi:
+
+```ts
+const prisma = criarPrismaApp();   // era new PrismaClient()
+```
+
+Nenhuma asserção, nenhuma fixture. Os 14 testes continuam passando, e agora o S13 prova a política do banco em vez de provar a chave composta e o `where` — que era tudo o que ele provava antes.
+
+Foi exatamente para isso que o passo 2 veio separado do passo 4: se o mesmo commit trocasse o papel *e* reescrevesse as fixtures, uma falha não diria qual dos dois a causou.
+
+#### O arquivo de verificação passou sem verificar
+
+Terceira vez nesta série, e desta vez no artefato cuja única função é conferir.
+
+As consultas 5 e 6 do `verificacoes-rls-passo4.sql` mediam "auditorias visíveis sem contexto: 0" e "com contexto: pelo menos 1". Rodaram, e deram `0` e `0` — **porque a tabela estava vazia.** A suíte apaga os tenants no `afterAll`, então na prática ela está sempre vazia. Com zero linhas, aquele `0` sai igual com a política ligada, desligada, ou inexistente.
+
+O conserto tem duas partes:
+
+- **`EXPLAIN` no lugar da contagem.** Se a política está no caminho, ela aparece como `Filter` no plano — com zero linhas ou com um milhão. É a única verificação do arquivo que não depende de haver dado, e passou a ser a principal. Saída real: `Filter: ("tenantId" = current_setting('app.tenant_id'::text, true))` nos dois planos.
+- **Denominador na contagem.** Conta o total real como superusuário antes de assumir o papel da aplicação. `total > 0` com `visíveis = 0` prova; `total = 0` **declara que não prova**, em vez de deixar o leitor concluir sozinho.
+
+O padrão é o mesmo das outras duas vezes: um número correto respondendo a pergunta errada. Aqui a pergunta certa não era "quantas linhas vejo?", era "comparado a quantas existem?".
+
+#### E o typecheck vermelho com a suíte verde, pela sétima vez
+
+`pnpm test` passou 321 com o `typecheck:all` falhando — `TS2339` numa desestruturação de índice sob `noUncheckedIndexedAccess`, no teste novo. O vitest transpila sem checar tipos, então as duas coisas eram verdade ao mesmo tempo: o comportamento estava certo e o tipo estava errado.
+
+A recomendação de rodar `typecheck:all` antes de `test` em CI está registrada desde 24/08 e continua sem dono. Sete ocorrências é o argumento.
 
 ---
 
