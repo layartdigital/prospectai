@@ -8,6 +8,62 @@ Este documento levanta o inventário, aponta os dois lugares onde o mecanismo co
 
 ---
 
+## Correção de 27/08 (2): o inventário de chamadores foi medido numa cópia velha
+
+**A contagem de usos por modelo da primeira versão deste documento estava errada**, e vale dizer por quê, porque o erro não foi de raciocínio.
+
+Contei sobre uma cópia local do repositório que estava desatualizada: faltavam os módulos `audits`, `dashboard`, `notifications`, `proposals`, `segments` e `system` inteiros. Os números pareciam plausíveis e eram calculados sobre a árvore errada.
+
+**É o mesmo padrão de três outros erros do dia** — o "4 `PipelineStage`" que li como "é pouco" sem perguntar onde estavam os outros dois, a verificação SQL que media zero contra tabela vazia, e o `NO FORCE` que eu afirmei sem testar. Em todos, um número correto respondendo a uma pergunta que não era a que eu precisava fazer. A pergunta que faltou aqui: **sobre o que este número foi calculado?**
+
+### O inventário de verdade
+
+**193 chamadas a tabelas com `tenantId`, em 17 arquivos.** Três já convertidos — `pipeline.service.ts`, `audits.service.ts` e `process-audit-job.ts`, somando 21 chamadas. **Restam 172 em 14 arquivos.**
+
+| arquivo | chamadas |
+|---|---:|
+| `leads/leads.service.ts` | 33 |
+| `proposals/proposals.service.ts` | 22 |
+| `team/team.service.ts` | 21 |
+| `worker/pipeline/process-scrape-job.ts` | 20 |
+| `account/account.service.ts` | 16 |
+| `outreach/outreach.service.ts` | 13 |
+| `dashboard/dashboard.service.ts` | 12 |
+| `billing/billing.service.ts` | 8 |
+| `notifications/notifications.service.ts` | 7 |
+| `admin/admin.service.ts` | 7 |
+| `prospecting/prospecting.service.ts` | 6 |
+| `auth/auth.service.ts` | 5 |
+| `entitlements/entitlements.service.ts` | 1 |
+| `common/tenant.guard.ts` | 1 |
+
+**A correção que mais muda o plano:** a família 8 não é "sem interface, por último". O `proposals.service.ts` tem **22 chamadas** — a segunda maior do repositório —, sendo 7 em `proposal` e 4 em `contract`. Eu tinha registrado zero usos, medido na árvore sem o módulo.
+
+E `dashboard` (12) e `notifications` (7) não apareciam em análise nenhuma de chamadores.
+
+### Os três casos que não recebem `comTenant`
+
+Saíram do levantamento e precisam de tratamento próprio:
+
+- **`admin.service.ts` (7)** — atravessa tenants de propósito. É o caso do papel `propectai_admin` já descrito acima; embrulhar em `comTenant` quebraria a funcionalidade.
+- **`tenant.guard.ts` (1)** — roda **antes** de o tenant ser conhecido: é ele quem o resolve. Não há contexto para declarar.
+- **`entitlements.service.ts` (1)** — é chamado de dentro do bloco dos outros, com client próprio. O conserto é receber o `tx` por parâmetro, não abrir bloco próprio.
+
+### A ordem da fase A
+
+Uma fatia por vez, cada uma verificável sozinha, nenhuma arriscada:
+
+1. **`auth.service.ts`** — pequeno, e é o caso especial: o tenant **nasce dentro** da transação de registro, então o contexto precisa ser declarado no meio dela, não na abertura. Também é o que quebrou a família Pipeline. Vai primeiro por isso.
+2. **`prospecting` + `notifications` + `dashboard`** — 25 chamadas de leitura simples.
+3. **`team` + `account`** — 37.
+4. **`outreach` + `proposals`** — 35.
+5. **`billing`** — 8.
+6. **`leads`** — 33, o hub. Por último entre os da API, quando o padrão já estiver repetido cinco vezes.
+7. **`process-scrape-job`** — 20, no worker.
+8. **Os três casos especiais**, cada um com a sua solução.
+
+---
+
 ## O inventário
 
 **42 tabelas. 33 carregam `tenantId`; 9 não.**
@@ -65,7 +121,7 @@ O conserto é o mesmo padrão em qualquer serviço compartilhado: **receber o `t
 | 5 | Leads núcleo | 7 | `LeadsService`, `processScrapeJob` | |
 | 6 | Conta e cobrança | 6 | `AccountService`, `TeamService`, `BillingService` | depende do §2 acima |
 | 7 | Operação e registro | 5 | vários | depende do papel admin |
-| 8 | Comercial | 2 (+`proposal_items`) | — sem interface | por último |
+| 8 | Comercial | 2 (+`proposal_items`) | `ProposalsService` — **22 chamadas**, não zero | |
 
 ### Por que Pipeline é a próxima, e não Leads
 
