@@ -121,13 +121,30 @@ O que **não** foi duplicado é o que poderia divergir sem ninguém ver: `TENANT
 
 Antes do passo 4, era preciso saber se algum caminho fala com o banco por SQL cru fora do `comTenant`. Saíram exatamente três linhas: o `SELECT 1` do healthcheck, sem tenant, e os dois `set_config`. Nenhum `$queryRaw` solto.
 
-#### A medição que eu não consegui fazer
+#### A medição que a suíte não dava, e o braço que resolveu
 
-O passo 3 existe, entre outras coisas, para medir o custo do round trip **antes** de a política entrar. Não consegui o número.
+O passo 3 existe, entre outras coisas, para medir o custo do round trip **antes** de a política entrar. Pela suíte não deu: o worker foi de 135s para 242s, mas o `scrape-pipeline.spec.ts` — que nem toca em `comTenant` — triplicou sozinho de 50s para 150s, e o `audit-pipeline.spec.ts`, que mudou de verdade, ficou **mais rápido**. Ruído maior que o efeito.
 
-O worker foi de 135s para 242s, mas o `scrape-pipeline.spec.ts` — que não toca em `comTenant` — triplicou sozinho, de 50s para 150s. No caminho que de fato mudou, o `audit-pipeline.spec.ts` ficou **mais rápido**, 16,9s para 12,1s. Os dois números são ruído de máquina.
+`pnpm rls:bench` — `apps/worker/scripts/rls-bench.ts` — quatro braços intercalados, 300 iterações, p50 e p95.
 
-Dizer "não houve regressão" seria ler ruído como resultado, que é o mesmo erro do `durationMs` baixo do mock. Fica registrado como pendência: os `+159%` do spike continuam sem confirmação neste ambiente, e uma vez ligada a política o custo do round trip e o custo do RLS ficam somados e não se separam mais.
+**O quarto braço é o que faz o resto valer.** Um deles é idêntico ao basal, só com outro nome: a diferença entre os dois é o piso de ruído da máquina. Saiu em **0,2%**. Sem ele, um `+168%` seria uma afirmação de fé — com ele, é medição.
+
+| p50 (ms) | solto | transação | `comTenant` | total |
+|---|---:|---:|---:|---:|
+| leitura por chave | 2,983 | 6,087 | 8,000 | **+168%** |
+| lista de 50 | 3,712 | 7,476 | 9,723 | **+162%** |
+
+Os `+159%` do spike se confirmam. E a separação em três braços responde o que o spike não separava: **a transação custa mais que o `set_config`**. O `BEGIN`/`COMMIT` sozinho já dobra a consulta; o `set_config` acrescenta pouco menos da metade disso. A divisão fica em torno de 60/40.
+
+Isso reforça a D2 pelo lado inesperado. A alternativa recusada — extensão do client injetando `where: { tenantId }` — não precisa de transação e não pagaria nada disto. O preço de adotar RLS não é o `set_config`: é a transação que ele obriga a existir. Quem defender a extensão está defendendo economizar ~5 ms por operação, contra um mecanismo que alcança `$queryRaw` e que não falha em silêncio quando alguém acrescenta um caminho novo.
+
+#### Eu previ que o custo se diluiria na consulta maior. Não diluiu.
+
+Escrevi no próprio script que numa lista de 50 o custo fixo se dissolveria. Em absoluto ele **subiu**: +5,0 ms na leitura por chave contra +6,0 ms na lista, com o percentual praticamente igual.
+
+A explicação não salva a previsão, mas explica: a "lista de 50" não é uma consulta cara. São 3,7 ms contra 3,0 ms — 0,7 ms de trabalho a mais. As duas formas são baratas, e o overhead é fixo entre 5 e 6 ms. **A hipótese não foi refutada; não foi testada**, porque o benchmark não tem nenhuma consulta lenta o bastante. Fica sem evidência, e não como "medimos e não diluiu".
+
+O que sai daí é uma regra de uso, essa sim medida: **o custo é por chamada de `comTenant`, não por requisição.** Cinco consultas em cinco chamadas pagam cinco vezes; as mesmas cinco dentro de um `comTenant` pagam uma. Envolver o escopo mais amplo que fizer sentido deixou de ser questão de estilo. O código de hoje está dentro da regra — onde vai doer é no passo 6, nas telas de listagem e no dashboard.
 
 #### Um dump de banco entrou num commit, e a instrução era minha
 

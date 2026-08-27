@@ -34,7 +34,8 @@
     "dev:lock": "tsx prisma/set-plan.ts free --reset",
     "db:studio": "prisma studio --port 5556",
     "audit:fumaca": "tsx apps/worker/scripts/auditoria-fumaca.ts",
-    "audit:e2e": "tsx apps/worker/scripts/auditoria-e2e.ts"
+    "audit:e2e": "tsx apps/worker/scripts/auditoria-e2e.ts",
+    "rls:bench": "tsx apps/worker/scripts/rls-bench.ts"
   },
   "prisma": {
     "schema": "prisma/schema.prisma",

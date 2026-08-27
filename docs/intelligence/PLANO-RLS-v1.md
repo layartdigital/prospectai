@@ -116,7 +116,7 @@ Com (b), quem esquece de embrulhar recebe **zero linhas**, que é ruidoso e loca
 
 **3. `comTenant` no `PrismaService`, e o `AuditsService` e o `processAuditJob` usando.** ✅ *feito em 27/08.* RLS ainda desligado.
 → *Nada muda no resultado*; só aparecem transações onde antes havia consultas soltas. Aqui se mede o custo real de latência no ambiente de vocês, com RLS fora do caminho — que é a única forma de separar o custo do round trip do custo da política.
-→ **A medição não saiu.** A variação da própria suíte (o `scrape-pipeline.spec.ts`, que não toca em `comTenant`, triplicou sozinho de 50s para 150s na mesma rodada) é maior que o efeito que se quer medir. Os `+159%` do spike continuam sem confirmação neste ambiente, e depois do passo 4 os dois custos ficam somados. **Fica como pendência antes do passo 4**, com um benchmark isolado — não pela suíte.
+→ **Medido com `pnpm rls:bench`**, piso de ruído de 0,2%. Ver *"O custo, medido"* abaixo.
 → Duas armadilhas encontradas ao envolver código existente em transação, ambas de escrita silenciosamente perdida: `.catch()` em torno de `update` (o Postgres aborta a transação e o `COMMIT` vira `ROLLBACK` sem lançar) e recuperação de `P2002` lendo o banco dentro da mesma transação que falhou. Detalhe no `CHANGELOG.md` de 27/08.
 → Varredura por `$queryRaw`/`$executeRaw` feita: só o `SELECT 1` do healthcheck e os dois `set_config`. **Nenhum caminho solto**, que era o pré-requisito do passo 4.
 
@@ -132,13 +132,42 @@ Os passos 1 a 3 não mudam comportamento. O passo 4 é o único com risco, e ele
 
 ---
 
+## O custo, medido
+
+`pnpm rls:bench` · 300 iterações, braços intercalados, p50 em ms. O braço `controle` é idêntico ao `solto`: a diferença entre os dois é o piso de ruído da máquina, e ele saiu em **0,2%**. Tudo abaixo disso não se lê.
+
+| | solto | transação | `comTenant` | total |
+|---|---:|---:|---:|---:|
+| leitura por chave | 2,983 | 6,087 | 8,000 | **+168%** |
+| lista de 50 | 3,712 | 7,476 | 9,723 | **+162%** |
+
+Os `+159%` do spike se confirmam neste ambiente. E o benchmark responde duas coisas que o spike não separava.
+
+**A transação custa mais que o `set_config`, e por larga margem.** O `BEGIN`/`COMMIT` sozinho já dobra a consulta — +3,1 ms na leitura por chave, +3,8 ms na lista. O `set_config` acrescenta +1,9 e +2,2 ms. A divisão é estável: **cerca de 60% transação, 40% `set_config`**.
+
+Isso importa para a D2. A alternativa recusada — extensão do client injetando `where: { tenantId }` — **não precisa de transação nenhuma**, e portanto não paga nada disto. O custo de adotar RLS não é o `set_config`; é a transação que ele obriga a existir. Quem defender a extensão daqui em diante está defendendo economizar ~5 ms por operação, e a resposta continua sendo a do spike: a extensão não alcança `$queryRaw` e falha em silêncio quando alguém acrescenta um caminho que ela não cobre.
+
+**E a segunda: o custo não se diluiu na consulta maior, ao contrário do que previ.** Em absoluto ele até subiu — +5,0 ms na leitura por chave contra +6,0 ms na lista.
+
+A explicação é que a "lista de 50" não é uma consulta cara: são 3,7 ms contra 3,0 ms da leitura por chave, 0,7 ms de trabalho a mais. As duas formas são baratas, e o overhead é **fixo, entre 5 e 6 ms**. A hipótese da diluição não foi refutada — **não foi testada**, porque o benchmark não tem nenhuma consulta lenta o bastante para testá-la. Fica como está: sem evidência.
+
+### A regra de uso que sai daí
+
+O custo é **por chamada de `comTenant`, não por requisição**. Uma rota que chama o helper cinco vezes paga cinco vezes; as mesmas cinco consultas dentro de um `comTenant` só pagam o `BEGIN`/`COMMIT`/`set_config` uma vez.
+
+**Envolva o escopo mais amplo que fizer sentido, não cada consulta.** Com a ressalva já escrita no helper: nada de I/O externo lá dentro, o que na prática limita o escopo ao bloco de trabalho de banco.
+
+O código de hoje está dentro da regra — `criar` usa duas transações porque a conferência de saldo mora entre elas, `detalhe` usa uma, e o `processAuditJob` usa duas num job que leva 300 ms. **Onde isso vai doer é no passo 6**: telas de listagem e o dashboard, que fazem várias consultas por requisição, precisam ser envolvidas de uma vez, não consulta a consulta.
+
+---
+
 ## O que este plano não resolve
 
 **O `$queryRaw` continua sendo o buraco que só o RLS fecha** — e é exatamente por isso que ele vale a pena. Mas o `comTenant` não alcança quem chama `$queryRaw` fora dele. Sob RLS o resultado é zero linhas, o que é falha barulhenta e local; ainda assim, vale uma varredura por `$queryRaw` e `$executeRaw` antes do passo 4.
 
 **PgBouncer não está no caminho hoje** e não foi testado. Se entrar, em modo *transaction*, o `set_config` local à transação continua correto — mas isso é afirmação minha, não medição. Fica para quando existir.
 
-**O custo em consulta barata é real**: +159% de latência, medido. Se aparecer um endpoint de leitura frequente e barata, ele merece medição própria antes de assumir que o número é aceitável.
+**O custo em consulta barata é real**: +168% no ambiente de vocês, ~5 ms absolutos por chamada de `comTenant`. Se aparecer um endpoint de leitura frequente e barata, ele merece medição própria antes de assumir que o número é aceitável — e a primeira pergunta a fazer é quantas vezes ele chama o helper.
 
 ---
 
