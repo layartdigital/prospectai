@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import {
   computeScore,
   type PlanCardView,
@@ -26,7 +27,10 @@ export class AccountService {
     planCode: string,
   ): Promise<SubscriptionResponse> {
     const [subscription, plans, usage] = await Promise.all([
-      this.prisma.subscription.findUnique({ where: { tenantId } }),
+      this.prisma.comTenant(tenantId, (tx) =>
+        tx.subscription.findUnique({ where: { tenantId } }),
+      ),
+      // `plans` é catálogo global: não tem `tenantId` e nunca terá política.
       this.prisma.plan.findMany({
         where: { isActive: true },
         orderBy: { sortOrder: 'asc' },
@@ -64,13 +68,32 @@ export class AccountService {
   }
 
   async preferences(tenantId: string): Promise<PreferencesView> {
+    return this.prisma.comTenant(tenantId, (tx) => this.lerPreferencias(tx, tenantId));
+  }
+
+  /**
+   * O corpo do `preferences`, recebendo o `tx`.
+   *
+   * **Seis métodos deste arquivo terminam devolvendo as preferências**, e todos
+   * chamavam `this.preferences()`. Se ele abrisse o próprio bloco, cada um
+   * desses métodos abriria transação dentro de transação, segurando duas
+   * conexões. Com a versão que recebe o `tx`, o método público embrulha uma vez
+   * e os internos reaproveitam o bloco que já está aberto.
+   *
+   * Mesmo conserto do `assertNaoEUltimoDono` no `TeamService`, e o mesmo que o
+   * `EntitlementsService` vai precisar.
+   */
+  private async lerPreferencias(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+  ): Promise<PreferencesView> {
     const [state, tenant] = await Promise.all([
-      this.prisma.onboardingState.upsert({
+      tx.onboardingState.upsert({
         where: { tenantId },
         create: { tenantId },
         update: {},
       }),
-      this.prisma.tenant.findUnique({
+      tx.tenant.findUnique({
         where: { id: tenantId },
         select: {
           segment: { select: { id: true, name: true, macroSegment: true } },
@@ -103,8 +126,9 @@ export class AccountService {
     segmentId: string | null,
     aplicarPadroes: boolean,
   ): Promise<PreferencesView> {
+    return this.prisma.comTenant(tenantId, async (tx) => {
     const segment = segmentId
-      ? await this.prisma.segment.findFirst({
+      ? await tx.segment.findFirst({
           where: { id: segmentId, isActive: true },
         })
       : null;
@@ -113,18 +137,18 @@ export class AccountService {
       throw new NotFoundException('Segmento não encontrado');
     }
 
-    await this.prisma.tenant.update({
+    await tx.tenant.update({
       where: { id: tenantId },
       data: { segmentId: segment?.id ?? null },
     });
 
     if (segment && aplicarPadroes) {
-      const atual = await this.preferences(tenantId);
+      const atual = await this.lerPreferencias(tx, tenantId);
 
       const unir = (existente: string[], novo: string[]): string[] =>
         Array.from(new Set([...existente, ...novo]));
 
-      await this.prisma.onboardingState.upsert({
+      await tx.onboardingState.upsert({
         where: { tenantId },
         create: {
           tenantId,
@@ -138,7 +162,7 @@ export class AccountService {
       });
     }
 
-    await this.prisma.auditLog.create({
+    await tx.auditLog.create({
       data: {
         tenantId,
         actorId: userId,
@@ -149,7 +173,8 @@ export class AccountService {
       },
     });
 
-    return this.preferences(tenantId);
+    return this.lerPreferencias(tx, tenantId);
+    });
   }
 
   /**
@@ -161,16 +186,17 @@ export class AccountService {
    * data original, porque a informação útil é quando terminou da primeira vez.
    */
   async completeOnboarding(tenantId: string, userId: string): Promise<PreferencesView> {
-    const existing = await this.prisma.onboardingState.findUnique({ where: { tenantId } });
+    return this.prisma.comTenant(tenantId, async (tx) => {
+    const existing = await tx.onboardingState.findUnique({ where: { tenantId } });
 
     if (!existing?.completedAt) {
-      await this.prisma.onboardingState.upsert({
+      await tx.onboardingState.upsert({
         where: { tenantId },
         create: { tenantId, completedAt: new Date() },
         update: { completedAt: new Date() },
       });
 
-      await this.prisma.auditLog.create({
+      await tx.auditLog.create({
         data: {
           tenantId,
           actorId: userId,
@@ -181,7 +207,8 @@ export class AccountService {
       });
     }
 
-    return this.preferences(tenantId);
+    return this.lerPreferencias(tx, tenantId);
+    });
   }
 
   /**
@@ -193,13 +220,14 @@ export class AccountService {
    * o usuário entende como "só quero olhar de novo".
    */
   async restartOnboarding(tenantId: string, userId: string): Promise<PreferencesView> {
-    await this.prisma.onboardingState.upsert({
+    return this.prisma.comTenant(tenantId, async (tx) => {
+    await tx.onboardingState.upsert({
       where: { tenantId },
       create: { tenantId },
       update: { completedAt: null },
     });
 
-    await this.prisma.auditLog.create({
+    await tx.auditLog.create({
       data: {
         tenantId,
         actorId: userId,
@@ -209,7 +237,8 @@ export class AccountService {
       },
     });
 
-    return this.preferences(tenantId);
+    return this.lerPreferencias(tx, tenantId);
+    });
   }
 
   /**
@@ -224,9 +253,10 @@ export class AccountService {
     userId: string,
     input: UpdatePreferencesInput,
   ): Promise<PreferencesView & { scoreAffected: boolean }> {
-    const before = await this.preferences(tenantId);
+    return this.prisma.comTenant(tenantId, async (tx) => {
+    const before = await this.lerPreferencias(tx, tenantId);
 
-    const state = await this.prisma.onboardingState.upsert({
+    const state = await tx.onboardingState.upsert({
       where: { tenantId },
       create: {
         tenantId,
@@ -259,7 +289,7 @@ export class AccountService {
       JSON.stringify(before.targetNiches) !== JSON.stringify(input.targetNiches ?? before.targetNiches) ||
       JSON.stringify(before.targetRegions) !== JSON.stringify(input.targetRegions ?? before.targetRegions);
 
-    await this.prisma.auditLog.create({
+    await tx.auditLog.create({
       data: {
         tenantId,
         actorId: userId,
@@ -277,7 +307,8 @@ export class AccountService {
     // `segment` entrou — o typecheck pegou, mas só porque o campo é
     // obrigatório. Campo opcional teria passado, e a tela mostraria "sem
     // segmento" depois de salvar preferências.
-    return { ...(await this.preferences(tenantId)), scoreAffected };
+    return { ...(await this.lerPreferencias(tx, tenantId)), scoreAffected };
+    });
   }
 
   /**
@@ -295,12 +326,38 @@ export class AccountService {
     const niches = preferences.targetNiches.map((niche) => niche.toLowerCase());
     const regions = preferences.targetRegions.map((region) => region.toLowerCase());
 
-    const leads = await this.prisma.lead.findMany({
-      where: { tenantId, deletedAt: null },
-      include: { digitalPresence: true, score: true },
-    });
+    const leads = await this.prisma.comTenant(tenantId, (tx) =>
+      tx.lead.findMany({
+        where: { tenantId, deletedAt: null },
+        include: { digitalPresence: true, score: true },
+      }),
+    );
 
-    for (const lead of leads) {
+    /**
+     * **Em lotes, e não num bloco só.**
+     *
+     * Este laço faz três consultas por lead. Numa base de mil leads são três
+     * mil comandos — e uma transação do Prisma os serializa numa conexão só.
+     * A ~3 ms cada, isso é meio minuto dentro de um bloco cujo teto é 10 s: o
+     * recálculo morreria por timeout justamente nos workspaces grandes, que são
+     * os que mais precisam dele.
+     *
+     * Cem por lote dá cerca de trezentos comandos, ou ~1 s — folga confortável
+     * contra o teto, e continua pagando o custo do contexto uma vez a cada cem
+     * leads em vez de uma vez por lead.
+     *
+     * **Não se perde atomicidade**, porque ela não existia: hoje cada lead já é
+     * um conjunto de comandos soltos, e um erro no meio deixa metade da base
+     * recalculada. Em lotes, o mesmo erro deixa metade — só que com fronteira
+     * conhecida.
+     */
+    const LOTE = 100;
+
+    for (let inicio = 0; inicio < leads.length; inicio += LOTE) {
+      const lote = leads.slice(inicio, inicio + LOTE);
+
+      await this.prisma.comTenant(tenantId, async (tx) => {
+    for (const lead of lote) {
       const category = (lead.category ?? '').toLowerCase();
       const city = (lead.addressCity ?? '').toLowerCase();
 
@@ -329,7 +386,7 @@ export class AccountService {
 
       const result = computeScore(input);
 
-      const score = await this.prisma.leadScore.upsert({
+      const score = await tx.leadScore.upsert({
         where: { leadId: lead.id },
         create: {
           tenantId,
@@ -345,8 +402,8 @@ export class AccountService {
         },
       });
 
-      await this.prisma.leadScoreReason.deleteMany({ where: { scoreId: score.id } });
-      await this.prisma.leadScoreReason.createMany({
+      await tx.leadScoreReason.deleteMany({ where: { scoreId: score.id } });
+      await tx.leadScoreReason.createMany({
         data: result.reasons.map((reason) => ({
           tenantId,
           scoreId: score.id,
@@ -358,8 +415,11 @@ export class AccountService {
         })),
       });
     }
+      });
+    }
 
-    await this.prisma.auditLog.create({
+    await this.prisma.comTenant(tenantId, (tx) =>
+      tx.auditLog.create({
       data: {
         tenantId,
         actorId: userId,
@@ -368,7 +428,8 @@ export class AccountService {
         entityId: tenantId,
         after: { updated: leads.length },
       },
-    });
+      }),
+    );
 
     return { updated: leads.length };
   }

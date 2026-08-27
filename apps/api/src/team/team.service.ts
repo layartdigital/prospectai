@@ -18,7 +18,9 @@ import {
 } from '@propectai/types';
 
 import { EntitlementsService } from '../entitlements/entitlements.service';
-import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '@prisma/client';
+
+import { declararTenant, PrismaService } from '../prisma/prisma.service';
 
 /** Convite vence em sete dias. Link eterno é credencial eterna. */
 const INVITE_TTL_DAYS = 7;
@@ -40,18 +42,20 @@ export class TeamService {
   // ---------------------------------------------------------------------------
 
   async list(tenantId: string, planCode: string, userId: string): Promise<TeamView> {
-    const [memberships, invitations] = await Promise.all([
-      this.prisma.membership.findMany({
+    const [memberships, invitations] = await this.prisma.comTenant(tenantId, (tx) =>
+      Promise.all([
+      tx.membership.findMany({
         where: { tenantId, deletedAt: null },
         include: { user: true },
         orderBy: { createdAt: 'asc' },
       }),
-      this.prisma.invitation.findMany({
+      tx.invitation.findMany({
         where: { tenantId, acceptedAt: null, revokedAt: null },
         include: { invitedBy: true },
         orderBy: { createdAt: 'desc' },
       }),
-    ]);
+      ]),
+    );
 
     const pendentes = invitations.filter((convite) => convite.expiresAt > new Date());
 
@@ -103,22 +107,36 @@ export class TeamService {
       );
     }
 
-    const jaMembro = await this.prisma.membership.findFirst({
-      where: { tenantId, deletedAt: null, user: { email } },
-    });
-    if (jaMembro) {
-      throw new ConflictException('Esta pessoa já faz parte do workspace');
-    }
-
-    const jaConvidado = await this.prisma.invitation.findFirst({
+    /**
+     * **Três blocos, e não um. O `this.list()` abaixo é o motivo.**
+     *
+     * `list` é método público e abre o próprio `comTenant`. Chamá-lo de dentro
+     * de um bloco abriria transação dentro de transação, segurando duas conexões
+     * ao mesmo tempo. Então as conferências ficam num bloco, a contagem de
+     * assentos usa o dela, e a gravação usa um terceiro.
+     *
+     * O conserto natural é extrair uma contagem de assentos que receba o `tx` —
+     * hoje o `list` busca membros e convites inteiros, com `include`, só para
+     * contar. Fica para depois: isto aqui é conversão, não otimização.
+     */
+    const { jaMembro, jaConvidado } = await this.prisma.comTenant(tenantId, async (tx) => ({
+      jaMembro: await tx.membership.findFirst({
+        where: { tenantId, deletedAt: null, user: { email } },
+      }),
+      jaConvidado: await tx.invitation.findFirst({
       where: {
         tenantId,
         email,
         acceptedAt: null,
         revokedAt: null,
         expiresAt: { gt: new Date() },
-      },
-    });
+        },
+      }),
+    }));
+
+    if (jaMembro) {
+      throw new ConflictException('Esta pessoa já faz parte do workspace');
+    }
     if (jaConvidado) {
       throw new ConflictException('Já existe um convite pendente para este e-mail');
     }
@@ -144,27 +162,33 @@ export class TeamService {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
 
-    const convite = await this.prisma.invitation.create({
-      data: {
-        tenantId,
-        email,
-        role: input.role,
-        tokenHash: hashToken(token),
-        invitedById: convidante.id,
-        expiresAt,
-      },
-      include: { invitedBy: true },
-    });
+    // Convite e registro juntos: um convite sem rastro de quem convidou é
+    // exatamente o que o `AuditLog` existe para não deixar acontecer.
+    const convite = await this.prisma.comTenant(tenantId, async (tx) => {
+      const criado = await tx.invitation.create({
+        data: {
+          tenantId,
+          email,
+          role: input.role,
+          tokenHash: hashToken(token),
+          invitedById: convidante.id,
+          expiresAt,
+        },
+        include: { invitedBy: true },
+      });
 
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId,
-        actorId: convidante.id,
-        action: 'team.invited',
-        entityType: 'Invitation',
-        entityId: convite.id,
-        after: { email, role: input.role },
-      },
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorId: convidante.id,
+          action: 'team.invited',
+          entityType: 'Invitation',
+          entityId: criado.id,
+          after: { email, role: input.role },
+        },
+      });
+
+      return criado;
     });
 
     return {
@@ -184,25 +208,27 @@ export class TeamService {
     invitationId: string,
     userId: string,
   ): Promise<void> {
-    const convite = await this.prisma.invitation.findFirst({
-      where: { id: invitationId, tenantId },
-    });
-    if (!convite) throw new NotFoundException('Convite não encontrado');
+    await this.prisma.comTenant(tenantId, async (tx) => {
+      const convite = await tx.invitation.findFirst({
+        where: { id: invitationId, tenantId },
+      });
+      if (!convite) throw new NotFoundException('Convite não encontrado');
 
-    await this.prisma.invitation.update({
-      where: { id: invitationId },
-      data: { revokedAt: new Date() },
-    });
+      await tx.invitation.update({
+        where: { id: invitationId },
+        data: { revokedAt: new Date() },
+      });
 
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId,
-        actorId: userId,
-        action: 'team.invitation_revoked',
-        entityType: 'Invitation',
-        entityId: invitationId,
-        before: { email: convite.email, role: convite.role },
-      },
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorId: userId,
+          action: 'team.invitation_revoked',
+          entityType: 'Invitation',
+          entityId: invitationId,
+          before: { email: convite.email, role: convite.role },
+        },
+      });
     });
   }
 
@@ -258,6 +284,16 @@ export class TeamService {
     const passwordHash = existente ? null : await argonHash(input.password);
 
     return this.prisma.$transaction(async (tx) => {
+      /**
+       * **Contexto declarado no meio, como no `register`.**
+       *
+       * O tenant já existe — veio do convite —, mas o usuário pode nascer aqui.
+       * O `user.create` logo abaixo toca uma tabela global e não precisa de
+       * contexto; tudo o que vem depois (`membership`, `invitation`,
+       * `auditLog`) é escopado e precisa.
+       */
+      await declararTenant(tx, convite.tenantId);
+
       const user =
         existente ??
         (await tx.user.create({
@@ -314,7 +350,8 @@ export class TeamService {
     ator: { id: string; role: Role },
     novoPapel: Role,
   ): Promise<void> {
-    const membership = await this.prisma.membership.findFirst({
+    await this.prisma.comTenant(tenantId, async (tx) => {
+    const membership = await tx.membership.findFirst({
       where: { id: membershipId, tenantId, deletedAt: null },
     });
     if (!membership) throw new NotFoundException('Membro não encontrado');
@@ -329,15 +366,15 @@ export class TeamService {
     }
 
     if (membership.role === 'OWNER' && novoPapel !== 'OWNER') {
-      await this.assertNaoEUltimoDono(tenantId, membershipId);
+      await this.assertNaoEUltimoDono(tx, tenantId, membershipId);
     }
 
-    await this.prisma.membership.update({
+    await tx.membership.update({
       where: { id: membershipId },
       data: { role: novoPapel },
     });
 
-    await this.prisma.auditLog.create({
+    await tx.auditLog.create({
       data: {
         tenantId,
         actorId: ator.id,
@@ -348,6 +385,7 @@ export class TeamService {
         after: { role: novoPapel },
       },
     });
+    });
   }
 
   async removeMember(
@@ -355,7 +393,8 @@ export class TeamService {
     membershipId: string,
     ator: { id: string; role: Role },
   ): Promise<void> {
-    const membership = await this.prisma.membership.findFirst({
+    await this.prisma.comTenant(tenantId, async (tx) => {
+    const membership = await tx.membership.findFirst({
       where: { id: membershipId, tenantId, deletedAt: null },
       include: { user: true },
     });
@@ -366,24 +405,28 @@ export class TeamService {
     }
 
     if (membership.role === 'OWNER') {
-      await this.assertNaoEUltimoDono(tenantId, membershipId);
+      await this.assertNaoEUltimoDono(tx, tenantId, membershipId);
     }
 
     // Soft delete: o histórico do lead aponta para o autor, e apagar o vínculo
     // deixaria contatos e notas órfãos de quem os registrou.
-    await this.prisma.membership.update({
+    await tx.membership.update({
       where: { id: membershipId },
       data: { deletedAt: new Date() },
     });
 
     // A sessão precisa morrer junto. Sem isto, quem foi removido continua
     // trabalhando até o access token expirar.
-    await this.prisma.refreshToken.updateMany({
+    //
+    // `refresh_tokens` não tem `tenantId` — é da pessoa, não do workspace —, e
+    // por isso nunca terá política. Estar dentro do bloco não a submete a nada:
+    // ganha só a atomicidade com o soft delete acima, que é o que importa aqui.
+    await tx.refreshToken.updateMany({
       where: { userId: membership.userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
 
-    await this.prisma.auditLog.create({
+    await tx.auditLog.create({
       data: {
         tenantId,
         actorId: ator.id,
@@ -392,6 +435,7 @@ export class TeamService {
         entityId: membershipId,
         before: { email: membership.user.email, role: membership.role },
       },
+    });
     });
   }
 
@@ -403,11 +447,17 @@ export class TeamService {
    * Workspace sem dono é workspace sem quem mude plano, convide ou remova.
    * Estado irrecuperável pela própria interface.
    */
-  private async assertNaoEUltimoDono(
-    tenantId: string,
-    membershipId: string,
-  ): Promise<void> {
-    const outrosDonos = await this.prisma.membership.count({
+  /**
+   * Recebe o `tx` em vez de usar o client injetado.
+   *
+   * É o padrão para todo auxiliar chamado de dentro de um `comTenant`: se ele
+   * abrisse a própria consulta, rodaria fora da transação — e, com a política
+   * ligada, fora do contexto de tenant, devolvendo zero. O mesmo conserto que
+   * o `EntitlementsService` vai precisar.
+   */
+  private async assertNaoEUltimoDono(tx: Prisma.TransactionClient, tenantId: string,
+    membershipId: string,): Promise<void> {
+    const outrosDonos = await tx.membership.count({
       where: {
         tenantId,
         role: 'OWNER',
@@ -423,6 +473,19 @@ export class TeamService {
     }
   }
 
+  /**
+   * **Atravessa tenants por desenho, e não recebe `comTenant`.**
+   *
+   * Quem aceita um convite **ainda não pertence ao workspace** — é justamente
+   * o que o convite existe para mudar. Não há tenant a declarar: ele é o
+   * resultado da busca, não a entrada dela. O token é a credencial, e o
+   * `tokenHash` é o que a torna inútil se o banco vazar.
+   *
+   * Quarto caminho de travessia deliberada do repositório, junto com o
+   * `AdminService`, o `PrivacyService` e o `getSession`. Quando a família 6
+   * puser política em `invitations`, esta busca devolve zero e **convite
+   * nenhum pode ser aceito** — precisa do papel que atravessa tenants.
+   */
   private async conviteValido(token: string) {
     const convite = await this.prisma.invitation.findUnique({
       where: { tokenHash: hashToken(token) },
