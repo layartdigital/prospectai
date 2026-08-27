@@ -10,7 +10,6 @@ import { JwtService } from '@nestjs/jwt';
 import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
 import {
   type AuthTenant,
-  type PlanCode,
   type Role,
   type SessionResponse,
 } from '@propectai/types';
@@ -257,7 +256,7 @@ export class AuthService {
       name: membership.tenant.name,
       slug: membership.tenant.slug,
       role: membership.role as Role,
-      planCode: (membership.tenant.subscription?.plan.code ?? 'FREE') as PlanCode,
+      planCode: membership.tenant.subscription?.plan.code ?? 'FREE',
     }));
 
     const active =

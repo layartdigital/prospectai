@@ -1,4 +1,4 @@
-import type { PlanCode, Role } from '@propectai/types';
+import type { Role } from '@propectai/types';
 import type { Request } from 'express';
 
 export interface AuthenticatedUser {
@@ -10,7 +10,8 @@ export interface ActiveTenant {
   id: string;
   slug: string;
   role: Role;
-  planCode: PlanCode;
+  /** Texto livre desde o passo 4 do §11.1: `Plan.code` e chave, nao enum. */
+  planCode: string;
   /** ISO 3166-1 alpha-2. Decide locale da taxonomia e regra de normalização. */
   country: string;
   /** ISO 4217. */

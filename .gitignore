@@ -57,3 +57,10 @@ e2e-saida.txt
 # Copias feitas antes de hotfix. O git ja e o backup — manter cópia velha de
 # codigo de autenticacao versionada e convidar alguem a abrir a errada.
 _hotfix-backups/
+
+# Gate 0 — medicoes sobre negocios reais e dump do banco de desenvolvimento.
+# Ficam fora do git: sao dados de terceiros (regra 6), e dump versionado e
+# permanente mesmo depois de apagado num commit seguinte.
+gate0/pre-f0.dump
+gate0/cnpjs.txt
+gate0_*.csv

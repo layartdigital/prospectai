@@ -1,6 +1,6 @@
 'use client';
 
-import type { AdminTenantList, AdminTenantView, PlanCode } from '@propectai/types';
+import type { AdminTenantList, AdminTenantView } from '@propectai/types';
 import { Ban, Loader2, PlayCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -8,10 +8,12 @@ import { useState } from 'react';
 import { clientApi } from '@/lib/client-api';
 import { formatDateTime, formatInteger } from '@/lib/utils';
 
-const PLANOS: PlanCode[] = ['FREE', 'START', 'PRO', 'AGENCY'];
-
 export function TenantsTable({ data }: { data: AdminTenantList }) {
   const router = useRouter();
+  // A lista de planos do seletor sai do proprio resumo, que o servidor monta
+  // consultando a tabela `plans`. Plano criado no Master aparece aqui sem
+  // mudanca de codigo — que e o ponto inteiro do passo 4 do §11.1.
+  const planos = Object.keys(data.summary.byPlan);
   const [busy, setBusy] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -63,6 +65,7 @@ export function TenantsTable({ data }: { data: AdminTenantList }) {
               <Linha
                 key={tenant.id}
                 tenant={tenant}
+                planos={planos}
                 busy={busy === tenant.id}
                 onTrocarPlano={(planCode, reason) =>
                   void executar(tenant.id, () =>
@@ -98,14 +101,26 @@ export function TenantsTable({ data }: { data: AdminTenantList }) {
 
 function Linha({
   tenant,
+  planos,
   busy,
   onTrocarPlano,
   onSuspender,
   onReativar,
 }: {
   tenant: AdminTenantView;
+  /**
+   * Planos existentes, vindos do servidor.
+   *
+   * Antes era uma constante de quatro literais neste arquivo. Com a tela de
+   * planos do Master, um plano novo simplesmente nao apareceria no seletor —
+   * e a tela de trocar plano nao ofereceria o plano recem-criado.
+   *
+   * As chaves de `summary.byPlan` sao a lista que o banco devolveu, entao o
+   * seletor acompanha o banco sem endpoint novo.
+   */
+  planos: string[];
   busy: boolean;
-  onTrocarPlano: (planCode: PlanCode, reason: string) => void;
+  onTrocarPlano: (planCode: string, reason: string) => void;
   onSuspender: (reason: string) => void;
   onReativar: () => void;
 }) {
@@ -149,11 +164,11 @@ function Linha({
               event.target.value = tenant.planCode;
               return;
             }
-            onTrocarPlano(event.target.value as PlanCode, reason.trim());
+            onTrocarPlano(event.target.value, reason.trim());
           }}
           className="rounded-control border border-line bg-surface px-2.5 py-1.5 text-xs text-navy-900 disabled:opacity-60"
         >
-          {PLANOS.map((code) => (
+          {planos.map((code) => (
             <option key={code} value={code}>
               {code}
             </option>

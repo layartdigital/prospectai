@@ -14,7 +14,9 @@ export type Capability =
   | 'export.xlsx'
   | 'pipeline'
   | 'ai.outreach'
-  | 'phone.full';
+  | 'phone.full'
+  | 'audit.run'
+  | 'audit.export';
 
 /**
  * Limites de quem não tem plano identificável.
@@ -29,6 +31,7 @@ const LIMITES_MINIMOS: PlanLimits = {
   leadsIncluded: 0,
   searchesPerMonth: 0,
   aiGenerationsPerMonth: 0,
+  auditsPerMonth: 0,
   maxUsers: 1,
   exportFormats: [],
   retentionDays: 30,
@@ -111,8 +114,42 @@ export class EntitlementsService implements OnModuleInit, OnModuleDestroy {
 
     this.cache.clear();
     for (const plano of planos) {
-      this.cache.set(plano.code, plano.limits as unknown as PlanLimits);
+      this.cache.set(plano.code, this.normalizar(plano.code, plano.limits));
     }
+  }
+
+  /**
+   * Completa o que faltar com o limite mínimo, e avisa alto.
+   *
+   * `Plan.limits` é JSON, e `as unknown as PlanLimits` é uma afirmação sem
+   * prova: um plano gravado antes de um limite novo existir simplesmente não
+   * tem a chave, e o tipo diz que tem. Sem esta etapa, `limits.auditsPerMonth`
+   * seria `undefined` no meio de uma comparação numérica, e cada ponto de
+   * leitura precisaria do seu próprio `?? 0` — quinze defesas em vez de uma.
+   *
+   * O padrão é o mínimo, nunca o do FREE, pela mesma razão do
+   * `LIMITES_MINIMOS`: errar para o lado generoso entrega recurso pago de
+   * graça sem dar sinal.
+   *
+   * **O aviso não é opcional.** Um plano que perde limite em silêncio degrada
+   * o produto para o cliente sem ninguém saber por quê — que é o modo de falha
+   * que este arquivo inteiro existe para impedir.
+   */
+  private normalizar(code: string, bruto: unknown): PlanLimits {
+    const parcial = (bruto ?? {}) as Partial<PlanLimits>;
+    const faltando = (Object.keys(LIMITES_MINIMOS) as (keyof PlanLimits)[]).filter(
+      (chave) => parcial[chave] === undefined,
+    );
+
+    if (faltando.length > 0) {
+      this.logger.warn(
+        `Plano "${code}" não tem ${faltando.join(', ')} em Plan.limits. ` +
+          'Aplicando o mínimo nesses campos — rode `pnpm db:seed` para gravar ' +
+          'os valores do catálogo.',
+      );
+    }
+
+    return { ...LIMITES_MINIMOS, ...parcial };
   }
 
   limits(planCode: string): PlanLimits {
@@ -144,6 +181,12 @@ export class EntitlementsService implements OnModuleInit, OnModuleDestroy {
         return limits.aiGenerationsPerMonth > 0;
       case 'phone.full':
         return !limits.maskPhones;
+      case 'audit.run':
+        return limits.auditsPerMonth > 0;
+      case 'audit.export':
+        // Separado de `audit.run` porque a Fase 4 pode restringir o PDF sem
+        // restringir a auditoria — o gate precisa existir antes da regra.
+        return limits.auditsPerMonth > 0;
       default:
         return false;
     }
@@ -188,6 +231,19 @@ export class EntitlementsService implements OnModuleInit, OnModuleDestroy {
     const usage = await this.currentUsage(tenantId);
     const included = this.limits(planCode).leadsIncluded;
     return Math.max(0, included - usage.leadsReserved - usage.leadsSettled);
+  }
+
+  /**
+   * Saldo de auditorias do periodo.
+   *
+   * Espelha `availableLeadCredits`, e a diferenca e que aqui nao ha reserva:
+   * a auditoria e sob demanda e sincrona do ponto de vista da cota — conta ao
+   * executar, nao ao enfileirar. Nao ha o caso "reservou e nao virou lead".
+   */
+  async availableAuditCredits(tenantId: string, planCode: string): Promise<number> {
+    const usage = await this.currentUsage(tenantId);
+    const included = this.limits(planCode).auditsPerMonth;
+    return Math.max(0, included - usage.auditsCount);
   }
 
   /** Mascara o telefone quando o plano exige: (11) ••••••-0924 */

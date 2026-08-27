@@ -5,10 +5,15 @@ import IORedis from 'ioredis';
 import { QUEUE_NAMES, QUEUE_PREFIX, config } from './config';
 import { logger } from './logger';
 import {
+  processAuditJob,
+  type AuditJobPayload,
+} from './pipeline/process-audit-job';
+import {
   processScrapeJob,
   type ScrapeJobPayload,
 } from './pipeline/process-scrape-job';
 import { createLeadSourceProvider } from './providers';
+import { createSiteAuditProvider } from './providers/site-audit';
 
 /**
  * Worker do PropectAI.
@@ -20,6 +25,16 @@ import { createLeadSourceProvider } from './providers';
 
 const prisma = new PrismaClient();
 const provider = createLeadSourceProvider();
+const auditProvider = createSiteAuditProvider();
+
+/**
+ * Tentativas da auditoria.
+ *
+ * Declarado aqui e nao so nas opcoes do job porque o pipeline precisa saber se
+ * esta na ultima: e o que decide entre levantar o erro — deixando o BullMQ
+ * repetir — e gravar `FAILED` devolvendo a cota.
+ */
+const AUDIT_TENTATIVAS = 3;
 
 const connection = new IORedis(config.redisUrl, { maxRetriesPerRequest: null });
 
@@ -54,6 +69,40 @@ const scrapeWorker = new Worker<ScrapeJobPayload>(
   },
 );
 
+const auditWorker = new Worker<AuditJobPayload>(
+  QUEUE_NAMES.audit,
+  async (job: Job<AuditJobPayload>) => {
+    // **O id do job e a credencial da mensagem.** Sem ele o pipeline nao tem
+    // como separar retry legitimo de payload forjado — ver `audit-decisoes.ts`.
+    const queueJobId = job.id;
+    if (queueJobId === undefined) {
+      throw new Error('Job de auditoria sem id: impossivel distinguir retry de forjado');
+    }
+
+    const result = await processAuditJob(prisma, auditProvider, job.data, {
+      queueJobId,
+      ultimaTentativa: job.attemptsMade + 1 >= AUDIT_TENTATIVAS,
+    });
+
+    logger.info({ jobId: job.id, ...result }, 'Auditoria concluída');
+    return result;
+  },
+  {
+    connection,
+    prefix: QUEUE_PREFIX,
+    // Mais folgada que a coleta: a auditoria fala com o site do próprio lead,
+    // um alvo por vez, e não com uma fonte que bloqueia por volume.
+    concurrency: 4,
+  },
+);
+
+auditWorker.on('failed', (job, error) => {
+  logger.error(
+    { jobId: job?.id, attempt: job?.attemptsMade, error: error.message },
+    'Job de auditoria falhou',
+  );
+});
+
 scrapeWorker.on('failed', (job, error) => {
   logger.error(
     { jobId: job?.id, attempt: job?.attemptsMade, error: error.message },
@@ -67,7 +116,7 @@ scrapeWorker.on('completed', (job) => {
 
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Encerrando worker');
-  await scrapeWorker.close();
+  await Promise.all([scrapeWorker.close(), auditWorker.close()]);
   await connection.quit();
   await prisma.$disconnect();
   process.exit(0);
@@ -80,6 +129,7 @@ logger.info(
   {
     redis: config.redisUrl,
     provider: provider.name,
+    auditProvider: auditProvider.name,
     concurrency: config.maxConcurrentJobs,
     scraper: config.scraperBaseUrl,
   },

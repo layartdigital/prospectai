@@ -1,18 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { type AdminTenantList, type AdminTenantView, type PlanCode } from '@propectai/types';
+import { type AdminTenantList, type AdminTenantView } from '@propectai/types';
 
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
-
-/**
- * Planos considerados na estatística por plano.
- *
- * Ainda fixo. Vira consulta ao banco no passo 4 de
- * `docs/strategic/lacunas-estruturais.md` §11.1, junto com o alargamento de
- * `PlanCode` — enquanto ninguém consegue criar plano, uma lista fixa não
- * esconde nada. Depois da tela do Master, esconderia.
- */
-const PLANOS: PlanCode[] = ['FREE', 'START', 'PRO', 'AGENCY'];
 
 @Injectable()
 export class AdminService {
@@ -57,7 +47,7 @@ export class AdminService {
     );
 
     const items: AdminTenantView[] = tenants.map((tenant) => {
-      const planCode = (tenant.subscription?.plan.code ?? 'FREE') as PlanCode;
+      const planCode = tenant.subscription?.plan.code ?? 'FREE';
       const limits = this.entitlements.limits(planCode);
       const uso = usoPorTenant.get(tenant.id);
 
@@ -88,9 +78,23 @@ export class AdminService {
       };
     });
 
-    const byPlan = Object.fromEntries(
-      PLANOS.map((code) => [code, items.filter((t) => t.planCode === code).length]),
-    ) as Record<PlanCode, number>;
+    // Os planos vêm do banco, não de lista fixa.
+    //
+    // Enquanto ninguém conseguia criar plano, a lista compilada não escondia
+    // nada. Depois da tela do Master, esconderia: um plano novo teria zero
+    // tenants na estatística até alguém lembrar de editar este arquivo — e a
+    // estatística estaria errada sem dar sinal.
+    //
+    // Inclui plano inativo com contagem zero de propósito: sumir da tabela e
+    // ter zero são coisas diferentes, e só a segunda é informação.
+    const planos = await this.prisma.plan.findMany({
+      select: { code: true },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    const byPlan: Record<string, number> = Object.fromEntries(
+      planos.map(({ code }) => [code, items.filter((t) => t.planCode === code).length]),
+    );
 
     return {
       items,
@@ -113,12 +117,12 @@ export class AdminService {
    *
    * O motivo é obrigatório: troca de plano sem justificativa vira mistério em
    * auditoria seis meses depois, quando alguém perguntar por que este cliente
-   * está em AGENCY.
+   * está no plano em que está.
    */
   async changePlan(
     tenantId: string,
     operadorId: string,
-    input: { planCode: PlanCode; reason: string },
+    input: { planCode: string; reason: string },
   ): Promise<void> {
     const tenant = await this.prisma.tenant.findFirst({
       where: { id: tenantId, deletedAt: null },

@@ -30,21 +30,6 @@ enum Role {
   VIEWER
 }
 
-/// **Em remocao.** Mantido apenas enquanto `prisma/set-plan.ts` e as
-/// assinaturas de metodo dos services migram para `string` — ver
-/// `docs/strategic/lacunas-estruturais.md` §11.1, passos 4 e 5.
-///
-/// `Plan.code` deixou de usa-lo em 13/08/2026: plano precisa ser criado e
-/// excluido pelo Master, e enum do Postgres torna isso migration. Mesmo
-/// defeito da taxonomia de segmentos — informacao que muda por decisao
-/// comercial vivendo compilada.
-enum PlanCode {
-  FREE
-  START
-  PRO
-  AGENCY
-}
-
 /// Espelha os estados do Stripe de proposito.
 ///
 /// Traduzir para um vocabulario proprio pareceria mais limpo e criaria a
@@ -73,6 +58,49 @@ enum ScrapeJobStatus {
   COMPLETED
   FAILED
   CANCELLED
+}
+
+/// Desfecho de uma auditoria de presenca digital.
+///
+/// Tem `PARTIAL`, que o `ScrapeJobStatus` nao tem — e a diferenca importa: na
+/// auditoria, tres de sete checagens concluirem e o caso comum, nao a excecao.
+/// Sem um estado proprio, "parcial" viraria COMPLETED (e o relatorio afirmaria
+/// o que nao mediu) ou FAILED (e o cliente perderia o que ja foi verificado).
+enum AuditStatus {
+  REQUESTED
+  QUEUED
+  RUNNING
+  COMPLETED
+  /// Persiste o obtido, cobra o executado, reprocessa so o que falhou.
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+/// As medicoes do `scope-v0.2.md` §3.1.
+///
+/// INSTAGRAM_LINK e FACEBOOK_LINK NAO estao aqui, e a ausencia e deliberada: a
+/// `SECURITY-EGRESS-POLICY-v3.md` §8 exige reclassificar a privacidade do link
+/// social antes — para clinica, advogado e MEI o Instagram do site e o perfil
+/// pessoal. Entram na Fase 3, depois da decisao.
+enum SiteCheck {
+  DNS
+  HTTP_REACHABLE
+  HTTPS
+  REDIRECT_CHAIN
+  VIEWPORT_META
+  TTFB
+  TITLE_META
+}
+
+/// OK mediu. FAILED tentou e nao conseguiu. SKIPPED nao tentou.
+///
+/// Os tres sao diferentes no relatorio: FAILED e informacao sobre o site do
+/// prospect, SKIPPED e informacao sobre a nossa execucao.
+enum CheckOutcome {
+  OK
+  FAILED
+  SKIPPED
 }
 
 enum LeadSource {
@@ -242,6 +270,7 @@ model User {
   ownedCards     PipelineCard[]
   outreach       OutreachMessage[]
   transitions    PipelineTransition[]
+  presenceAudits DigitalPresenceAudit[]
 
   @@index([email])
   @@map("users")
@@ -627,6 +656,10 @@ model PlanUsage {
   searchesCount       Int      @default(0)
   aiGenerationsCount  Int      @default(0)
   exportsCount        Int      @default(0)
+  /// Auditorias de presenca digital consumidas no periodo.
+  /// Cota por plano — `scope-v0.2.md` §6. O gate age na tentativa, nunca no
+  /// carregamento da tela.
+  auditsCount         Int      @default(0)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -942,9 +975,13 @@ model Lead {
   outreachMessages OutreachMessage[]
   tags             LeadTag[]
   proposals        Proposal[]
+  presenceAudits   DigitalPresenceAudit[]
 
   @@unique([tenantId, fingerprint])
   @@unique([tenantId, placeId])
+  // Alvo das FKs compostas dos filhos com tenantId proprio.
+  // Sem esta unicidade o Postgres recusa a FK: ERROR 42830.
+  @@unique([tenantId, id])
   @@index([tenantId, createdAt])
   @@index([tenantId, addressStateUf, addressCity])
   @@index([tenantId, websiteStatus])
@@ -966,9 +1003,15 @@ model LeadSourceRecord {
   collectedAt DateTime   @default(now())
   createdAt   DateTime   @default(now())
 
-  lead      Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// FK composta: o tenantId desta linha nao pode divergir do tenant do lead.
+  /// Antes disto, tenantId era coluna solta e a garantia era so disciplina.
+  lead      Lead       @relation(fields: [tenantId, leadId], references: [tenantId, id], onDelete: Cascade)
+  /// scrapeJob permanece simples de proposito — ver F0-MIGRATION §2.2.
   scrapeJob ScrapeJob? @relation(fields: [scrapeJobId], references: [id], onDelete: SetNull)
 
+  // Exigido pelo validador para manter a relacao 1-1: o conjunto exato de
+  // campos da relacao precisa ser unico, e leadId @unique sozinho nao basta.
+  @@unique([tenantId, leadId])
   @@index([tenantId])
   @@index([scrapeJobId])
   @@map("lead_source_records")
@@ -994,10 +1037,121 @@ model LeadDigitalPresence {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// FK composta — ver LeadSourceRecord.
+  lead Lead @relation(fields: [tenantId, leadId], references: [tenantId, id], onDelete: Cascade)
 
+  @@unique([tenantId, leadId])
   @@index([tenantId])
   @@map("lead_digital_presences")
+}
+
+/// Uma execucao da auditoria de presenca digital.
+///
+/// Nao estende `ScrapeJob`, e a razao e o schema, nao preferencia: `ScrapeJob`
+/// exige `searchId` e `keyword` NOT NULL, e auditoria e "sob demanda, por
+/// lead" (`scope-v0.2.md` §1) — nao tem busca nem palavra-chave. Estender
+/// exigiria tornar duas colunas nulaveis em tabela com volume.
+model DigitalPresenceAudit {
+  id            String      @id @default(cuid())
+  tenantId      String
+  leadId        String
+  /// Quem pediu. Nulo quando o usuario e removido — a auditoria permanece,
+  /// porque o relatorio entregue ao prospect nao deixa de existir.
+  requestedById String?
+  /// Versao do verificador, pelo mesmo motivo que o score tem
+  /// `algorithmVersion`: quando a regra mudar, relatorio antigo continua
+  /// explicavel. `scope-v0.2.md` §5.
+  auditVersion  String
+  /// **Quem mediu.** `native`, `mock`, ou o que vier depois.
+  ///
+  /// Pelo mesmo argumento do `auditVersion`, levado a serio: se a versao do
+  /// verificador precisa ficar registrada para o relatorio continuar
+  /// explicavel, a *implementacao* tambem precisa. Sem este campo, uma
+  /// auditoria medida contra a internet e uma inventada pelo mock ficam
+  /// indistinguiveis no banco — e isso aconteceu tres vezes em 24 e 25/08, cada
+  /// uma descoberta so porque alguem reparou num `durationMs` baixo demais.
+  ///
+  /// Reparar num numero nao e um mecanismo. Este campo e.
+  ///
+  /// Preenchido pelo worker ao finalizar; nulo nas linhas anteriores a esta
+  /// migration e enquanto a auditoria nao rodou.
+  providerName  String?
+  status        AuditStatus @default(REQUESTED)
+  /// Id do job no BullMQ. E o que separa retry legitimo de mensagem forjada:
+  /// o retry carrega o mesmo id, a forjada nao. Ver T6 da egress policy §4.
+  queueJobId    String?
+  /// Chave de idempotencia — mesma convencao do `ScrapeJob`.
+  ///
+  /// **Existe porque clique duplo cobrava dois creditos.** Cada `POST /audits`
+  /// criava auditoria com id novo, logo `jobId` novo, e o BullMQ nao tinha como
+  /// recusar. Num plano com tres auditorias por mes, dois cliques queimavam dois
+  /// tercos da cota medindo o mesmo site no mesmo minuto.
+  ///
+  /// A chave cobre lead, versao do verificador e o MINUTO do pedido. O minuto e
+  /// a janela: fecha o clique duplo e o retry impaciente sem decidir politica de
+  /// frescor, que e decisao de produto e nao de codigo.
+  ///
+  /// Nulavel apenas pelas linhas anteriores a esta migration. Toda criacao nova
+  /// preenche — e no Postgres varios NULL convivem sob indice unico.
+  idempotencyKey String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  durationMs    Int?
+  errorCode     String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  lead        Lead                   @relation(fields: [tenantId, leadId], references: [tenantId, id], onDelete: Cascade)
+  requestedBy User?                  @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+  checks      DigitalPresenceCheck[]
+
+  /// Alvo da FK composta de DigitalPresenceCheck.
+  @@unique([tenantId, id])
+  /// O que torna a idempotencia segura sob corrida: dois pedidos simultaneos
+  /// calculam a mesma chave, e o banco recusa o segundo. Conferir antes de
+  /// gravar nao bastaria — entre a leitura e a escrita cabe outro pedido.
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, leadId, createdAt])
+  /// Busca de auditoria em andamento para o mesmo lead.
+  @@index([tenantId, leadId, status])
+  @@map("digital_presence_audits")
+}
+
+/// Uma medicao. E a evidencia — nao existe modelo `Evidence` separado.
+///
+/// `observedUrl` e `observedAt` sao POR CHECAGEM, nao por execucao: com ate
+/// tres saltos de redirect, DNS e TITLE_META nao olham a mesma URL, e o
+/// `scope-v0.2.md` §4 exige "evidencia e data em cada afirmacao — o prospect
+/// precisa poder conferir". Um carimbo por execucao seria o mesmo defeito do
+/// `lastCheckedAt` do LeadDigitalPresence.
+model DigitalPresenceCheck {
+  id          String       @id @default(cuid())
+  tenantId    String
+  auditId     String
+  check       SiteCheck
+  outcome     CheckOutcome
+  /// A URL exata observada NESTA checagem, ja sanitizada — sem userinfo.
+  /// Nao o dominio: e o que permite ao prospect conferir.
+  observedUrl String?
+  observedAt  DateTime?
+  /// O resultado da medicao, serializado. Nunca o payload cru.
+  result      Json?
+  /// Codigo estavel, nunca mensagem. Erro uniforme — egress policy §2.8.
+  errorCode   String?
+  /// Ausente quando o provider nao fornece. Nunca inventada.
+  confidence  Float?
+  /// Sem isto a tabela cresce sem limite, que e o defeito que o
+  /// `LeadSourceRecord.payload` ja tem e que este modelo nao deve repetir.
+  retentionUntil DateTime?
+  createdAt   DateTime     @default(now())
+
+  audit DigitalPresenceAudit @relation(fields: [tenantId, auditId], references: [tenantId, id], onDelete: Cascade)
+
+  /// Alvo das FKs compostas que o LeadDigitalPresence tera na proxima fatia,
+  /// quando cada sinal apontar para a medicao que o sustenta.
+  @@unique([tenantId, id])
+  @@index([tenantId, auditId])
+  @@map("digital_presence_checks")
 }
 
 model LeadScore {
@@ -1011,9 +1165,14 @@ model LeadScore {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  lead    Lead              @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// FK composta — ver LeadSourceRecord.
+  lead    Lead              @relation(fields: [tenantId, leadId], references: [tenantId, id], onDelete: Cascade)
   reasons LeadScoreReason[]
 
+  @@unique([tenantId, leadId])
+  // Alvo da FK composta de LeadScoreReason. A cadeia fica
+  // lead_score_reasons -> lead_scores -> leads, toda escopada por tenant.
+  @@unique([tenantId, id])
   @@index([tenantId, value])
   @@map("lead_scores")
 }
@@ -1032,9 +1191,14 @@ model LeadScoreReason {
   evidence  String?
   createdAt DateTime            @default(now())
 
-  score LeadScore @relation(fields: [scoreId], references: [id], onDelete: Cascade)
+  /// FK composta — ver LeadSourceRecord.
+  score LeadScore @relation(fields: [tenantId, scoreId], references: [tenantId, id], onDelete: Cascade)
 
   @@index([scoreId])
+  // Indice de suporte da FK nova. O Postgres nao cria indice para a coluna
+  // referenciante, e o Prisma tambem nao: sem ele, apagar um LeadScore faz
+  // varredura sequencial aqui. Irrelevante hoje, caro depois.
+  @@index([tenantId, scoreId])
   @@index([tenantId, code])
   @@map("lead_score_reasons")
 }
@@ -1084,6 +1248,8 @@ model PipelineCard {
   owner       User?                @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   transitions PipelineTransition[]
 
+  // Alvo da FK composta de PipelineTransition.
+  @@unique([tenantId, id])
   @@index([tenantId, stageId, position])
   @@map("pipeline_cards")
 }
@@ -1099,7 +1265,16 @@ model PipelineTransition {
   reason      String?
   createdAt   DateTime @default(now())
 
-  card      PipelineCard   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  /// FK composta — o tenantId nao pode divergir do tenant do card.
+  ///
+  /// fromStage permanece simples por impedimento real: e ON DELETE SET NULL, e
+  /// uma FK composta que partilhe tenantId nao pode ser SET NULL — o Postgres
+  /// anularia TODAS as colunas da chave, inclusive tenantId, que e NOT NULL.
+  ///
+  /// toStage e outra coisa: toStageId e NOT NULL e a relacao e obrigatoria,
+  /// logo Restrict, e SET NULL nao se aplica. E fechavel — falta so
+  /// @@unique([tenantId, id]) em PipelineStage. Esta na fila, nao bloqueado.
+  card      PipelineCard   @relation(fields: [tenantId, cardId], references: [tenantId, id], onDelete: Cascade)
   fromStage PipelineStage? @relation("FromStage", fields: [fromStageId], references: [id])
   toStage   PipelineStage  @relation("ToStage", fields: [toStageId], references: [id])
   changedBy User?          @relation(fields: [changedById], references: [id], onDelete: SetNull)
@@ -1399,18 +1574,31 @@ model Tag {
   leads  LeadTag[]
 
   @@unique([tenantId, name])
+  // Alvo da FK composta de LeadTag.
+  @@unique([tenantId, id])
   @@map("tags")
 }
 
+/// Unica juncao real do schema: dois pais, cada um com o seu tenant.
+///
+/// Sem tenantId proprio, nada impedia ligar um Lead do Tenant A a uma Tag do
+/// Tenant B — o nome da tag de um concorrente na tela do outro. As duas FKs
+/// partilham a mesma coluna tenantId, e e isso que forca os dois lados ao
+/// mesmo tenant: a divergencia deixa de ser representavel.
 model LeadTag {
+  tenantId  String
   leadId    String
   tagId     String
   createdAt DateTime @default(now())
 
-  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  lead Lead @relation(fields: [tenantId, leadId], references: [tenantId, id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tenantId, tagId], references: [tenantId, id], onDelete: Cascade)
 
+  // A chave primaria NAO muda. leadId ja identifica o lead globalmente, e
+  // acrescentar tenantId renomearia a chave composta gerada de leadId_tagId
+  // para tenantId_leadId_tagId, quebrando todo `where: { leadId_tagId: ... }`.
   @@id([leadId, tagId])
+  @@index([tenantId])
   @@map("lead_tags")
 }
 

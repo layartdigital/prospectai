@@ -2,7 +2,6 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   computeScore,
   type PlanCardView,
-  type PlanCode,
   type PlanLimits,
   type PreferencesView,
   type ScoreInput,
@@ -24,7 +23,7 @@ export class AccountService {
 
   async subscription(
     tenantId: string,
-    planCode: PlanCode,
+    planCode: string,
   ): Promise<SubscriptionResponse> {
     const [subscription, plans, usage] = await Promise.all([
       this.prisma.subscription.findUnique({ where: { tenantId } }),
@@ -50,7 +49,7 @@ export class AccountService {
         periodEnd: usage.periodEnd.toISOString(),
       },
       plans: plans.map<PlanCardView>((plan) => ({
-        code: plan.code as PlanCode,
+        code: plan.code,
         name: plan.name,
         priceCents: plan.priceCents,
         currency: plan.currency,

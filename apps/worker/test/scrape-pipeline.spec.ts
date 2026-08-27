@@ -134,6 +134,26 @@ async function buscaComTermo(segmentLocaleId: string): Promise<string> {
   return search.id;
 }
 
+/**
+ * Timeout explicito de 60s nos hooks, e a razao esta medida.
+ *
+ * O padrao do vitest e 10s, e este `beforeAll` falhava em ~12s com
+ * `Can't reach database server at localhost:5434` — **sem deixar rastro no log
+ * do Postgres**. A conexao nao chegava ao servidor: morria no encaminhamento
+ * de porta do Docker Desktop, sob um caminho de disco que o proprio log mostra
+ * levando 20 segundos para escrever 201 buffers.
+ *
+ * Falhava uma corrida em cada duas ou tres. Suite intermitente treina a
+ * ignorar vermelho — e o vermelho aqui e ambiente, nao regressao.
+ *
+ * O outro lado da correcao esta no `.env`: `connect_timeout=30&pool_timeout=30`.
+ *
+ * **Isto tolera a lentidao, nao a conserta.** Os 20s de checkpoint continuam
+ * la, e sao configuracao de maquina — Docker Desktop, WSL2, antivirus varrendo
+ * o volume.
+ */
+const TIMEOUT_HOOK_MS = 60_000;
+
 beforeAll(async () => {
   await prisma.$connect();
 
@@ -168,13 +188,16 @@ beforeAll(async () => {
     },
   });
   segmentId = segment.id;
-});
+}, TIMEOUT_HOOK_MS);
 
 afterAll(async () => {
-  await prisma.tenant.deleteMany({ where: { id: tenantId } });
-  await prisma.segment.deleteMany({ where: { id: segmentId } });
+  // Roda mesmo se o `beforeAll` tiver falhado: sem isto, uma falha de conexao
+  // deixa tenant e segmento de teste para tras, e a corrida seguinte encontra
+  // o `slug` ja ocupado — a falha de ambiente vira falha de dado.
+  if (tenantId) await prisma.tenant.deleteMany({ where: { id: tenantId } });
+  if (segmentId) await prisma.segment.deleteMany({ where: { id: segmentId } });
   await prisma.$disconnect();
-});
+}, TIMEOUT_HOOK_MS);
 
 describe('regra 5.3 — cota', () => {
   it('primeira busca cobra apenas pelos leads novos e zera a reserva', async () => {

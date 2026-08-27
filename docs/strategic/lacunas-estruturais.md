@@ -386,6 +386,8 @@ O passo 2 é o que decide se a coisa funcionou. Enquanto o gate ler constante co
 
 **Estado em 13/08/2026:** passos 1, 2 e 3 concluídos e no repositório. Editar `Plan.limits` no banco já muda o comportamento do produto.
 
+**Estado em 23/08/2026:** passos 4 e 5 concluídos. `PlanCode` não existe mais como tipo nem como enum do Postgres — migration `20260823141003_f0_remove_enum_plancode`. **Falta o passo 6**, o CRUD de planos no Master, que é a tela que todo o resto existiu para tornar possível.
+
 #### Mapa do passo 4
 
 Varredura mecânica, sem decisão nova. `PlanCode` sai das assinaturas e vira `string`:
@@ -405,9 +407,25 @@ Varredura mecânica, sem decisão nova. `PlanCode` sai das assinaturas e vira `s
 
 O cast em `tenant.guard.ts` é o marcador: enquanto ele existir, o passo 4 não terminou.
 
+> **O mapa acima estava incompleto, e a lição é sobre listas.** Ele foi escrito em 13/08 e não incluía `outreach/outreach.service.ts`, que ganhou a referência depois. Quem executou o passo 4 montou o inventário a partir desta tabela em vez de varrer o repositório, e o compilador foi quem encontrou o arquivo que faltava.
+>
+> É o mesmo defeito que o `tenant.guard.ts` descreve sobre listas de rotas: *"lista envelhece em silêncio"*. **O inventário de uma varredura mecânica se faz por `grep`, não por documento** — e o documento vale para explicar o porquê de cada mudança, não para enumerá-las.
+>
+> Também saiu daqui, e não estava no mapa: o `@IsIn(['FREE','START','PRO','AGENCY'])` do `ChangePlanDto`. Ele rejeitaria com 400 qualquer plano criado pelo Master — a validação de existência já vive no `AdminService.changePlan`, contra o banco.
+
 **`AGENCY` morre aqui.** O código ficou factualmente errado quando o produto passou a atender todos os segmentos, e esta é a varredura que já toca todos os pontos onde ele aparece. `SCALE` no lugar. Fazer em separado seria repetir o mesmo trabalho.
 
-**`AGENCY` some no caminho.** O código ficou factualmente errado quando o produto passou a atender todos os segmentos, e este é o trabalho que já mexe em todos os pontos onde ele aparece. Pagar essa dívida em separado seria fazer a mesma varredura duas vezes.
+> *(O parágrafo acima aparecia duplicado, com duas redações da mesma ideia. Uma foi removida em 23/08.)*
+
+**Revisão de 23/08/2026 — `AGENCY` permanece, e o §11.1 é que estava desatualizado.**
+>
+> O argumento original era de custo: *"a varredura já toca todos os pontos"*. Isso valia enquanto o enum existia. Com o passo 5 concluído, renomear o `code` deixou de ser mudança de tipo e virou `UPDATE` em dado vivo — com o `AuditLog` guardando `AGENCY` nas trocas de plano passadas e o Stripe possivelmente referenciando o código em `metadata`. O custo inverteu de barato para arriscado.
+>
+> E a decisão que prevalece é a do próprio schema, escrita depois deste parágrafo, no comentário de `Plan.code`: *"**É chave, não rótulo.** O nome de vitrine vive em `name`... o `code` aparece em log, auditoria e integração, e mudá-lo quebra histórico. **Renomear plano não toca aqui.**"*
+>
+> A correção que este parágrafo pedia **já foi feita, no campo certo**: desde 13/08 o plano se chama **"Escala"** na vitrine, com `code: 'AGENCY'`. O que ficou errado era o rótulo, e o rótulo mudou.
+>
+> Reabrir só se aparecer motivo de integração — e aí é migration de dados própria, precedida de conferir o que o Stripe tem em `metadata`.
 
 ### 11.2 Financeiro espelha, não consulta
 

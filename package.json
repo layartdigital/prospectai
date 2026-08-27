@@ -13,6 +13,9 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
+    "typecheck:tests": "pnpm --filter @propectai/types exec tsc -p tsconfig.tests.json --noEmit && pnpm --filter @propectai/api exec tsc -p tsconfig.tests.json --noEmit && pnpm --filter @propectai/worker exec tsc -p tsconfig.tests.json --noEmit",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
+    "typecheck:all": "pnpm typecheck && pnpm typecheck:tests && pnpm typecheck:scripts",
     "clean": "turbo run clean && rimraf node_modules",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
@@ -29,7 +32,9 @@
     "db:segments": "tsx prisma/import-segments.ts",
     "dev:unlock": "tsx prisma/set-plan.ts agency --reset",
     "dev:lock": "tsx prisma/set-plan.ts free --reset",
-    "db:studio": "prisma studio --port 5556"
+    "db:studio": "prisma studio --port 5556",
+    "audit:fumaca": "tsx apps/worker/scripts/auditoria-fumaca.ts",
+    "audit:e2e": "tsx apps/worker/scripts/auditoria-e2e.ts"
   },
   "prisma": {
     "schema": "prisma/schema.prisma",

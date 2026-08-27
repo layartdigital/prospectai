@@ -5,7 +5,6 @@ import {
   type LeadDetail,
   type LeadFacets,
   type LeadListResponse,
-  type PlanCode,
   type ScoreInput,
   type ScoreLevelName,
   type WebsiteStatus,
@@ -67,7 +66,7 @@ export class LeadsService {
 
   async list(
     tenantId: string,
-    planCode: PlanCode,
+    planCode: string,
     query: LeadQueryDto,
   ): Promise<LeadListResponse> {
     const page = query.page ?? 1;
@@ -195,7 +194,7 @@ export class LeadsService {
   async findOne(
     tenantId: string,
     leadId: string,
-    planCode: PlanCode,
+    planCode: string,
   ): Promise<LeadDetail> {
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, tenantId, deletedAt: null },
@@ -704,7 +703,7 @@ export class LeadsService {
    */
   async exportCsv(
     tenantId: string,
-    planCode: PlanCode,
+    planCode: string,
     userId: string,
     query: LeadQueryDto,
   ): Promise<{ filename: string; content: string; rows: number }> {

@@ -24,6 +24,8 @@ export * from './proposal-api';
 export * from './prospecting-api';
 export * from './score';
 export * from './segment-api';
+export * from './site-audit';
 export * from './scoring-engine';
 export * from './system';
 export * from './team-api';
+export * from './tenant-context';

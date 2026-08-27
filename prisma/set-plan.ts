@@ -12,6 +12,9 @@
  *   pnpm db:plan pro --reset    troca o plano e zera o consumo
  *   pnpm dev:unlock             atalho para agency + reset
  *
+ * A lista aceita sai do banco: `pnpm db:plan` sem argumento imprime os
+ * códigos cadastrados, inclusive os criados pelo Master.
+ *
  * Por que não deixar tudo liberado sempre: os gates são regra de produto.
  * Um ambiente que roda permanentemente como AGENCY nunca exercita o
  * mascaramento de telefone nem o bloqueio de IA — e o bug só aparece em
@@ -20,33 +23,49 @@
 
 import path from 'node:path';
 
-import { PlanCode, PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 const prisma = new PrismaClient();
 
-const VALID: PlanCode[] = ['FREE', 'START', 'PRO', 'AGENCY'];
-
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const requested = (args[0] ?? '').toUpperCase() as PlanCode;
+  const requested = (args[0] ?? '').toUpperCase();
   const shouldReset = args.includes('--reset');
 
-  if (!VALID.includes(requested)) {
-    console.log('\n  Informe um plano válido: free, start, pro ou agency');
+  // A lista de planos válidos é o banco, não uma constante.
+  //
+  // Antes havia um `VALID` de quatro literais aqui. Com o Master criando
+  // plano, esse script recusaria justamente o plano novo — e a mensagem de
+  // erro diria "informe um plano válido" sobre um plano que existe.
+  const planos = await prisma.plan.findMany({
+    select: { code: true },
+    orderBy: { sortOrder: 'asc' },
+  });
+
+  if (planos.length === 0) {
+    console.log('\n  Nenhum plano cadastrado. Rode `pnpm db:seed` antes.\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  const plan = requested
+    ? planos.find((p) => p.code === requested)
+    : undefined;
+
+  if (!plan) {
+    const lista = planos.map((p) => p.code.toLowerCase()).join(', ');
+    console.log(`\n  Informe um plano válido: ${lista}`);
     console.log('  Exemplo: pnpm db:plan pro --reset\n');
     process.exitCode = 1;
     return;
   }
 
-  const plan = await prisma.plan.findUnique({ where: { code: requested } });
-  if (!plan) {
-    console.log(`\n  Plano ${requested} não existe. Rode \`pnpm db:seed\` antes.\n`);
-    process.exitCode = 1;
-    return;
-  }
+  const planoCompleto = await prisma.plan.findUniqueOrThrow({
+    where: { code: plan.code },
+  });
 
   const tenants = await prisma.tenant.findMany({
     where: { isDemo: true, deletedAt: null },
@@ -62,8 +81,8 @@ async function main(): Promise<void> {
   for (const tenant of tenants) {
     await prisma.subscription.upsert({
       where: { tenantId: tenant.id },
-      create: { tenantId: tenant.id, planId: plan.id, status: 'ACTIVE' },
-      update: { planId: plan.id, status: 'ACTIVE' },
+      create: { tenantId: tenant.id, planId: planoCompleto.id, status: 'ACTIVE' },
+      update: { planId: planoCompleto.id, status: 'ACTIVE' },
     });
   }
 
@@ -74,7 +93,7 @@ async function main(): Promise<void> {
     });
   }
 
-  const limits = plan.limits as Record<string, unknown>;
+  const limits = planoCompleto.limits as Record<string, unknown>;
 
   console.log(`\n  Plano alterado para ${requested}`);
   console.log('  ──────────────────────────────');

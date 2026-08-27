@@ -18,6 +18,14 @@ export const config = {
   scraperTimeoutSeconds: Number(process.env.SCRAPER_TIMEOUT_SECONDS ?? 300),
   maxConcurrentJobs: Number(process.env.SCRAPER_MAX_CONCURRENT_JOBS ?? 2),
   leadSourceProvider: process.env.LEAD_SOURCE_PROVIDER ?? 'mock',
+  /**
+   * `mock` ate a checagem nativa estar comprovada contra alvo publico.
+   *
+   * Mesmo padrao do `leadSourceProvider`, e pelo mesmo motivo: o padrao seguro
+   * e o que nao sai para a internet. Trocar para `native` e uma decisao de
+   * deploy, nao de desenvolvimento.
+   */
+  siteAuditProvider: process.env.SITE_AUDIT_PROVIDER ?? 'mock',
 } as const;
 
 /**
@@ -37,4 +45,12 @@ export const QUEUE_NAMES = {
   enrich: 'enrich',
   score: 'score',
   notify: 'notify',
+  /**
+   * Auditoria de presenca digital. Fila propria, e nao um tipo de job na fila
+   * de coleta, porque as duas tem perfis opostos: coleta e lenta, rara e
+   * limitada por bloqueio da fonte; auditoria e curta, sob demanda e disparada
+   * pelo usuario esperando na tela. Compartilhar fila faria a auditoria esperar
+   * atras de uma coleta de cinco minutos.
+   */
+  audit: 'audit',
 } as const;

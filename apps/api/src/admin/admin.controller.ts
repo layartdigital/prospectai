@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { AdminTenantList } from '@propectai/types';
-import { IsIn, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsString, MaxLength, MinLength } from 'class-validator';
 
 import { CurrentUser } from '../common/decorators';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
@@ -20,8 +20,22 @@ import type { AuthenticatedUser } from '../common/request-context';
 import { AdminService } from './admin.service';
 
 export class ChangePlanDto {
-  @IsIn(['FREE', 'START', 'PRO', 'AGENCY'])
-  planCode!: 'FREE' | 'START' | 'PRO' | 'AGENCY';
+  /**
+   * Codigo do plano, validado contra o banco.
+   *
+   * O `@IsIn` com quatro literais saiu no passo 4 do §11.1: ele rejeitaria com
+   * 400 qualquer plano criado pelo Master, e a tela de planos existe
+   * justamente para criar planos. Validar aqui contra lista fixa faria a tela
+   * nova falhar sem que ninguem soubesse por que.
+   *
+   * Quem confere a existencia e o `AdminService.changePlan`, que ja consulta
+   * `plan.findUnique({ where: { code } })` e responde 400 "Plano inexistente".
+   * Uma validacao so, no lugar onde a verdade mora.
+   */
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  planCode!: string;
 
   @IsString()
   @MinLength(3, { message: 'Descreva o motivo da troca' })

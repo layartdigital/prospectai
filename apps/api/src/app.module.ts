@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 
 import { AccountModule } from './account/account.module';
 import { AdminModule } from './admin/admin.module';
+import { AuditsModule } from './audits/audits.module';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -30,6 +31,7 @@ import { TeamModule } from './team/team.module';
     RedisModule,
     AuthModule,
     AccountModule,
+    AuditsModule,
     AdminModule,
     BillingModule,
     EntitlementsModule,

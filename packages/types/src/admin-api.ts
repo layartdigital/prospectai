@@ -1,4 +1,3 @@
-import type { PlanCode } from './common';
 
 /** Um tenant visto pelo provedor. */
 export interface AdminTenantView {
@@ -9,7 +8,7 @@ export interface AdminTenantView {
   currency: string;
   customerType: 'PF' | 'PJ';
   taxId: string | null;
-  planCode: PlanCode;
+  planCode: string;
   subscriptionStatus: string | null;
   isDemo: boolean;
   suspendedAt: string | null;
@@ -38,12 +37,12 @@ export interface AdminTenantList {
     active: number;
     suspended: number;
     demo: number;
-    byPlan: Record<PlanCode, number>;
+    byPlan: Record<string, number>;
   };
 }
 
 export interface ChangePlanInput {
-  planCode: PlanCode;
+  planCode: string;
   /** Registrado no AuditLog. Trocar plano sem motivo vira mistério em auditoria. */
   reason: string;
 }

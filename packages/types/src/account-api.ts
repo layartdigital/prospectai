@@ -1,8 +1,7 @@
-import type { PlanCode } from './common';
 import type { PlanLimits } from './auth';
 
 export interface PlanCardView {
-  code: PlanCode;
+  code: string;
   name: string;
   priceCents: number;
   currency: string;
@@ -22,7 +21,7 @@ export interface SubscriptionUsageView {
 }
 
 export interface SubscriptionResponse {
-  currentPlan: PlanCode;
+  currentPlan: string;
   status: string;
   usage: SubscriptionUsageView;
   plans: PlanCardView[];

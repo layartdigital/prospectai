@@ -83,13 +83,22 @@ async function seedPlans(): Promise<Map<string, string>> {
     // permite renomear plano sem migration.
     //
     // `AGENCY` ficou factualmente errado quando o produto passou a atender
-    // todos os segmentos. É dívida registrada, não descuido: renomear o enum
-    // agora custa uma migration e a varredura de todos os gates, e o custo
-    // certo de pagar é antes do primeiro cliente pagante, não depois.
-    { code: 'FREE' as const, name: 'Explorar', priceCents: 0, sortOrder: 0 },
-    { code: 'START' as const, name: 'Base', priceCents: 2700, sortOrder: 1 },
-    { code: 'PRO' as const, name: 'Impulso', priceCents: 4700, sortOrder: 2 },
-    { code: 'AGENCY' as const, name: 'Escala', priceCents: 9700, sortOrder: 3 },
+    // todos os segmentos — e a correção já foi feita onde importa: o nome de
+    // vitrine é "Escala". O `code` permanece.
+    //
+    // O §11.1 previa renomear o code para `SCALE` junto com o passo 4, quando
+    // o enum ainda existia e a varredura tocaria todos os pontos. O enum saiu
+    // no passo 5, e a decisão que sobreviveu é a do próprio schema:
+    // "**É chave, não rótulo.** O `code` aparece em log, auditoria e
+    // integração, e mudá-lo quebra histórico. Renomear plano não toca aqui."
+    //
+    // Renomear o code hoje não é mais varredura de tipos: é UPDATE em dado
+    // vivo, com o AuditLog guardando `AGENCY` nas trocas de plano passadas e o
+    // Stripe possivelmente referenciando o código em metadata. Fica como está.
+    { code: 'FREE', name: 'Explorar', priceCents: 0, sortOrder: 0 },
+    { code: 'START', name: 'Base', priceCents: 2700, sortOrder: 1 },
+    { code: 'PRO', name: 'Impulso', priceCents: 4700, sortOrder: 2 },
+    { code: 'AGENCY', name: 'Escala', priceCents: 9700, sortOrder: 3 },
   ];
 
   const ids = new Map<string, string>();

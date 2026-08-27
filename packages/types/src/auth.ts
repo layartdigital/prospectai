@@ -1,4 +1,4 @@
-import type { PlanCode, Role } from './common';
+import type { Role } from './common';
 
 export interface AuthUser {
   id: string;
@@ -12,7 +12,7 @@ export interface AuthTenant {
   name: string;
   slug: string;
   role: Role;
-  planCode: PlanCode;
+  planCode: string;
 }
 
 export interface SessionResponse {
@@ -48,6 +48,8 @@ export interface PlanLimits {
   leadsIncluded: number;
   searchesPerMonth: number;
   aiGenerationsPerMonth: number;
+  /** Auditorias de presenca digital por mes. `scope-v0.2.md` §6. */
+  auditsPerMonth: number;
   maxUsers: number;
   exportFormats: string[];
   retentionDays: number;
@@ -72,11 +74,12 @@ export interface PlanLimits {
  * Os números aqui envelhecem sem consequência: depois do primeiro seed, quem
  * manda é o banco.
  */
-export const PLAN_LIMITS: Record<PlanCode, PlanLimits> = {
+export const PLAN_LIMITS: Record<string, PlanLimits> = {
   FREE: {
     leadsIncluded: 5,
     searchesPerMonth: 3,
     aiGenerationsPerMonth: 0,
+    auditsPerMonth: 3,
     maxUsers: 1,
     exportFormats: [],
     retentionDays: 30,
@@ -87,6 +90,7 @@ export const PLAN_LIMITS: Record<PlanCode, PlanLimits> = {
     leadsIncluded: 250,
     searchesPerMonth: 50,
     aiGenerationsPerMonth: 150,
+    auditsPerMonth: 30,
     maxUsers: 1,
     exportFormats: ['csv'],
     retentionDays: 180,
@@ -100,6 +104,7 @@ export const PLAN_LIMITS: Record<PlanCode, PlanLimits> = {
     leadsIncluded: 600,
     searchesPerMonth: 120,
     aiGenerationsPerMonth: 400,
+    auditsPerMonth: 150,
     maxUsers: 5,
     exportFormats: ['csv', 'xlsx'],
     retentionDays: 365,
@@ -110,6 +115,7 @@ export const PLAN_LIMITS: Record<PlanCode, PlanLimits> = {
     leadsIncluded: 1500,
     searchesPerMonth: 250,
     aiGenerationsPerMonth: 1000,
+    auditsPerMonth: 600,
     maxUsers: 25,
     exportFormats: ['csv', 'xlsx'],
     retentionDays: 730,

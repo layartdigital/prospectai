@@ -13,7 +13,6 @@ import {
   ROLE_RANK,
   type InvitationPreview,
   type InvitationView,
-  type PlanCode,
   type Role,
   type TeamView,
 } from '@propectai/types';
@@ -40,7 +39,7 @@ export class TeamService {
   // Leitura
   // ---------------------------------------------------------------------------
 
-  async list(tenantId: string, planCode: PlanCode, userId: string): Promise<TeamView> {
+  async list(tenantId: string, planCode: string, userId: string): Promise<TeamView> {
     const [memberships, invitations] = await Promise.all([
       this.prisma.membership.findMany({
         where: { tenantId, deletedAt: null },
@@ -90,7 +89,7 @@ export class TeamService {
 
   async invite(
     tenantId: string,
-    planCode: PlanCode,
+    planCode: string,
     convidante: { id: string; role: Role },
     input: { email: string; role: Role },
   ): Promise<InvitationView> {

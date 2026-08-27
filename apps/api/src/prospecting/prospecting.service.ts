@@ -11,7 +11,6 @@ import {
   JOB_PROGRESS,
   buildSearchKeyword,
   fingerprintInput,
-  type PlanCode,
   type ScrapeJobStatus,
   type SearchQuotaResponse,
   type SearchStatusResponse,
@@ -82,7 +81,7 @@ export class ProspectingService implements OnModuleDestroy {
     await this.connection.quit();
   }
 
-  async quota(tenantId: string, planCode: PlanCode): Promise<SearchQuotaResponse> {
+  async quota(tenantId: string, planCode: string): Promise<SearchQuotaResponse> {
     const limits = this.entitlements.limits(planCode);
     const usage = await this.entitlements.currentUsage(tenantId);
 
@@ -104,7 +103,7 @@ export class ProspectingService implements OnModuleDestroy {
   async createSearch(
     tenantId: string,
     userId: string,
-    planCode: PlanCode,
+    planCode: string,
     dto: CreateSearchDto,
   ): Promise<{ searchId: string; jobId: string }> {
     const available = await this.entitlements.availableLeadCredits(tenantId, planCode);

@@ -7,7 +7,6 @@ import {
   type OutreachMessageView,
   type OutreachQuotaView,
   type OutreachTone,
-  type PlanCode,
 } from '@propectai/types';
 
 import { EntitlementsService } from '../entitlements/entitlements.service';
@@ -30,7 +29,7 @@ export class OutreachService {
     this.ai = aiFactory.get();
   }
 
-  async quota(tenantId: string, planCode: PlanCode): Promise<OutreachQuotaView> {
+  async quota(tenantId: string, planCode: string): Promise<OutreachQuotaView> {
     const limits = this.entitlements.limits(planCode);
     const usage = await this.entitlements.currentUsage(tenantId);
 
@@ -63,7 +62,7 @@ export class OutreachService {
     tenantId: string,
     leadId: string,
     userId: string,
-    planCode: PlanCode,
+    planCode: string,
     input: GenerateOutreachInput,
   ): Promise<OutreachMessageView> {
     this.entitlements.assert(planCode, 'ai.outreach');

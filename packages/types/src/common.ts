@@ -6,8 +6,16 @@ export type Uuid = string;
 export const ROLES = ['OWNER', 'ADMIN', 'MANAGER', 'SDR', 'VIEWER'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const PLAN_CODES = ['FREE', 'START', 'PRO', 'AGENCY'] as const;
-export type PlanCode = (typeof PLAN_CODES)[number];
+/**
+ * Nao existe tipo `PlanCode`, e a ausencia e a decisao.
+ *
+ * `Plan.code` e texto unico no banco desde 13/08/2026 — o Master cria plano
+ * sem deploy. Uma uniao de quatro literais aqui reintroduziria o enum na
+ * camada de tipos e faria o quinto plano nao compilar. Ver
+ * `docs/strategic/lacunas-estruturais.md` §11.1, passo 4.
+ *
+ * Quem precisa da lista de planos consulta o banco.
+ */
 
 /**
  * Tres estados, nunca dois.
