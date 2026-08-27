@@ -177,15 +177,25 @@ O custo é **por chamada de `comTenant`, não por requisição**. Uma rota que c
 
 **Envolva o escopo mais amplo que fizer sentido, não cada consulta.** Com a ressalva já escrita no helper: nada de I/O externo lá dentro, o que na prática limita o escopo ao bloco de trabalho de banco.
 
-> **Correção de 27/08: a regra acima vale para trabalho sequencial, e pode estar errada para leitura paralela.**
+> **Ressalva de 27/08, levantada e medida: a regra sobrevive, o raciocínio que a sustentava não.**
 >
-> Ela foi deduzida de um benchmark que mede consulta a consulta, e ignora que **uma transação do Prisma roda tudo numa conexão só**. Envolver um `Promise.all` de doze consultas num `comTenant` não paga o overhead uma vez em vez de doze: paga uma vez **e serializa as doze**, que hoje correm em paralelo pelo pool.
+> A regra tinha sido deduzida de um benchmark que mede consulta a consulta, e ignorava que **uma transação do Prisma roda tudo numa conexão só**. Envolver um `Promise.all` de doze consultas num `comTenant` não paga o overhead uma vez em vez de doze: paga uma vez **e serializa as doze**. O `dashboard.service.ts` é exatamente esse caso.
 >
-> O `dashboard.service.ts` é exatamente esse caso — doze consultas independentes numa chamada só. Aplicar a regra ali, do jeito como estava escrita, trocaria ~8 ms por algo na casa dos 40 ms.
+> Achei que isso derrubaria a regra. Terceiro bloco do `rls:bench`, 300 iterações, piso de ruído 0,9%:
 >
-> **Não há resposta óbvia**, porque a alternativa — doze `comTenant` em paralelo — abre doze transações simultâneas e move o custo para o pool, onde ele só aparece com vários usuários ao mesmo tempo. Por isso o `rls:bench` ganhou um terceiro bloco que mede as três formas, e a regra definitiva sai de lá.
+> | doze consultas independentes | p50 | p95 |
+> |---|---:|---:|
+> | solto (paralelo, sem contexto) | 13,3 ms | 52 ms |
+> | **um bloco** (1 `comTenant`, serial) | **37,4 ms** | 138 ms |
+> | doze blocos (12 `comTenant`, paralelo) | 52,1 ms | 187 ms |
 >
-> Foi a segunda vez no mesmo dia que uma regra minha veio de raciocínio e não de medição — a primeira foi a previsão de que o custo se diluiria em consulta maior, que também estava errada.
+> **Um bloco ganha de doze blocos por 28%.** A serialização custa menos que doze transações — e as doze ainda disputam o pool entre si, o que é visível no p95 e piora com usuários simultâneos, não melhora.
+>
+> Então **"envolva o escopo mais amplo" continua valendo, inclusive para leitura paralela** — só que pelo motivo oposto ao que eu tinha escrito. Não é que o overhead se pague uma vez em vez de doze: é que doze transações concorrentes são piores que doze consultas em fila.
+>
+> **O preço fica registrado como fato de produto:** o dashboard sai de 13 ms para 37 ms de p50, e de 52 ms para 138 ms de p95. Não é catastrófico e não é grátis.
+>
+> **E abre um trabalho que antes não valia a pena:** hoje o `overview` faz doze consultas porque elas custavam quase nada em paralelo. Serializadas, cada uma vira tempo de parede — e várias são contagens sobre `leads` com filtros diferentes, que cabem numa consulta só com agregação condicional. Reduzir doze para quatro passa a valer o esforço.
 
 O código de hoje está dentro da regra — `criar` usa duas transações porque a conferência de saldo mora entre elas, `detalhe` usa uma, e o `processAuditJob` usa duas num job que leva 300 ms. **Onde isso vai doer é no passo 6**: telas de listagem e o dashboard, que fazem várias consultas por requisição, precisam ser envolvidas de uma vez, não consulta a consulta.
 
