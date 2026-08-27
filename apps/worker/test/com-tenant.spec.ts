@@ -1,11 +1,12 @@
 import path from 'node:path';
 
-import { type Prisma, PrismaClient } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { TENANT_SETTING, TenantIdInvalido } from '@propectai/types';
 import dotenv from 'dotenv';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { comTenant } from '../src/db/com-tenant';
+import { criarPrismaApp } from '../src/db/prisma-app';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -27,7 +28,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  */
 
 const admin = criarPrismaAdmin();
-const prisma = new PrismaClient();
+const prisma = criarPrismaApp();
 const sufixo = Date.now().toString(36);
 const TIMEOUT_HOOK_MS = 60_000;
 

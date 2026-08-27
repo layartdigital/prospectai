@@ -1,8 +1,8 @@
-import { PrismaClient } from '@prisma/client';
 import { Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 
 import { QUEUE_NAMES, QUEUE_PREFIX, config } from './config';
+import { criarPrismaApp } from './db/prisma-app';
 import { logger } from './logger';
 import {
   processAuditJob,
@@ -23,7 +23,9 @@ import { createSiteAuditProvider } from './providers/site-audit';
  * -> score -> liquidação de cota -> notificação -> auditoria.
  */
 
-const prisma = new PrismaClient();
+// Passo 4: papel sujeito a politica. Ver `db/prisma-app.ts` para o motivo de
+// isto ser variavel propria e nao troca do `DATABASE_URL`.
+const prisma = criarPrismaApp();
 const provider = createLeadSourceProvider();
 const auditProvider = createSiteAuditProvider();
 

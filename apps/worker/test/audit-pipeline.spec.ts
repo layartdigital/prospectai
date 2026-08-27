@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-import { PrismaClient } from '@prisma/client';
 import type { SiteAuditProvider } from '@propectai/types';
 import dotenv from 'dotenv';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { criarPrismaApp } from '../src/db/prisma-app';
 import { processAuditJob } from '../src/pipeline/process-audit-job';
 import { criarPrismaAdmin } from './prisma-admin';
 import { MockSiteAuditProvider } from '../src/providers/site-audit/mock.provider';
@@ -36,12 +36,13 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * vira o papel da aplicacao **sem uma linha mudar aqui** — e so entao S13
  * comeca a provar a politica do banco, e nao apenas a chave composta.
  *
- * Hoje os dois apontam para o mesmo lugar e nada muda. E essa e a ideia: o
- * passo que troca o papel nao pode ser o mesmo que reescreve as fixtures,
- * senao uma falha nao diz qual dos dois a causou.
+ * **Passo 4, e a promessa se cumpriu:** a unica linha que mudou aqui foi a de
+ * baixo, de `new PrismaClient()` para `criarPrismaApp()`. Nenhuma assercao, e
+ * nenhuma fixture. A partir de agora o S13 prova a politica do banco, e nao
+ * apenas a chave composta e o `where`.
  */
 const admin = criarPrismaAdmin();
-const prisma = new PrismaClient();
+const prisma = criarPrismaApp();
 const sufixo = Date.now().toString(36);
 
 /** Ver a nota extensa no `scrape-pipeline.spec.ts`: e ambiente, nao regressao. */

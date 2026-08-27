@@ -12,12 +12,40 @@ import { TENANT_SETTING, validarTenantId } from '@propectai/types';
 const TX_TIMEOUT_MS = 10_000;
 const TX_MAX_WAIT_MS = 5_000;
 
+/**
+ * Passo 4: a API conecta com o papel que **esta** sujeito a politica.
+ *
+ * **Por que uma variavel nova, e nao trocar o `DATABASE_URL`.** O Prisma CLI le
+ * o `DATABASE_URL`: `migrate`, `db:seed`, `db:studio` e os scripts de `prisma/`
+ * passariam todos a conectar como um papel sem DDL, e a proxima migration
+ * falharia. `directUrl` resolveria o `migrate` e deixaria o seed e os scripts
+ * no mesmo problema. Entao e **opt-in por processo** — e reverter o passo 4
+ * vira apagar uma linha do `.env`.
+ *
+ * O aviso e alto de proposito. Silenciar seria o pior dos casos: a API voltaria
+ * a conectar como dono, o `FORCE` sairia do caminho, e **tudo continuaria
+ * funcionando** — com os testes de isolamento passando sem a politica no meio.
+ */
+function urlDaAplicacao(): string | undefined {
+  const url = process.env.DATABASE_URL_APP;
+  if (url === undefined || url.trim() === '') {
+    console.warn(
+      '[db] DATABASE_URL_APP ausente — conectando como dono das tabelas. ' +
+        'A politica de RLS NAO esta no caminho. Ver passo 4 do PLANO-RLS-v1.md.',
+    );
+    return undefined;
+  }
+  return url;
+}
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
+    const datasourceUrl = urlDaAplicacao();
     super({
+      ...(datasourceUrl === undefined ? {} : { datasourceUrl }),
       log:
         process.env.NODE_ENV === 'development'
           ? [{ emit: 'stdout', level: 'warn' }, { emit: 'stdout', level: 'error' }]
