@@ -10,6 +10,7 @@ import type {
 import dotenv from 'dotenv';
 
 import { BillingService } from '../src/billing/billing.service';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -26,6 +27,23 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * dependente de rede, de chave e do humor de um serviço externo, e não
  * provaria nada a mais sobre o nosso código.
  *
+ * ---
+ *
+ * **Dois clientes de banco, de propósito.**
+ *
+ * O `prisma` daqui é o cliente do *teste*: monta o cenário e confere o
+ * resultado, conectado como dono das tabelas. Ele nunca entra no serviço.
+ *
+ * O serviço recebe um `PrismaService` de verdade — o mesmo que a aplicação
+ * usa, conectado pelo `DATABASE_URL_APP` e portanto **sujeito à política de
+ * RLS**. É a mesma separação de `criarPrismaAdmin` nos outros arquivos, e é o
+ * que faz este teste exercitar o caminho real em vez de um atalho.
+ *
+ * Antes daqui o serviço recebia o cliente cru com um `as never`, e o `never`
+ * calava o compilador exatamente na fronteira que teria acusado o problema:
+ * o `PrismaClient` não tem `comTenant`, e a suíte só descobriu isso em
+ * tempo de execução, no dia em que o `BillingService` passou a chamá-lo.
+ *
  * Precisa de `pnpm docker:up` e `pnpm db:migrate`.
  */
 
@@ -40,6 +58,8 @@ const MOTIVO_INADIMPLENCIA = 'billing:inadimplencia';
 let tenantId = '';
 let planId = '';
 let service: BillingService;
+/** O cliente que o serviço usa. Separado do `prisma` das asserções. */
+let prismaDoServico: PrismaService;
 
 /** Estado do plano PRO antes do teste, para devolver como estava. */
 let planoOriginal: { stripePriceId: string | null; priceCents: number } | null = null;
@@ -156,8 +176,13 @@ beforeAll(async () => {
     data: { tenantId, planId, status: 'TRIALING', stripeSubscriptionId: SUB_ID },
   });
 
+  // Sem `as never` no primeiro parâmetro: é um `PrismaService` de verdade, e
+  // o tipo confere sozinho. Os outros dois continuam dublês — é o ponto do
+  // arquivo.
+  prismaDoServico = new PrismaService();
+
   service = new BillingService(
-    prisma as never,
+    prismaDoServico,
     { get: () => dubleProvider } as never,
     { get: () => 'http://localhost:3100' } as never,
   );
@@ -177,6 +202,7 @@ afterAll(async () => {
     });
   }
 
+  await prismaDoServico.$disconnect();
   await prisma.$disconnect();
 });
 
