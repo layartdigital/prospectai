@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import { Injectable, Logger } from '@nestjs/common';
 
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaSistemaService } from '../prisma/prisma-sistema.service';
 
 /**
  * Eliminação de dado pessoal — decisão D4.
@@ -27,7 +27,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class PrivacyService {
   private readonly logger = new Logger(PrivacyService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly sistema: PrismaSistemaService) {}
 
   /**
    * Substitui o ator por uma lápide em todo o log de auditoria.
@@ -53,10 +53,14 @@ export class PrivacyService {
     // contas, não 2^256.
     const pseudonimo = `usuario-removido-${randomBytes(4).toString('hex')}`;
 
-    const { count } = await this.prisma.auditLog.updateMany({
-      where: { actorId: userId },
-      data: { actorId: null, actorPseudonym: pseudonimo },
-    });
+    const { count } = await this.sistema.atravessandoTenants(
+      'eliminar o ator: a pessoa pode ser membro de varios workspaces, e o pedido e dela',
+      (db) =>
+        db.auditLog.updateMany({
+          where: { actorId: userId },
+          data: { actorId: null, actorPseudonym: pseudonimo },
+        }),
+    );
 
     // O log registra o pseudônimo e a contagem, nunca o `userId` — registrar o
     // id aqui seria recriar, no arquivo de log, exatamente o vínculo que a

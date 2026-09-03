@@ -10,6 +10,7 @@ import type {
 import dotenv from 'dotenv';
 
 import { BillingService } from '../src/billing/billing.service';
+import { PrismaSistemaService } from '../src/prisma/prisma-sistema.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -60,6 +61,8 @@ let planId = '';
 let service: BillingService;
 /** O cliente que o serviço usa. Separado do `prisma` das asserções. */
 let prismaDoServico: PrismaService;
+/** O papel que atravessa tenants — `acharTenant` passa por ele. */
+let sistema: PrismaSistemaService;
 
 /** Estado do plano PRO antes do teste, para devolver como estava. */
 let planoOriginal: { stripePriceId: string | null; priceCents: number } | null = null;
@@ -176,13 +179,25 @@ beforeAll(async () => {
     data: { tenantId, planId, status: 'TRIALING', stripeSubscriptionId: SUB_ID },
   });
 
-  // Sem `as never` no primeiro parâmetro: é um `PrismaService` de verdade, e
-  // o tipo confere sozinho. Os outros dois continuam dublês — é o ponto do
+  // Sem `as never` nos dois primeiros parâmetros: são serviços de verdade, e o
+  // tipo confere sozinho. Os outros dois continuam dublês — é o ponto do
   // arquivo.
   prismaDoServico = new PrismaService();
 
+  /**
+   * O papel que atravessa tenants, com o ciclo de vida de verdade.
+   *
+   * `acharTenant` passa por ele: descobrir o tenant a partir do webhook é a
+   * consulta que não tem tenant a declarar. Chamar `onModuleInit` e
+   * `onModuleDestroy` à mão é o que o Nest faria — e sem o segundo o Jest
+   * termina reclamando de conexão aberta.
+   */
+  sistema = new PrismaSistemaService();
+  await sistema.onModuleInit();
+
   service = new BillingService(
     prismaDoServico,
+    sistema,
     { get: () => dubleProvider } as never,
     { get: () => 'http://localhost:3100' } as never,
   );
@@ -202,6 +217,7 @@ afterAll(async () => {
     });
   }
 
+  await sistema.onModuleDestroy();
   await prismaDoServico.$disconnect();
   await prisma.$disconnect();
 });

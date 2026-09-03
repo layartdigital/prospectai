@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import type { RemoteInvoice, RemotePrice, RemoteSubscription } from '@propectai/types';
 import type { Prisma } from '@prisma/client';
 
+import { PrismaSistemaService } from '../prisma/prisma-sistema.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentProviderFactory } from './providers/payment-provider.factory';
 
@@ -60,6 +61,7 @@ export class BillingService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly sistema: PrismaSistemaService,
     private readonly providers: PaymentProviderFactory,
     private readonly config: ConfigService,
   ) {}
@@ -430,21 +432,26 @@ export class BillingService {
    * Ver a nota no topo da classe.
    */
   private async acharTenant(remota: RemoteSubscription): Promise<string | null> {
-    const pelosMetadados = remota.metadata?.tenantId;
-    if (pelosMetadados) {
-      const existe = await this.prisma.tenant.findUnique({
-        where: { id: pelosMetadados },
-        select: { id: true },
-      });
-      if (existe) return existe.id;
-    }
+    return this.sistema.atravessandoTenants(
+      'achar o tenant a partir do webhook do Stripe: nao ha sessao, e o tenant e o resultado da busca',
+      async (db) => {
+        const pelosMetadados = remota.metadata?.tenantId;
+        if (pelosMetadados) {
+          const existe = await db.tenant.findUnique({
+            where: { id: pelosMetadados },
+            select: { id: true },
+          });
+          if (existe) return existe.id;
+        }
 
-    const pelaConta = await this.prisma.tenant.findUnique({
-      where: { stripeCustomerId: remota.customerId },
-      select: { id: true },
-    });
+        const pelaConta = await db.tenant.findUnique({
+          where: { stripeCustomerId: remota.customerId },
+          select: { id: true },
+        });
 
-    return pelaConta?.id ?? null;
+        return pelaConta?.id ?? null;
+      },
+    );
   }
 
   // --------------------------------------------------------------- faturas

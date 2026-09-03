@@ -20,6 +20,7 @@ import {
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import type { Prisma } from '@prisma/client';
 
+import { PrismaSistemaService } from '../prisma/prisma-sistema.service';
 import { declararTenant, PrismaService } from '../prisma/prisma.service';
 
 /** Convite vence em sete dias. Link eterno é credencial eterna. */
@@ -33,6 +34,7 @@ function hashToken(token: string): string {
 export class TeamService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly sistema: PrismaSistemaService,
     private readonly entitlements: EntitlementsService,
     private readonly config: ConfigService,
   ) {}
@@ -487,10 +489,14 @@ export class TeamService {
    * nenhum pode ser aceito** — precisa do papel que atravessa tenants.
    */
   private async conviteValido(token: string) {
-    const convite = await this.prisma.invitation.findUnique({
-      where: { tokenHash: hashToken(token) },
-      include: { tenant: true, invitedBy: true },
-    });
+    const convite = await this.sistema.atravessandoTenants(
+      'achar o convite pelo token: quem aceita ainda nao pertence ao workspace',
+      (db) =>
+        db.invitation.findUnique({
+          where: { tokenHash: hashToken(token) },
+          include: { tenant: true, invitedBy: true },
+        }),
+    );
 
     if (!convite || convite.revokedAt || convite.acceptedAt) {
       throw new NotFoundException('Convite inválido ou já utilizado');

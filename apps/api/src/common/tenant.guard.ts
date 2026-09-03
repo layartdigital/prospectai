@@ -8,7 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { type Role, roleAtLeast } from '@propectai/types';
 
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaSistemaService } from '../prisma/prisma-sistema.service';
 import { CONSOME_RECURSO_KEY, IS_PUBLIC_KEY, REQUIRED_ROLE_KEY } from './decorators';
 import type { RequestWithContext } from './request-context';
 
@@ -18,11 +18,35 @@ import type { RequestWithContext } from './request-context';
  * Regra inegociável: o tenantId NUNCA é lido do corpo da requisição.
  * Ele vem do header x-tenant-id ou do membership padrão do usuário, e em
  * ambos os casos o membership é verificado no banco a cada requisição.
+ *
+ * ---------------------------------------------------------------------------
+ * Por que este guard usa o papel que atravessa tenants
+ * ---------------------------------------------------------------------------
+ *
+ * A consulta abaixo tem **dois ramos, de naturezas diferentes**, e é a
+ * diferença entre eles que decide o desenho:
+ *
+ * - **Com `x-tenant-id`**, ele valida. Esse ramo até sobreviveria a uma
+ *   política em `memberships`: bastaria declarar o tenant do cabeçalho como
+ *   contexto, e a autorização continuaria vindo do filtro por `userId`.
+ * - **Sem cabeçalho**, ele *escolhe* — o membership padrão da pessoa, varrendo
+ *   todos os workspaces dela. Aqui não há tenant a declarar, porque
+ *   descobri-lo é o serviço.
+ *
+ * Fazer o guard depender dessa distinção seria pior que qualquer um dos dois:
+ * a correção dele passaria a variar conforme o cliente mandou ou não um
+ * cabeçalho. Então os dois ramos usam o mesmo caminho.
+ *
+ * **O que não muda:** a autorização nunca esteve na política de RLS, e continua
+ * não estando. Quem decide é o `where` por `userId` — o `request.user.id` vem
+ * do JWT já validado pelo `JwtAuthGuard`, nunca do corpo nem do cabeçalho. O
+ * papel do sistema remove a política do caminho de uma consulta que a política
+ * nunca protegeu; ele não afrouxa nenhuma verificação que existisse.
  */
 @Injectable()
 export class TenantGuard implements CanActivate {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly sistema: PrismaSistemaService,
     private readonly reflector: Reflector,
   ) {}
 
@@ -43,20 +67,26 @@ export class TenantGuard implements CanActivate {
       ? requestedTenantId[0]
       : requestedTenantId;
 
-    const membership = await this.prisma.membership.findFirst({
-      where: {
-        userId: request.user.id,
-        deletedAt: null,
-        ...(tenantId ? { tenantId } : {}),
-        tenant: { deletedAt: null },
-      },
-      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-      include: {
-        tenant: {
-          include: { subscription: { include: { plan: true } } },
-        },
-      },
-    });
+    const usuarioId = request.user.id;
+
+    const membership = await this.sistema.atravessandoTenants(
+      'resolver o workspace ativo: sem cabecalho, escolhe o membership padrao da pessoa entre todos os workspaces dela',
+      (db) =>
+        db.membership.findFirst({
+          where: {
+            userId: usuarioId,
+            deletedAt: null,
+            ...(tenantId ? { tenantId } : {}),
+            tenant: { deletedAt: null },
+          },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+          include: {
+            tenant: {
+              include: { subscription: { include: { plan: true } } },
+            },
+          },
+        }),
+    );
 
     // 404 seria mais informativo, mas confirmar a existência do recurso já é
     // vazamento. Membership ausente e tenant inexistente respondem igual.

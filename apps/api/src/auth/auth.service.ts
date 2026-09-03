@@ -14,6 +14,7 @@ import {
   type SessionResponse,
 } from '@propectai/types';
 
+import { PrismaSistemaService } from '../prisma/prisma-sistema.service';
 import { declararTenant, PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload } from '../common/request-context';
 
@@ -59,6 +60,7 @@ export interface IssuedTokens {
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly sistema: PrismaSistemaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
   ) {}
@@ -269,23 +271,27 @@ export class AuthService {
    * este caminho** — ver a nota de metodo no `PLANO-RLS-PASSO6-v1.md`.
    */
   async getSession(userId: string, activeTenantId?: string): Promise<SessionResponse> {
-    const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-      include: {
-        memberships: {
-          where: { deletedAt: null, tenant: { deletedAt: null } },
-          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+    const user = await this.sistema.atravessandoTenants(
+      'listar os workspaces de uma pessoa: a pergunta e sobre ela, nao sobre um deles',
+      (db) =>
+        db.user.findUniqueOrThrow({
+          where: { id: userId },
           include: {
-            tenant: {
+            memberships: {
+              where: { deletedAt: null, tenant: { deletedAt: null } },
+              orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
               include: {
-                subscription: { include: { plan: true } },
-                onboardingState: true,
+                tenant: {
+                  include: {
+                    subscription: { include: { plan: true } },
+                    onboardingState: true,
+                  },
+                },
               },
             },
           },
-        },
-      },
-    });
+        }),
+    );
 
     const tenants: AuthTenant[] = user.memberships.map((membership) => ({
       id: membership.tenantId,
