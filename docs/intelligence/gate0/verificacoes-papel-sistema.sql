@@ -1,5 +1,9 @@
 -- Verificações do papel `propectai_sistema`.
 --
+-- Atualizado em 03/09, depois da fatia 8c e da migration de estreitamento. O
+-- alcance esperado mudou: eram 11 tabelas e 4 com escrita; passaram a **10
+-- tabelas e 1 com escrita**.
+--
 -- Todas são consultas ao catálogo do Postgres: **o resultado não depende de
 -- haver dado nas tabelas**. Isso é requisito, não elegância — na verificação do
 -- passo 4 duas checagens mediam zero contra tabela vazia e passavam sem provar
@@ -9,7 +13,7 @@
 -- resposta distinguível de "não mediu".
 
 \echo '=== 1. O papel existe, e com os atributos certos ==='
--- Esperado: uma linha. bypassrls = t, superusuario = f, cria_papel = f.
+-- Esperado: uma linha por papel. Para o sistema, bypassrls = t, superusuario = f.
 -- Superusuário seria pior que BYPASSRLS: ignoraria também os GRANT abaixo,
 -- e a enumeração de tabelas viraria decoração.
 SELECT rolname          AS papel,
@@ -42,11 +46,8 @@ SELECT m.rolname   AS membro,
 
 \echo ''
 \echo '=== 3. O alcance, com denominador ==='
--- Quantas tabelas o papel enxerga, sobre o total do schema.
---
--- Esperado: **11** para o `propectai_sistema`, e o total do schema para o
--- `propectai_app`. O denominador e o que torna o numero legivel: "11" sozinho
--- nao diz se e pouco.
+-- Esperado: **10** para o `propectai_sistema` (eram 11 antes do
+-- estreitamento), e o total do schema para o `propectai_app`.
 --
 -- O total inclui `_prisma_migrations`, que e tabela de controle do Prisma e nao
 -- do modelo — entao ele fica um acima da contagem de modelos do schema. Nao
@@ -65,8 +66,8 @@ SELECT grantee                                   AS papel,
 
 \echo ''
 \echo '=== 4. O que exatamente ele alcanca, e com que operacoes ==='
--- Esperado: 11 linhas. Leitura em todas; escrita apenas em tenants,
--- subscriptions, audit_logs e refresh_tokens. Nenhum DELETE em lugar nenhum.
+-- Esperado: 10 linhas, **todas com apenas SELECT**, exceto `audit_logs`, que
+-- tem SELECT e UPDATE. `refresh_tokens` nao deve aparecer.
 SELECT table_name                                        AS tabela,
        string_agg(privilege_type, ', ' ORDER BY privilege_type) AS operacoes
   FROM information_schema.role_table_grants
@@ -76,11 +77,28 @@ SELECT table_name                                        AS tabela,
  ORDER BY table_name;
 
 \echo ''
-\echo '=== 5. O dado do cliente esta fora do alcance ==='
+\echo '=== 5. Ele escreve em UMA tabela, e so nela ==='
+-- A afirmacao central depois do estreitamento, medida em vez de lida.
+--
+-- Esperado: exatamente **uma linha** — `audit_logs`, com `UPDATE`. Zero linhas
+-- significaria que o `anonimizarAtor` perdeu a escrita de que precisa; mais de
+-- uma significaria que o estreitamento nao pegou.
+SELECT table_name     AS tabela,
+       privilege_type AS operacao
+  FROM information_schema.role_table_grants
+ WHERE table_schema = 'public'
+   AND grantee = 'propectai_sistema'
+   AND privilege_type <> 'SELECT'
+ ORDER BY table_name, privilege_type;
+
+\echo ''
+\echo '=== 6. O dado do cliente e as sessoes estao fora do alcance ==='
 -- A afirmacao que justifica enumerar os GRANT em vez de usar ON ALL TABLES.
 --
--- Cada tabela aparece com o numero de privilegios que o papel tem sobre ela.
--- Esperado: sete linhas, **todas com zero**.
+-- `refresh_tokens` entrou nesta lista com o estreitamento: sessao aberta e
+-- credencial viva, e revoga-las passou para o `comTenant` do `suspend`.
+--
+-- Esperado: oito linhas, **todas com zero**.
 --
 -- A consulta parte da lista de tabelas (LEFT JOIN), e nao dos privilegios: se
 -- partisse dos privilegios, zero linhas seria o resultado de sucesso E o
@@ -90,7 +108,7 @@ SELECT t.tabela,
        count(g.privilege_type) AS privilegios_do_sistema
   FROM (VALUES ('leads'), ('lead_notes'), ('lead_contact_records'),
                ('proposals'), ('contracts'), ('outreach_messages'),
-               ('digital_presence_audits')) AS t(tabela)
+               ('digital_presence_audits'), ('refresh_tokens')) AS t(tabela)
   LEFT JOIN information_schema.role_table_grants g
          ON g.table_name = t.tabela
         AND g.table_schema = 'public'
@@ -99,7 +117,34 @@ SELECT t.tabela,
  ORDER BY t.tabela;
 
 \echo ''
-\echo '=== 6. Ele nao e dono de tabela nenhuma ==='
+\echo '=== 7. Nenhuma sequencia ==='
+-- Sem `INSERT` em lugar nenhum, sequencia nao e alcancada.
+--
+-- Esperado: `com_usage` = 0 para o sistema, e igual a `sequencias_no_schema`
+-- para o app.
+--
+-- **O denominador e obrigatorio aqui.** Se o schema nao tiver sequencia nenhuma
+-- — o projeto usa `cuid`, nao `serial` —, os dois papeis dao zero e a checagem
+-- nao prova nada. Com `sequencias_no_schema` na tela, isso fica visivel em vez
+-- de passar por sucesso.
+--
+-- Uso `pg_class` com `has_sequence_privilege`, e nao `information_schema`: la os
+-- privilegios de sequencia aparecem de forma incompleta, e uma consulta que
+-- devolve vazio por limitacao da view e indistinguivel de uma que devolve vazio
+-- por o privilegio nao existir.
+SELECT p.papel,
+       (SELECT count(*) FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'S')      AS sequencias_no_schema,
+       (SELECT count(*) FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'S'
+           AND has_sequence_privilege(p.papel, c.oid, 'USAGE')) AS com_usage
+  FROM (VALUES ('propectai_app'), ('propectai_sistema')) AS p(papel)
+ ORDER BY p.papel;
+
+\echo ''
+\echo '=== 8. Ele nao e dono de tabela nenhuma ==='
 -- Mesmo cinto e suspensorio do `propectai_app`: dono ignora politica por
 -- padrao, independentemente de BYPASSRLS. Esperado: ZERO linhas.
 SELECT tablename AS tabela, tableowner AS dono
@@ -108,7 +153,7 @@ SELECT tablename AS tabela, tableowner AS dono
    AND tableowner IN ('propectai_app', 'propectai_sistema');
 
 \echo ''
-\echo '=== 7. Tabela nova nao entra sozinha ==='
+\echo '=== 9. Tabela nova nao entra sozinha ==='
 -- Nao ha ALTER DEFAULT PRIVILEGES para o sistema, de proposito: tabela criada
 -- por migration futura nasce invisivel a ele, e o sintoma e `permission denied`
 -- em vez de alcance crescendo em silencio.
