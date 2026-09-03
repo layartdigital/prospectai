@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { RemoteInvoice, RemotePrice, RemoteSubscription } from '@propectai/types';
+import type { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentProviderFactory } from './providers/payment-provider.factory';
@@ -19,6 +20,40 @@ import { PaymentProviderFactory } from './providers/payment-provider.factory';
  */
 const MOTIVO_INADIMPLENCIA = 'billing:inadimplencia';
 
+/**
+ * ## O tenant deste serviço nem sempre existe quando a chamada começa
+ *
+ * Duas portas de entrada, com naturezas opostas:
+ *
+ * - `criarCheckout` e `abrirPortal` vêm de uma requisição autenticada. O
+ *   tenant é conhecido antes da primeira consulta, e o `comTenant` cobre tudo.
+ *
+ * - `receberWebhook` vem do **provedor de pagamento**. Não há sessão, não há
+ *   `tenantId` no caminho da chamada: ele é *descoberto* dentro, lendo
+ *   `metadata.tenantId` ou procurando por `stripeCustomerId`. É o quinto
+ *   caminho legitimamente sem tenant declarado do projeto, e o único em que a
+ *   descoberta é a própria operação.
+ *
+ * A forma que isso impõe: **descobrir fora, escrever dentro**. Assim que o
+ * `tenantId` existe, as escritas com escopo de tenant entram num bloco.
+ *
+ * ### O que isto revela sobre a tabela `tenants`
+ *
+ * As buscas de descoberta varrem `tenants` **sem** saber o tenant — é
+ * literalmente o que elas estão tentando responder. Se um dia a tabela
+ * `tenants` ganhar política de RLS (`id = current_setting(...)`), estas duas
+ * consultas passam a devolver zero linhas, e todo webhook do produto quebra:
+ * a política exige a resposta que a consulta existe para descobrir.
+ *
+ * Ou `tenants` fica sem política, ou a descoberta roda como `propectai_sistema`.
+ * Está registrado no PLANO-RLS como decisão pendente de schema — não é algo
+ * que a fase A resolva embrulhando chamada.
+ *
+ * Delegates com escopo de tenant aqui: `membership`, `auditLog`,
+ * `subscription`, `invoice` — oito chamadas. `plan` e `billingEvent` são
+ * catálogo e log do provedor, globais, e ficam de fora por não terem
+ * `tenantId` para política nenhuma filtrar.
+ */
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
@@ -50,12 +85,33 @@ export class BillingService {
    * e EUR sob um único `stripePriceId` (§10.2). Pedir uma moeda que o preço
    * não oferece é erro de configuração e falha aqui, com mensagem — bem antes
    * de o cliente ver uma tela de pagamento quebrada.
+   *
+   * Dois blocos: a criação da sessão no provedor é I/O externo e fica entre
+   * eles. Mesma razão de `outreach.generate` — segurar uma conexão do pool
+   * durante uma chamada de rede de segundos é o que o `timeout` de 10 s do
+   * `comTenant` existe para impedir.
    */
   async criarCheckout(tenantId: string, planCode: string): Promise<{ url: string }> {
-    const [tenant, plan] = await Promise.all([
-      this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } }),
-      this.prisma.plan.findUnique({ where: { code: planCode } }),
-    ]);
+    const { tenant, plan, dono } = await this.prisma.comTenant(tenantId, async (tx) => {
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+      const plan = await tx.plan.findUnique({ where: { code: planCode } });
+
+      /**
+       * O `Promise.all` saiu daqui.
+       *
+       * Dentro de uma transação interativa do Prisma tudo corre numa conexão
+       * só, então o paralelismo era aparente — as duas consultas já seriam
+       * serializadas. Escrevê-las em sequência diz a verdade sobre o que
+       * acontece. Medido: 12 consultas soltas 13,3 ms, num bloco 37,4 ms;
+       * aqui são duas leituras baratas.
+       */
+      const dono = await tx.membership.findFirst({
+        where: { tenantId, role: 'OWNER' },
+        include: { user: { select: { email: true } } },
+      });
+
+      return { tenant, plan, dono };
+    });
 
     if (!plan) throw new NotFoundException('Plano não encontrado');
     if (!plan.isActive) throw new BadRequestException('Plano indisponível');
@@ -75,13 +131,9 @@ export class BillingService {
       );
     }
 
-    const dono = await this.prisma.membership.findFirst({
-      where: { tenantId, role: 'OWNER' },
-      include: { user: { select: { email: true } } },
-    });
-
     if (!dono) throw new BadRequestException('Workspace sem proprietário');
 
+    // I/O externo — fora de qualquer transação, de propósito.
     const sessao = await this.provider.createCheckout({
       customerId: tenant.stripeCustomerId,
       email: dono.user.email,
@@ -95,24 +147,26 @@ export class BillingService {
       metadata: { tenantId, planCode },
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId,
-        action: 'billing.checkout.created',
-        entityType: 'Plan',
-        entityId: plan.id,
-        after: { planCode, currency: moeda },
-      },
-    });
+    await this.prisma.comTenant(tenantId, (tx) =>
+      tx.auditLog.create({
+        data: {
+          tenantId,
+          action: 'billing.checkout.created',
+          entityType: 'Plan',
+          entityId: plan.id,
+          after: { planCode, currency: moeda },
+        },
+      }),
+    );
 
     return { url: sessao.url };
   }
 
   /** Portal do provedor: trocar cartão, ver faturas, cancelar. */
   async abrirPortal(tenantId: string): Promise<{ url: string }> {
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({
-      where: { id: tenantId },
-    });
+    const tenant = await this.prisma.comTenant(tenantId, (tx) =>
+      tx.tenant.findUniqueOrThrow({ where: { id: tenantId } }),
+    );
 
     if (!tenant.stripeCustomerId) {
       throw new BadRequestException(
@@ -141,6 +195,17 @@ export class BillingService {
    * se conserta sozinha. O custo é que erro permanente gera reentregas até o
    * Stripe desistir; por isso a linha com `error` preenchido e `processedAt`
    * nulo é fila de conserto manual, não decoração.
+   *
+   * **`billing_events` não entra em bloco nenhum.** A tabela não tem `tenantId`
+   * — no momento em que a linha é gravada, ninguém ainda sabe de que tenant o
+   * evento é. Colocá-la sob `comTenant` exigiria inventar um tenant antes de
+   * descobri-lo, que é justamente a ordem que este método não pode ter.
+   *
+   * O `update` do `catch` roda **fora** da transação que falhou. Isso não é
+   * detalhe: a transação abortada já foi desfeita e a conexão devolvida antes
+   * de a promessa rejeitar, então o registro do erro pega conexão limpa. Se
+   * estivesse dentro, o Postgres recusaria o comando (`25P02`) e o motivo da
+   * falha se perderia — que é o mesmo defeito consertado em `devolverCota`.
    */
   async receberWebhook(rawBody: Buffer, signature: string): Promise<void> {
     const verificado = this.provider.verifyWebhook(rawBody, signature);
@@ -229,6 +294,16 @@ export class BillingService {
    * Espelha a assinatura remota no banco e ajusta o acesso.
    *
    * Regras em `docs/strategic/lacunas-estruturais.md` §10.3 e §10.4.
+   *
+   * Descoberta fora, escrita dentro. O `acharTenant` e a leitura do plano são
+   * as duas consultas que **não podem** declarar tenant: uma procura o tenant,
+   * a outra lê catálogo global.
+   *
+   * Do bloco para dentro, tudo o que antes eram quatro a seis escritas soltas
+   * passa a ser uma só: espelhar a assinatura, gravar o `stripeCustomerId` e
+   * suspender ou reativar o workspace agora vivem ou morrem juntos. Antes, uma
+   * falha no meio deixava a assinatura atualizada e o acesso no estado
+   * anterior — cliente pagante bloqueado, ou inadimplente com acesso.
    */
   private async aplicarAssinatura(remota: RemoteSubscription): Promise<void> {
     const tenantId = await this.acharTenant(remota);
@@ -242,10 +317,6 @@ export class BillingService {
     const plan = remota.priceId
       ? await this.prisma.plan.findUnique({ where: { stripePriceId: remota.priceId } })
       : null;
-
-    const assinatura = await this.prisma.subscription.findUnique({
-      where: { tenantId },
-    });
 
     const dados = {
       status: remota.status,
@@ -262,23 +333,27 @@ export class BillingService {
       ...(plan ? { planId: plan.id } : {}),
     };
 
-    if (assinatura) {
-      await this.prisma.subscription.update({ where: { tenantId }, data: dados });
-    } else if (plan) {
-      await this.prisma.subscription.create({ data: { tenantId, planId: plan.id, ...dados } });
-    } else {
-      throw new Error(
-        `Assinatura ${remota.externalId} referencia o preço ${remota.priceId}, ` +
-          'que não corresponde a nenhum plano. Rode a sincronização de preços.',
-      );
-    }
+    await this.prisma.comTenant(tenantId, async (tx) => {
+      const assinatura = await tx.subscription.findUnique({ where: { tenantId } });
 
-    await this.prisma.tenant.update({
-      where: { id: tenantId },
-      data: { stripeCustomerId: remota.customerId },
+      if (assinatura) {
+        await tx.subscription.update({ where: { tenantId }, data: dados });
+      } else if (plan) {
+        await tx.subscription.create({ data: { tenantId, planId: plan.id, ...dados } });
+      } else {
+        throw new Error(
+          `Assinatura ${remota.externalId} referencia o preço ${remota.priceId}, ` +
+            'que não corresponde a nenhum plano. Rode a sincronização de preços.',
+        );
+      }
+
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: { stripeCustomerId: remota.customerId },
+      });
+
+      await this.ajustarAcesso(tx, tenantId, remota.status);
     });
-
-    await this.ajustarAcesso(tenantId, remota.status);
   }
 
   /**
@@ -287,18 +362,26 @@ export class BillingService {
    * `PAST_DUE` não suspende: é o provedor ainda tentando cobrar, e a causa
    * mais comum é cartão vencido. Suspender aí perderia cliente por um
    * problema que se resolve sozinho na segunda tentativa.
+   *
+   * Recebe o `tx` porque é sempre chamado de dentro de um bloco — mesma forma
+   * de `assertNaoEUltimoDono` em `team.service.ts`. Abrir transação própria
+   * aqui desfaria a atomicidade que o chamador acabou de estabelecer.
    */
-  private async ajustarAcesso(tenantId: string, status: string): Promise<void> {
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+  private async ajustarAcesso(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    status: string,
+  ): Promise<void> {
+    const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
     const inadimplente = status === 'UNPAID' || status === 'CANCELED';
 
     if (inadimplente && !tenant.suspendedAt) {
-      await this.prisma.tenant.update({
+      await tx.tenant.update({
         where: { id: tenantId },
         data: { suspendedAt: new Date(), suspendedReason: MOTIVO_INADIMPLENCIA },
       });
 
-      await this.prisma.auditLog.create({
+      await tx.auditLog.create({
         data: {
           tenantId,
           action: 'billing.tenant.suspended',
@@ -317,12 +400,12 @@ export class BillingService {
     // Só desfaz a suspensão que a cobrança criou. Suspensão manual — abuso,
     // pedido judicial, investigação — não é revogada por um pagamento.
     if (ativo && tenant.suspendedAt && tenant.suspendedReason === MOTIVO_INADIMPLENCIA) {
-      await this.prisma.tenant.update({
+      await tx.tenant.update({
         where: { id: tenantId },
         data: { suspendedAt: null, suspendedReason: null },
       });
 
-      await this.prisma.auditLog.create({
+      await tx.auditLog.create({
         data: {
           tenantId,
           action: 'billing.tenant.reactivated',
@@ -336,6 +419,16 @@ export class BillingService {
     }
   }
 
+  /**
+   * **A consulta que não pode declarar tenant.**
+   *
+   * As duas leituras aqui varrem `tenants` sem saber o tenant — descobri-lo é
+   * a própria função do método. Nenhuma delas entra em `comTenant`, e não é
+   * omissão: uma política em `tenants` faria as duas devolverem zero linhas e
+   * derrubaria todo webhook de cobrança do produto.
+   *
+   * Ver a nota no topo da classe.
+   */
   private async acharTenant(remota: RemoteSubscription): Promise<string | null> {
     const pelosMetadados = remota.metadata?.tenantId;
     if (pelosMetadados) {
@@ -367,6 +460,10 @@ export class BillingService {
    * Upsert e não create: o mesmo `in_...` chega várias vezes ao longo da vida
    * da fatura — criada, emitida, tentada, paga. É a mesma fatura mudando de
    * estado, não quatro faturas.
+   *
+   * Mesma forma de `aplicarAssinatura`: a busca do tenant por
+   * `stripeCustomerId` é descoberta e fica fora; o `upsert` da fatura, que tem
+   * `tenantId`, entra no bloco.
    */
   private async aplicarFatura(fatura: RemoteInvoice): Promise<void> {
     const tenant = await this.prisma.tenant.findUnique({
@@ -400,20 +497,27 @@ export class BillingService {
       pdfUrl: fatura.pdfUrl,
     };
 
-    await this.prisma.invoice.upsert({
-      where: {
-        provider_externalId: {
-          provider: this.provider.name,
-          externalId: fatura.externalId,
+    await this.prisma.comTenant(tenant.id, (tx) =>
+      tx.invoice.upsert({
+        where: {
+          provider_externalId: {
+            provider: this.provider.name,
+            externalId: fatura.externalId,
+          },
         },
-      },
-      create: { provider: this.provider.name, externalId: fatura.externalId, ...dados },
-      update: dados,
-    });
+        create: { provider: this.provider.name, externalId: fatura.externalId, ...dados },
+        update: dados,
+      }),
+    );
   }
 
   // ---------------------------------------------------------------- preços
 
+  /**
+   * `plans` é catálogo global — não tem `tenantId`, nenhuma política vai
+   * filtrá-la, e envolvê-la em `comTenant` só acrescentaria o custo da
+   * transação sem trocar nada em segurança.
+   */
   private async aplicarPreco(preco: RemotePrice): Promise<void> {
     const plan = await this.prisma.plan.findUnique({
       where: { stripePriceId: preco.externalId },
@@ -445,6 +549,9 @@ export class BillingService {
    * Existe porque webhook perdido é normal — endpoint fora do ar, deploy no
    * momento errado — e sem uma reconciliação o cache diverge para sempre.
    * Chamada pelo painel do provedor e na subida da aplicação em produção.
+   *
+   * Não tem tenant nenhum: é operação de catálogo, disparada por administrador
+   * ou pela subida do processo.
    */
   async sincronizarPrecos(): Promise<{ atualizados: number }> {
     if (!this.provider.configurado) return { atualizados: 0 };
