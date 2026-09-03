@@ -29,21 +29,37 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  */
 
 /**
- * ⏸ PAUSADO — a familia Pipeline foi revertida em 27/08/2026.
+ * ▶ RELIGADO em 03/09/2026, pela `20260903200000_rls_familia_pipeline_religar`.
  *
- * A politica foi desligada pela migration `20260827200000_rls_pipeline_revertido`
- * porque a varredura de chamadores estava incompleta: `auth.service.ts` e
- * `leads.service.ts` tambem escrevem nestas tabelas, e nenhum dos dois tinha
- * sido convertido.
+ * ---
  *
- * **Os testes ficam aqui, em `skip`, e nao apagados.** Teste apagado e teste
- * esquecido; teste pulado aparece na contagem de toda execucao e cobra sozinho.
+ * **Historico, porque ele explica o desenho deste arquivo.**
  *
- * Para religar: `PAUSADO = false`. **Uma chave so** — os blocos e os hooks
- * dependem dela. Duas chaves para o mesmo estado e como um deles fica esquecido.
+ * A familia foi ligada em 27/08 e revertida no mesmo dia: a varredura de
+ * chamadores estava incompleta, o registro de conta passou a responder 500 e
+ * 45 testes cairam. Os testes ficaram aqui em `skip` em vez de apagados —
+ * teste apagado e teste esquecido; teste pulado aparece na contagem de toda
+ * execucao e cobra sozinho. Foram sete dias aparecendo como `7 skipped`.
+ *
+ * **A chave unica se pagou.** `PAUSADO` governa os blocos E os hooks, entao
+ * religar foi trocar `true` por `false`. Se fossem duas chaves, uma delas teria
+ * ficado para tras — e o modo de falha seria o pior possivel: os testes rodando
+ * sem o `beforeAll` ter montado o cenario, falhando por motivo errado.
+ *
+ * **A constante fica.** Nao vira codigo morto: e o interruptor de pausa desta
+ * familia, e a proxima vez que alguem precisar desligar a politica para
+ * investigar algo, `PAUSADO = true` e uma linha em vez de um `git revert`.
+ *
+ * ---
+ *
+ * A varredura que faltava foi refeita em 03/09 sobre os arquivos vivos: sao
+ * **cinco** arquivos e 19 acessos, e nao tres. O `dashboard.service.ts` era o
+ * que faltava na narrativa — e o mais perigoso dos cinco, porque **so le**, e
+ * leitura sob politica sem contexto nao da erro: da vazio. Ele teria zerado os
+ * KPIs do painel em silencio.
  */
 
-const PAUSADO = true;
+const PAUSADO = false;
 const bloco = PAUSADO ? describe.skip : describe;
 
 const admin = criarPrismaAdmin();
