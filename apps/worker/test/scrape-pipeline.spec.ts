@@ -1,12 +1,13 @@
 import path from 'node:path';
 
-import { PrismaClient } from '@prisma/client';
 import type { LeadSourceProvider } from '@propectai/types';
 import dotenv from 'dotenv';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { criarPrismaApp } from '../src/db/prisma-app';
 import { MockLeadSourceProvider } from '../src/providers/mock.provider';
 import { processScrapeJob } from '../src/pipeline/process-scrape-job';
+import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -22,10 +23,33 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  *   - job que falha devolve toda a reserva
  *   - nenhum lead de job concluído fica sem score e sem motivo
  *
+ * ---
+ *
+ * **Dois clientes, e a separação é o que dá sentido ao verde.**
+ *
+ * `admin` monta o cenário e confere o resultado, com o papel que ignora a
+ * política. Montar cenário é operação administrativa: não faz sentido submetê-la
+ * à política que se quer testar.
+ *
+ * `prisma` é o que o código sob teste recebe — `criarPrismaApp()`, conectado
+ * pelo `DATABASE_URL_APP` e portanto **sujeito à política**. É o mesmo par do
+ * `audit-pipeline.spec.ts`.
+ *
+ * Até 03/09 este era o único spec do worker com um cliente só, e ele era o
+ * cliente do dono. Não quebrava nada — não há política sobre as tabelas de lead
+ * ainda. **O que estava em risco era o significado do verde:** ligada a família
+ * Leads na fase B, esta suíte — que prova cota, deduplicação e score — rodaria
+ * por fora da política e passaria sem ela no caminho. Passaria provando menos
+ * do que diz provar, e nada indicaria isso.
+ *
+ * É exatamente o cenário para o qual o aviso alto do `criarPrismaApp` foi
+ * escrito.
+ *
  * Precisa de `pnpm docker:up` e `pnpm db:migrate` antes.
  */
 
-const prisma = new PrismaClient();
+const admin = criarPrismaAdmin();
+const prisma = criarPrismaApp();
 const suffix = Date.now().toString(36);
 
 const REQUESTED = 10;
@@ -51,7 +75,7 @@ function periodStart(): Date {
 }
 
 async function usage(): Promise<{ reserved: number; settled: number }> {
-  const row = await prisma.planUsage.findUniqueOrThrow({
+  const row = await admin.planUsage.findUniqueOrThrow({
     where: { tenantId_periodStart: { tenantId, periodStart: periodStart() } },
   });
   return { reserved: row.leadsReserved, settled: row.leadsSettled };
@@ -63,12 +87,12 @@ async function enqueue(
   count = REQUESTED,
   alvo = searchId,
 ): Promise<string> {
-  await prisma.planUsage.update({
+  await admin.planUsage.update({
     where: { tenantId_periodStart: { tenantId, periodStart: periodStart() } },
     data: { leadsReserved: { increment: count }, searchesCount: { increment: 1 } },
   });
 
-  const job = await prisma.scrapeJob.create({
+  const job = await admin.scrapeJob.create({
     data: {
       tenantId,
       searchId: alvo,
@@ -105,7 +129,7 @@ async function criarLocale(
   status: 'GERADO' | 'VALIDADO' | 'CURADO',
   chave: string,
 ): Promise<string> {
-  const locale = await prisma.segmentLocale.create({
+  const locale = await admin.segmentLocale.create({
     data: {
       segmentId,
       locale: `xx-${chave}`,
@@ -121,7 +145,7 @@ async function criarLocale(
 
 /** Busca que declara ter saído de um termo sugerido. */
 async function buscaComTermo(segmentLocaleId: string): Promise<string> {
-  const search = await prisma.prospectingSearch.create({
+  const search = await admin.prospectingSearch.create({
     data: {
       tenantId,
       niche: 'Dentistas',
@@ -155,14 +179,14 @@ async function buscaComTermo(segmentLocaleId: string): Promise<string> {
 const TIMEOUT_HOOK_MS = 60_000;
 
 beforeAll(async () => {
-  await prisma.$connect();
+  await admin.$connect();
 
-  const tenant = await prisma.tenant.create({
+  const tenant = await admin.tenant.create({
     data: { name: `Tenant Pipeline ${suffix}`, slug: `pipeline-${suffix}`, isDemo: true },
   });
   tenantId = tenant.id;
 
-  const search = await prisma.prospectingSearch.create({
+  const search = await admin.prospectingSearch.create({
     data: { tenantId, niche: 'Dentistas', stateUf: 'SP', city: 'São Paulo' },
   });
   searchId = search.id;
@@ -170,13 +194,13 @@ beforeAll(async () => {
   const start = periodStart();
   const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
 
-  await prisma.planUsage.create({
+  await admin.planUsage.create({
     data: { tenantId, periodStart: start, periodEnd: end },
   });
 
   // Segmento é global, não pertence a tenant nenhum — por isso sai na limpeza
   // por conta própria, e não de carona no cascade do tenant.
-  const segment = await prisma.segment.create({
+  const segment = await admin.segment.create({
     data: {
       externalId: `TEST-${suffix}`,
       macroSegment: 'Teste',
@@ -194,9 +218,10 @@ afterAll(async () => {
   // Roda mesmo se o `beforeAll` tiver falhado: sem isto, uma falha de conexao
   // deixa tenant e segmento de teste para tras, e a corrida seguinte encontra
   // o `slug` ja ocupado — a falha de ambiente vira falha de dado.
-  if (tenantId) await prisma.tenant.deleteMany({ where: { id: tenantId } });
-  if (segmentId) await prisma.segment.deleteMany({ where: { id: segmentId } });
+  if (tenantId) await admin.tenant.deleteMany({ where: { id: tenantId } });
+  if (segmentId) await admin.segment.deleteMany({ where: { id: segmentId } });
   await prisma.$disconnect();
+  await admin.$disconnect();
 }, TIMEOUT_HOOK_MS);
 
 describe('regra 5.3 — cota', () => {
@@ -235,7 +260,7 @@ describe('regra 5.3 — cota', () => {
     expect(depois.reserved).toBe(0);
     expect(depois.settled).toBe(antes.settled);
 
-    const total = await prisma.lead.count({ where: { tenantId } });
+    const total = await admin.lead.count({ where: { tenantId } });
     expect(total).toBe(antes.settled);
   });
 
@@ -265,14 +290,14 @@ describe('regra 5.3 — cota', () => {
     // Falhar não pode consumir crédito nem, pior, gerar crédito.
     expect(depois.settled).toBe(antes.settled);
 
-    const job = await prisma.scrapeJob.findUniqueOrThrow({ where: { id: jobId } });
+    const job = await admin.scrapeJob.findUniqueOrThrow({ where: { id: jobId } });
     expect(job.status).toBe('FAILED');
   });
 });
 
 describe('regra 5.4 — nenhum lead concluído sem score explicado', () => {
   it('todo lead criado pelo pipeline tem score e motivos', async () => {
-    const leads = await prisma.lead.findMany({
+    const leads = await admin.lead.findMany({
       where: { tenantId },
       include: { score: { include: { reasons: true } } },
     });
@@ -291,7 +316,7 @@ describe('regra 5.4 — nenhum lead concluído sem score explicado', () => {
   it('nenhum dado pessoal de avaliador foi persistido', async () => {
     // Regra 5.5, verificada no mesmo ciclo: o payload bruto gravado em
     // LeadSourceRecord não pode conter os campos de pessoa física.
-    const records = await prisma.leadSourceRecord.findMany({
+    const records = await admin.leadSourceRecord.findMany({
       where: { tenantId },
       select: { payload: true },
       take: 50,
@@ -323,7 +348,7 @@ describe('validação de termos por busca real', () => {
     const provider = new MockLeadSourceProvider();
     await processScrapeJob(prisma, provider, payload(jobId, REQUESTED_LARGO, alvo));
 
-    const locale = await prisma.segmentLocale.findUniqueOrThrow({
+    const locale = await admin.segmentLocale.findUniqueOrThrow({
       where: { id: localeId },
     });
 
@@ -351,7 +376,7 @@ describe('validação de termos por busca real', () => {
     expect(resultado.newLeads).toBe(0);
     expect(resultado.duplicates).toBe(RESULTADOS_LARGO);
 
-    const locale = await prisma.segmentLocale.findUniqueOrThrow({
+    const locale = await admin.segmentLocale.findUniqueOrThrow({
       where: { id: localeId },
     });
 
@@ -367,7 +392,7 @@ describe('validação de termos por busca real', () => {
     const provider = new MockLeadSourceProvider();
     await processScrapeJob(prisma, provider, payload(jobId, REQUESTED, alvo));
 
-    const locale = await prisma.segmentLocale.findUniqueOrThrow({
+    const locale = await admin.segmentLocale.findUniqueOrThrow({
       where: { id: localeId },
     });
 
@@ -387,7 +412,7 @@ describe('validação de termos por busca real', () => {
     const provider = new MockLeadSourceProvider();
     await processScrapeJob(prisma, provider, payload(jobId, REQUESTED, alvo));
 
-    const locale = await prisma.segmentLocale.findUniqueOrThrow({
+    const locale = await admin.segmentLocale.findUniqueOrThrow({
       where: { id: localeId },
     });
 
@@ -398,7 +423,7 @@ describe('validação de termos por busca real', () => {
   });
 
   it('busca sem termo sugerido não altera locale nenhum', async () => {
-    const antes = await prisma.segmentLocale.findMany({
+    const antes = await admin.segmentLocale.findMany({
       where: { segmentId },
       orderBy: { locale: 'asc' },
       select: { locale: true, status: true, resultCount: true },
@@ -408,7 +433,7 @@ describe('validação de termos por busca real', () => {
     const provider = new MockLeadSourceProvider();
     await processScrapeJob(prisma, provider, payload(jobId));
 
-    const depois = await prisma.segmentLocale.findMany({
+    const depois = await admin.segmentLocale.findMany({
       where: { segmentId },
       orderBy: { locale: 'asc' },
       select: { locale: true, status: true, resultCount: true },
