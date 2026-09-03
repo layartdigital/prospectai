@@ -48,6 +48,8 @@ O primeiro é falha de segurança em produção; o segundo é falha de desenvolv
 
 O `propectai_app` não ser dono é cinto e suspensório: mesmo que alguém remova o `FORCE` um dia, ele continua sujeito à política.
 
+**Em 03/09 virou um quarto**, e o título acima passou a ser histórico. O `propectai_sistema` (`BYPASSRLS`, alcance enumerado tabela por tabela) existe para os seis caminhos que não têm tenant a declarar; a migration `20260903120000_rls_papel_sistema` traz o raciocínio completo, inclusive os dois desenhos recusados.
+
 ### Correção: os papéis autenticam por senha, não por confiança
 
 A migration do passo 1 afirma, em comentário, que *"o Postgres local do projeto autentica por confiança, então os papéis logam sem senha"*. **É falso.** O sintoma apareceu na primeira execução do passo 2, com o papel novo:
@@ -61,14 +63,38 @@ Escrevi aquele comentário sem ler o `.env` — e não ler continua certo, porqu
 
 O que muda na prática:
 
-- **Cada ambiente define as duas senhas**, fora do controle de versão. Em desenvolvimento:
+- **Cada ambiente define as senhas**, fora do controle de versão. Em desenvolvimento:
   ```sql
   ALTER ROLE propectai_migrator PASSWORD 'migrator_dev_only';
   ALTER ROLE propectai_app      PASSWORD 'app_dev_only';
+  ALTER ROLE propectai_sistema  PASSWORD 'sistema_dev_only';
   ```
-  E a senha entra na `DATABASE_URL_MIGRATOR` do `.env`.
+  E a senha entra na `DATABASE_URL_*` correspondente do `.env`.
 - **O comentário errado permanece no arquivo da migration, e é assim que tem de ser.** A `20260826230000_rls_papeis` já está aplicada; editar o arquivo muda o checksum e o Prisma passa a recusar **toda** migration seguinte com *"migration modified after being applied"*. Um comentário impreciso custa menos que um repositório que não migra. A correção mora aqui, e este parágrafo é o ponteiro.
-- **O passo 4 herda um item de checklist**: apontar a aplicação para o `propectai_app` exige a senha dele na `DATABASE_URL`, e o primeiro deploy exige as duas definidas antes de qualquer migration rodar.
+- **O passo 4 herda um item de checklist**: apontar a aplicação para o `propectai_app` exige a senha dele na `DATABASE_URL`, e o primeiro deploy exige as senhas definidas antes de qualquer migration rodar.
+
+#### 03/09: escrevi a mesma frase falsa de novo
+
+A migration `20260903120000_rls_papel_sistema` diz, no rodapé: *"O Postgres local autentica por confiança; cada ambiente define a sua com `ALTER ROLE ... PASSWORD`"*. **A primeira metade é a mesma afirmação que este documento já desmentia** — desmentia num parágrafo que eu mesmo escrevi, oito dias antes.
+
+Copiei o rodapé da migration do passo 1 porque ele parecia a convenção da casa, e não consultei a correção. O sintoma foi idêntico: `Authentication failed ... for propectai_sistema`, 56 testes vermelhos.
+
+**A causa da recaída é o que faltava na correção original.** Ela dizia *que* a afirmação era falsa e não dizia **por quê** — e sem o porquê, a intuição errada sobrevive intacta e reaparece na próxima migration. O `pg_hba.conf` do container responde:
+
+```
+local   all   all                        trust
+host    all   all   127.0.0.1/32         trust
+host    all   all   ::1/128              trust
+host    all   all   all                  scram-sha-256
+```
+
+As linhas `trust` cobrem **o socket local e o `127.0.0.1` de dentro do container**. Uma conexão vinda do Windows atravessa o encaminhamento de porta do Docker e chega pelo IP do gateway da rede bridge — que não é `127.0.0.1` para o Postgres. Ela cai na última linha, e a última linha exige senha.
+
+Ou seja: nunca houve autenticação por confiança para quem conecta de fora do container. O `POSTGRES_PASSWORD` do `.env` confirma que **até o dono tem senha**. A frase era falsa desde o primeiro dia e só não doeu enquanto ninguém tentou conectar com um papel recém-criado.
+
+**Correção de método, e não só de fato:** quando um comentário de migration não pode ser editado, a correção precisa carregar a evidência que a torna difícil de reverter — aqui, a saída do `pg_hba.conf`. Uma correção que diz apenas "é falso" protege o leitor uma vez; uma que mostra o mecanismo protege quem for escrever a próxima migration. Eu era esse leitor, e a minha própria correção não me alcançou.
+
+**Item de checklist do primeiro deploy, atualizado: são três credenciais a provisionar** — `propectai_migrator`, `propectai_app` e `propectai_sistema` —, nenhuma delas loga sem senha, e as três precisam existir antes de a primeira migration rodar.
 
 ---
 
