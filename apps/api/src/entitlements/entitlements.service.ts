@@ -5,6 +5,7 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import type { PlanLimits } from '@propectai/types';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -208,17 +209,50 @@ export class EntitlementsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Período de consumo do mês corrente, criado sob demanda. */
-  async currentUsage(tenantId: string) {
+  /**
+   * Período de consumo do mês corrente, criado sob demanda.
+   *
+   * ---------------------------------------------------------------------------
+   * O `tx` opcional, e por que ele é opcional
+   * ---------------------------------------------------------------------------
+   *
+   * `plan_usages` tem `tenantId`. Sob política de RLS, este `upsert` **precisa**
+   * de contexto declarado, e até aqui ele não tinha nenhum: o serviço usa o
+   * client próprio, e quem o chama de dentro de um `comTenant` não conseguia
+   * emprestar a transação. Era o último caso especial de código da fase A.
+   *
+   * **O parâmetro é opcional, e os dois caminhos declaram contexto.** Não existe
+   * ramo que rode sem — essa é a propriedade que importa:
+   *
+   *   - com `tx`, participa da transação de quem chamou, e a leitura do período
+   *     fica atômica com a escrita que vem depois;
+   *   - sem `tx`, abre bloco próprio.
+   *
+   * Obrigatório seria mais rígido e pior. Dos treze pontos de chamada, vários
+   * são **portão de cota**: rodam antes de qualquer transação existir, para
+   * decidir se a ação sequer começa — `createSearch` recusa a busca antes de
+   * abrir bloco nenhum, e `outreach.quota` só responde uma pergunta. Forçá-los
+   * a abrir transação para perguntar "posso?" inverteria a ordem do fluxo por
+   * uma exigência de assinatura.
+   *
+   * O risco conhecido do opcional é alguém esquecer de passar o `tx` e ganhar
+   * uma transação a mais em silêncio. Custa ~5 ms e nada de correção — é
+   * exatamente o comportamento de hoje, então não é regressão; é o que deixa
+   * de melhorar.
+   */
+  async currentUsage(tenantId: string, tx?: Prisma.TransactionClient) {
     const now = new Date();
     const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
-    return this.prisma.planUsage.upsert({
-      where: { tenantId_periodStart: { tenantId, periodStart } },
-      create: { tenantId, periodStart, periodEnd },
-      update: {},
-    });
+    const upsert = (cliente: Prisma.TransactionClient) =>
+      cliente.planUsage.upsert({
+        where: { tenantId_periodStart: { tenantId, periodStart } },
+        create: { tenantId, periodStart, periodEnd },
+        update: {},
+      });
+
+    return tx ? upsert(tx) : this.prisma.comTenant(tenantId, upsert);
   }
 
   /**
@@ -227,8 +261,12 @@ export class EntitlementsService implements OnModuleInit, OnModuleDestroy {
    * `reserved` conta o que está em voo; `settled` conta o que virou lead novo
    * de fato. Duplicado não entra em nenhum dos dois.
    */
-  async availableLeadCredits(tenantId: string, planCode: string): Promise<number> {
-    const usage = await this.currentUsage(tenantId);
+  async availableLeadCredits(
+    tenantId: string,
+    planCode: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const usage = await this.currentUsage(tenantId, tx);
     const included = this.limits(planCode).leadsIncluded;
     return Math.max(0, included - usage.leadsReserved - usage.leadsSettled);
   }
@@ -240,8 +278,12 @@ export class EntitlementsService implements OnModuleInit, OnModuleDestroy {
    * a auditoria e sob demanda e sincrona do ponto de vista da cota — conta ao
    * executar, nao ao enfileirar. Nao ha o caso "reservou e nao virou lead".
    */
-  async availableAuditCredits(tenantId: string, planCode: string): Promise<number> {
-    const usage = await this.currentUsage(tenantId);
+  async availableAuditCredits(
+    tenantId: string,
+    planCode: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const usage = await this.currentUsage(tenantId, tx);
     const included = this.limits(planCode).auditsPerMonth;
     return Math.max(0, included - usage.auditsCount);
   }

@@ -890,17 +890,19 @@ export class LeadsService {
       '﻿' +
       [cabecalho, ...linhas].map((linha) => linha.map(csvCampo).join(';')).join('\r\n');
 
-    /**
-     * Garante que a linha de uso do período exista antes do `updateMany`.
-     *
-     * O retorno é descartado de propósito — o que interessa é o efeito. O
-     * `EntitlementsService` usa client próprio e fica **fora** do bloco; ele é
-     * o caso especial que precisa receber o `tx` por parâmetro, e isso é a
-     * fatia 8.
-     */
-    await this.entitlements.currentUsage(tenantId);
-
     await this.prisma.comTenant(tenantId, async (tx) => {
+      /**
+       * Garante que a linha de uso do período exista antes do `updateMany`.
+       *
+       * O retorno é descartado de propósito — o que interessa é o efeito.
+       *
+       * **Passou para dentro do bloco na fatia 8**, quando o `currentUsage`
+       * ganhou o `tx` opcional. Antes eram duas transações: uma para criar a
+       * linha, outra para incrementar. Agora criar e incrementar são o mesmo
+       * fato, e uma exportação registrada é uma exportação contada.
+       */
+      await this.entitlements.currentUsage(tenantId, tx);
+
       await tx.planUsage.updateMany({
         where: { tenantId },
         data: { exportsCount: { increment: 1 } },
