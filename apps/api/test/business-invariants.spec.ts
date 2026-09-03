@@ -1,7 +1,7 @@
 import path from 'node:path';
 
-import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
+import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -24,15 +24,33 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * Precisa de `pnpm docker:up`, `pnpm db:migrate` e `pnpm db:seed` antes.
  */
 
-const prisma = new PrismaClient();
+/**
+ * **Cliente de fixtures, e nao o da aplicacao.**
+ *
+ * Este arquivo monta cenario e confere invariante — nao exercita o caminho da
+ * aplicacao em lugar nenhum. As duas coisas exigem enxergar todos os tenants,
+ * entao o papel certo e o que ignora a politica.
+ *
+ * Vinha usando `new PrismaClient()`, que conecta pelo `DATABASE_URL` — o dono
+ * do banco, que **hoje** e superusuario e por isso ignora RLS. Funcionava por
+ * consequencia da configuracao, nao por escolha: no dia em que o `DATABASE_URL`
+ * apontar para um papel comum, estas consultas passariam a devolver vazio sem
+ * erro nenhum.
+ *
+ * `criarPrismaAdmin()` usa o `DATABASE_URL_MIGRATOR`, cujo `BYPASSRLS` e
+ * atributo do papel e nao efeito colateral de ser dono. O nome `admin` segue a
+ * convencao dos outros specs: `admin` ignora a politica, `admin` esta sujeito
+ * a ela.
+ */
+const admin = criarPrismaAdmin();
 const DB_TIMEOUT_MS = 30_000;
 
 beforeAll(async () => {
-  await prisma.$connect();
+  await admin.$connect();
 }, DB_TIMEOUT_MS);
 
 afterAll(async () => {
-  await prisma.$disconnect();
+  await admin.$disconnect();
 }, DB_TIMEOUT_MS);
 
 describe('regra 5.4 — nenhum lead visível fica sem score explicado', () => {
@@ -40,7 +58,7 @@ describe('regra 5.4 — nenhum lead visível fica sem score explicado', () => {
     // O número sozinho não serve: o produto vende explicabilidade. Score sem
     // motivo é score que ninguém pode contestar, e a ficha do lead renderiza
     // "nenhum ponto identificado" nas duas colunas.
-    const scores = await prisma.leadScore.findMany({
+    const scores = await admin.leadScore.findMany({
       select: { leadId: true, value: true, _count: { select: { reasons: true } } },
     });
 
@@ -55,7 +73,7 @@ describe('regra 5.4 — nenhum lead visível fica sem score explicado', () => {
     // Lead sem LeadScore aparece na lista com score nulo. O ciclo de estados
     // do job (RUNNING → NORMALIZING → SCORING → COMPLETED) existe justamente
     // para que nada chegue à interface antes de SCORING terminar.
-    const orfaos = await prisma.lead.findMany({
+    const orfaos = await admin.lead.findMany({
       where: { deletedAt: null, score: { is: null } },
       select: { id: true, name: true, tenantId: true },
       take: 20,
@@ -65,7 +83,7 @@ describe('regra 5.4 — nenhum lead visível fica sem score explicado', () => {
   });
 
   it('score fora da faixa 0–100 é defeito, não resultado', async () => {
-    const foraDaFaixa = await prisma.leadScore.count({
+    const foraDaFaixa = await admin.leadScore.count({
       where: { OR: [{ value: { lt: 0 } }, { value: { gt: 100 } }] },
     });
 
@@ -77,7 +95,7 @@ describe('regra 5.3 — cota reflete lead novo, não linha retornada', () => {
   it('nenhum período tem reserva ou liquidação negativa', async () => {
     // Devolver reserva de job falho com subtração maior que a reserva original
     // produz saldo negativo — o cliente ganharia crédito por falhar.
-    const negativos = await prisma.planUsage.findMany({
+    const negativos = await admin.planUsage.findMany({
       where: {
         OR: [{ leadsReserved: { lt: 0 } }, { leadsSettled: { lt: 0 } }],
       },
@@ -92,7 +110,7 @@ describe('regra 5.3 — cota reflete lead novo, não linha retornada', () => {
     // liquida com o número real de leads novos, FAILED devolve tudo. Sobrar
     // reserva sem job em andamento significa cota consumida por trabalho que
     // não existe mais — o cliente paga por nada.
-    const emAndamento = await prisma.scrapeJob.count({
+    const emAndamento = await admin.scrapeJob.count({
       where: { status: { in: ['QUEUED', 'RUNNING', 'NORMALIZING', 'SCORING'] } },
     });
 
@@ -102,7 +120,7 @@ describe('regra 5.3 — cota reflete lead novo, não linha retornada', () => {
       return;
     }
 
-    const comReserva = await prisma.planUsage.findMany({
+    const comReserva = await admin.planUsage.findMany({
       where: { leadsReserved: { gt: 0 } },
       select: { tenantId: true, periodStart: true, leadsReserved: true },
     });
@@ -114,7 +132,7 @@ describe('regra 5.3 — cota reflete lead novo, não linha retornada', () => {
     // Duplicado atualiza e não cobra. Se a liquidação passar da contagem real
     // de leads do tenant, alguém está cobrando por linha retornada e não por
     // lead novo — exatamente a regra que 5.3 proíbe.
-    const usos = await prisma.planUsage.groupBy({
+    const usos = await admin.planUsage.groupBy({
       by: ['tenantId'],
       _sum: { leadsSettled: true },
     });
@@ -123,7 +141,7 @@ describe('regra 5.3 — cota reflete lead novo, não linha retornada', () => {
       const settled = uso._sum.leadsSettled ?? 0;
       if (settled === 0) continue;
 
-      const existentes = await prisma.lead.count({ where: { tenantId: uso.tenantId } });
+      const existentes = await admin.lead.count({ where: { tenantId: uso.tenantId } });
 
       expect(settled).toBeLessThanOrEqual(existentes);
     }
