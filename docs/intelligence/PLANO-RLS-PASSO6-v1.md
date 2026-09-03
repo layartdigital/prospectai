@@ -49,6 +49,57 @@ O caso que revelou isso é o `getSession` do `AuthService`: ele consulta `user.f
 
 Antes da família 6, é preciso uma segunda varredura, por `include` e não por delegate. Enquanto ela não existir, o número acima é o que se sabe, não o que há.
 
+### A segunda varredura — feita em 03/09, e o resultado
+
+Feita antes da família 6, como planejado. Três cuidados de método, todos por causa de erros anteriores:
+
+1. **Sobre os arquivos vivos.** Os 86 `.ts` de `apps/api/src` e `apps/worker/src` foram trazidos da máquina de origem no momento da varredura. A cópia local que eu tinha continha 42 arquivos — menos da metade — e teria produzido o mesmo tipo de número plausível e errado da primeira contagem.
+2. **Com o mapa de relações derivado do schema, não escrito à mão.** A primeira tentativa usou um dicionário que eu digitei (`memberships` → `Membership`, e assim por diante). Ele deu o mesmo resultado, mas um mapa escrito à mão só encontra o que quem escreveu lembrou de listar. A versão que vale lê os campos de relação do `schema.prisma` e desce até quatro níveis de `include` aninhado.
+3. **Sobre a pergunta certa.** Não "quais arquivos têm `include`", mas **"quais chamadas cuja raiz não tem `tenantId` alcançam tabela que tem"**. É a pergunta que o `getSession` levantou.
+
+**Resultado: três chamadas, e as três já eram conhecidas.**
+
+| local | raiz | alcança |
+|---|---|---|
+| `admin.service.ts:22` | `tenant.findMany` | `memberships`, `subscription` |
+| `admin.service.ts:127` | `tenant.findFirst` | `subscription` |
+| `auth.service.ts:272` | `user.findUniqueOrThrow` | `memberships`, `onboardingState`, `subscription` |
+
+Nenhuma travessia nova. **O piso de 193 estava apertado para esta classe** — o que não era garantido, e por isso a varredura precisava existir. O `getSession` não era a ponta de um problema difuso; era o problema inteiro.
+
+#### O que ela achou de outro tipo
+
+A varredura falhou em confirmar uma coisa e acertou em outra. O inventário dizia **17 arquivos com chamadas ao Prisma. São 20.** Os três que faltavam:
+
+- **`common/platform-admin.guard.ts`** — nunca apareceu em levantamento nenhum. Faz uma chamada, a `platformAdmin.findUnique`, e `PlatformAdmin` não tem `tenantId`.
+- **`segments/segments.service.ts`** — seis chamadas, todas em `Segment` e `SegmentLocale`, taxonomia global compartilhada por todos os tenants.
+- **`privacy/privacy.service.ts`** — criado depois do inventário, na D4.
+
+**Nenhum dos três exige trabalho de conversão**, e é exatamente por isso que valia nomeá-los: sem estarem escritos, a ausência deles da fase A é indistinguível de esquecimento. Agora é decisão registrada.
+
+### O estado real, medido em 03/09
+
+Contagem sobre os arquivos vivos, separando o que está dentro de bloco (`tx.`) do que está fora (`this.prisma.`):
+
+**64 chamadas a tabelas com `tenantId` ainda fora de bloco.** Destas, **53 são conversão de verdade**:
+
+| arquivo | faltam |
+|---|---:|
+| `leads/leads.service.ts` | 33 |
+| `worker/pipeline/process-scrape-job.ts` | 20 |
+
+As outras **11 são os casos especiais**, e nenhuma delas deve virar `comTenant`:
+
+| local | chamadas | por quê |
+|---|---:|---|
+| `admin.service.ts` | 7 | atravessa tenants por desenho |
+| `team.service.ts:490` (`conviteValido`) | 1 | busca por token, antes de haver tenant |
+| `privacy.service.ts:56` (`anonimizarAtor`) | 1 | varre as linhas da pessoa em todos os tenants |
+| `common/tenant.guard.ts:46` | 1 | roda antes de o tenant ser conhecido |
+| `entitlements.service.ts:217` | 1 | precisa receber o `tx`, não abrir bloco próprio |
+
+Os números que o inventário já dava — `leads` 33, `process-scrape-job` 20, `admin` 7, `tenant.guard` 1, `entitlements` 1 — **conferiram todos**. O que estava errado era a lista de arquivos, não a contagem deles.
+
 ### Os casos que não recebem `comTenant`
 
 Saíram do levantamento e precisam de tratamento próprio:
@@ -59,6 +110,21 @@ Saíram do levantamento e precisam de tratamento próprio:
 - **`auth.service.ts` → `getSession`** — lista os workspaces de uma pessoa. Não há um tenant a declarar: enumerá-los é o propósito. Terceiro caso de travessia deliberada, junto com `AdminService` e `PrivacyService`, e o terceiro a precisar do papel `propectai_admin`.
 
 **Três caminhos atravessam tenants por desenho, e os três apareceram um de cada vez** — o painel administrativo no levantamento, o `PrivacyService` ao implementar a D4, e o `getSession` ao converter o `auth`. Nenhum foi previsto. Vale assumir que existe um quarto e procurá-lo antes da família 6, em vez de esperar que ele se apresente devolvendo zero em produção.
+
+#### Atualização de 03/09: eram cinco
+
+A suposição pagou, e pagou duas vezes.
+
+- **Quarto — `TeamService.conviteValido`** (fatia 3). Busca o convite **pelo token**, e o tenant é o que ela devolve. Declarar contexto antes exigiria saber a resposta.
+- **Quinto — a descoberta de tenant no webhook de cobrança** (fatia 5). `BillingService.receberWebhook` é chamado pelo Stripe: não há sessão e não há `tenantId` no caminho da chamada. `acharTenant` o descobre lendo `metadata.tenantId` ou procurando por `stripeCustomerId`.
+
+O quinto é diferente dos outros quatro e merece destaque, porque ele **não é resolvível por papel nem por embrulho**:
+
+> Se a tabela `tenants` ganhar política de RLS (`id = current_setting('app.tenant_id', true)`), as duas consultas de `acharTenant` passam a devolver zero linhas e **todo webhook de cobrança do produto para de funcionar** — a política exige como entrada exatamente o valor que a consulta existe para descobrir. É circular.
+
+Saídas possíveis, ambas em aberto: `tenants` fica **sem** política, ou a descoberta roda como `propectai_sistema`. É o argumento mais forte até agora para o papel existir, e é decisão de schema, não de fase A.
+
+**Cinco caminhos, e nenhum dos cinco foi previsto no levantamento inicial.** Os quatro primeiros apareceram ao converter o código; o quinto, ao ler um arquivo com atenção a uma pergunta que a varredura por delegate não faz. A segunda varredura (por `include`) fechou a classe que ela cobre — mas a classe "o tenant não existe quando a chamada começa" não é encontrável por varredura de texto nenhuma, porque é uma propriedade do fluxo e não da consulta. Essa continua saindo uma por vez.
 
 ### A ordem da fase A
 
