@@ -100,6 +100,26 @@ As outras **11 são os casos especiais**, e nenhuma delas deve virar `comTenant`
 
 Os números que o inventário já dava — `leads` 33, `process-scrape-job` 20, `admin` 7, `tenant.guard` 1, `entitlements` 1 — **conferiram todos**. O que estava errado era a lista de arquivos, não a contagem deles.
 
+### Fase A concluída — 03/09
+
+As 64 acabaram. **14 arquivos, 172 chamadas**, em oito fatias, cada uma verificada sozinha antes da seguinte.
+
+O que a fase entregou além do embrulho, porque envolver uma chamada obriga a olhar para ela:
+
+| onde | defeito que já existia |
+|---|---|
+| `leads.recalculateScore` e `scoreLead` (worker) | `deleteMany` + `createMany` nas razões do score, soltos: falha entre os dois deixava o lead com número e nenhuma explicação |
+| `leads.changeStage` | podia mover o card e perder a transição — histórico com buraco que parece completo |
+| `process-scrape-job.refundQuota` | `.catch()` dentro do que viraria transação: **segunda ocorrência** do defeito consertado em `devolverCota` em 27/08 |
+| `process-scrape-job` (conclusão) | `COMPLETED` + notificação + auditoria soltas: falha na notificação deixava o job concluído sem o cliente saber |
+| `admin.suspend` | marcar a suspensão e falhar antes de revogar as sessões deixava todo mundo trabalhando lá dentro |
+| `prospecting.createSearch` | `P2002` sem tratamento: dois cliques simultâneos davam 500 |
+| `billing.aplicarAssinatura` | seis escritas soltas: falha no meio deixava assinatura atualizada e acesso no estado anterior |
+
+Sete defeitos, nenhum deles procurado. **A fase A foi barata em risco e cara em atenção**, e foi a atenção que os encontrou.
+
+Duas correções de infraestrutura de teste entraram junto, e as duas eram "verde que valia menos do que parecia": o `billing-rules.spec.ts` passava um `PrismaClient` cru mascarado por `as never`, e o `scrape-pipeline.spec.ts` era o único spec do worker com um cliente só — o do dono —, o que faria a suíte de cota e score passar por fora da política na fase B.
+
 ### Os casos que não recebem `comTenant`
 
 Saíram do levantamento e precisam de tratamento próprio:
@@ -126,6 +146,27 @@ Saídas possíveis, ambas em aberto: `tenants` fica **sem** política, ou a desc
 
 **Cinco caminhos, e nenhum dos cinco foi previsto no levantamento inicial.** Os quatro primeiros apareceram ao converter o código; o quinto, ao ler um arquivo com atenção a uma pergunta que a varredura por delegate não faz. A segunda varredura (por `include`) fechou a classe que ela cobre — mas a classe "o tenant não existe quando a chamada começa" não é encontrável por varredura de texto nenhuma, porque é uma propriedade do fluxo e não da consulta. Essa continua saindo uma por vez.
 
+#### E no fim eram quatro, não seis
+
+O `TenantGuard` entrou na lista como sexto ao ser lido de perto — ele tem dois ramos, e o de escolher o membership padrão não tem tenant a declarar. Esse continua valendo.
+
+Mas a **fatia 8c desfez parte da contagem**, e na direção oposta à esperada: **o `AdminService` não era um caminho, era um quarto de caminho.**
+
+| método | atravessa? | por quê |
+|---|---|---|
+| `listTenants` | **sim** | agrega `plan_usages` e `lead_activities` de todos os tenants ao mesmo tempo |
+| `changePlan` | não | recebe o `tenantId` por parâmetro |
+| `suspend` | não | idem |
+| `reactivate` | não | idem |
+
+Os três últimos foram para o `comTenant`, e para eles isso **não é apenas suficiente — é mais apertado**: sob a política, um defeito que calculasse o tenant errado é recusado pelo `WITH CHECK`; com `BYPASSRLS` o mesmo defeito grava em silêncio no workspace de outro cliente.
+
+**O erro de classificação tem um nome:** eu confundi *quem chama* com *o que a chamada faz*. O operador ser da plataforma decide se ele **pode** agir — isso é o `PlatformAdminGuard`. Não decide sobre **quantos** workspaces a consulta age, que é o que a política governa. "É o painel administrativo, então precisa do papel forte" é a forma curta desse erro, e ela é sedutora porque soa prudente.
+
+**Custo concreto da confusão:** a migration `20260903120000_rls_papel_sistema` concedeu ao papel escrita em quatro tabelas, das quais três nunca foram usadas. Corrigido em `20260903190000_rls_papel_sistema_estreitar`, que deixa o papel com leitura em 10 tabelas e **uma única escrita** — o `UPDATE` em `audit_logs` do `anonimizarAtor`.
+
+A regra que sai daí, e que vale para a fase B: **classificar por método, nunca por arquivo.** Um arquivo com quatro métodos pode ter quatro naturezas.
+
 ### A ordem da fase A
 
 Uma fatia por vez, cada uma verificável sozinha, nenhuma arriscada:
@@ -138,6 +179,10 @@ Uma fatia por vez, cada uma verificável sozinha, nenhuma arriscada:
 6. **`leads`** — 33, o hub. Por último entre os da API, quando o padrão já estiver repetido cinco vezes.
 7. **`process-scrape-job`** — 20, no worker.
 8. **Os três casos especiais**, cada um com a sua solução.
+
+**A ordem foi cumprida como planejada, com a oitava fatia partida em três** — `8a` (`entitlements` recebe o `tx`), `8b` (o papel do sistema e os cinco caminhos de uma chamada) e `8c` (`admin`) — porque as naturezas eram diferentes demais para uma verificação só. Todas as oito fecharam em 326 testes.
+
+A escolha de deixar `leads` por último se pagou: quando chegou a vez dele, o padrão já tinha sido repetido cinco vezes, e a decisão difícil daquele arquivo — passar o `tx` para `assertLead` e `recordActivity` em vez de embrulhar método a método — foi reconhecida de imediato porque era a mesma de `team`, `account` e `billing`.
 
 ---
 
@@ -176,6 +221,16 @@ Três saídas, e a diferença entre elas é onde mora a confiança:
 **Recomendo (b).** O argumento: onde cruzar tenant é a funcionalidade, isso deve aparecer na identidade de quem conecta — e não numa flag que qualquer caminho pode acender. O `PlatformAdminGuard` já existe e já decide quem pode; o papel só torna a decisão visível para o banco.
 
 **Custo:** um papel novo, um client novo no `AdminModule`, e a disciplina de o `admin.service.ts` ser o único a usá-lo. Um teste que afirme `current_user = 'propectai_admin'` ali e `propectai_app` no resto fecha a disciplina.
+
+> **Executado em 03/09, com dois desvios em relação ao que está escrito acima.**
+>
+> **O papel chama-se `propectai_sistema`, e não `propectai_admin`.** O nome mudou quando ficou claro que o painel administrativo é só um dos seus usuários — o `TenantGuard`, o `getSession`, o `conviteValido`, o `acharTenant` e o `anonimizarAtor` usam o mesmo papel, e nenhum deles é "admin". Um nome que descreve um dos chamadores convida o próximo a não se reconhecer nele.
+>
+> **E o `admin.service.ts` NÃO é o único a usá-lo — nem usa o papel por inteiro.** Só o `listTenants` atravessa; os outros três métodos recebem o `tenantId` por parâmetro e ficaram sob `comTenant`. Ver a atualização "E no fim eram quatro, não seis", acima. A disciplina que a seção propunha — "o admin é o único" — teria sido **errada nos dois sentidos**: larga demais para o admin e estreita demais para o resto do produto.
+>
+> A disciplina que ficou no lugar dela é estrutural em vez de acordada: o `PrismaSistemaService` **não expõe o client**. A única porta é `atravessandoTenants(motivo, fn)`, e o `motivo` é obrigatório. Um `grep` por esse nome lista todas as travessias do repositório, com a justificativa de cada uma.
+>
+> A opção (c) continua recusada, e o motivo ficou mais concreto do que estava escrito: um sentinela no contexto tornaria a escalada de privilégio **uma string** — alcançável por qualquer `comTenant('*', ...)`, isto é, por um erro de digitação. Com papel e credencial próprios, escalar exige ter a outra conexão.
 
 ### 2. Serviços que usam o próprio client não enxergam o `tx` de quem os chama
 
