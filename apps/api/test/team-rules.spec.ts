@@ -4,12 +4,12 @@ import path from 'node:path';
 import { ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
 import type { InvitationView, SessionResponse, TeamView } from '@propectai/types';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
+import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -28,7 +28,20 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * Precisa de `pnpm docker:up` e `pnpm db:migrate`.
  */
 
-const prisma = new PrismaClient();
+/**
+ * **Fixtures pelo papel que ignora a política** — trocado em 04/09, junto com a
+ * família 6 (Conta e cobrança).
+ *
+ * Era `new PrismaClient()`, que conecta pelo `DATABASE_URL`. Funcionava porque
+ * o dono do banco hoje é superusuário, e superusuário ignora RLS mesmo com
+ * `FORCE`. Com `subscriptions` sob política, o `subscription.upsert` do cenário
+ * passaria a escrever sem contexto — e o que quebraria não seria ele, seriam os
+ * testes de assento, com plano que parece não existir.
+ *
+ * As asserções continuam sendo requisições HTTP reais pelo papel da aplicação.
+ * O cliente abaixo só monta e desmonta cenário.
+ */
+const prisma = criarPrismaAdmin();
 const suffix = Date.now().toString(36);
 const SENHA = 'SenhaDeTeste123';
 

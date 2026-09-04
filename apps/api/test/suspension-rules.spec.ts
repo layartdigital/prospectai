@@ -4,12 +4,12 @@ import path from 'node:path';
 import { ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
 import type { SessionResponse } from '@propectai/types';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
+import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -27,7 +27,17 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * Precisa de `pnpm docker:up`, `pnpm db:migrate` e `pnpm db:seed`.
  */
 
-const prisma = new PrismaClient();
+/**
+ * **Fixtures pelo papel que ignora a política** — trocado em 04/09, junto com a
+ * família 6 (Conta e cobrança). Mesmo motivo do `team-rules.spec.ts`: o
+ * `subscription.upsert` do cenário passaria a escrever sem contexto.
+ *
+ * Aqui isso seria pior de diagnosticar do que na equipe. O que este arquivo
+ * testa é o que a suspensão **não** bloqueia; cenário mal montado faria os
+ * testes de "mantém o que é dele" falharem, e a leitura óbvia da falha seria
+ * "a suspensão está bloqueando demais" — exatamente a conclusão errada.
+ */
+const prisma = criarPrismaAdmin();
 const suffix = Date.now().toString(36);
 const SENHA = 'SenhaDeTeste123';
 const BOOT_TIMEOUT_MS = 60_000;

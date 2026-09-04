@@ -1,6 +1,5 @@
 import path from 'node:path';
 
-import { PrismaClient } from '@prisma/client';
 import type {
   PaymentProvider,
   RemoteSubscription,
@@ -12,6 +11,7 @@ import dotenv from 'dotenv';
 import { BillingService } from '../src/billing/billing.service';
 import { PrismaSistemaService } from '../src/prisma/prisma-sistema.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -33,12 +33,19 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * **Dois clientes de banco, de propósito.**
  *
  * O `prisma` daqui é o cliente do *teste*: monta o cenário e confere o
- * resultado, conectado como dono das tabelas. Ele nunca entra no serviço.
+ * resultado, pelo papel que **ignora** a política. Ele nunca entra no serviço.
  *
  * O serviço recebe um `PrismaService` de verdade — o mesmo que a aplicação
  * usa, conectado pelo `DATABASE_URL_APP` e portanto **sujeito à política de
- * RLS**. É a mesma separação de `criarPrismaAdmin` nos outros arquivos, e é o
- * que faz este teste exercitar o caminho real em vez de um atalho.
+ * RLS**. É essa separação que faz o teste exercitar o caminho real em vez de
+ * um atalho.
+ *
+ * **Correção de 04/09.** Este comentário dizia "é a mesma separação de
+ * `criarPrismaAdmin` nos outros arquivos" enquanto a linha abaixo ainda era
+ * `new PrismaClient()` — o cliente do dono, não o do migrator. Descrevia o
+ * desenho certo sobre o código errado, e por isso ninguém releu a linha. Passou
+ * a usar `criarPrismaAdmin()` de fato quando a família 6 pôs `subscriptions`
+ * sob política.
  *
  * Antes daqui o serviço recebia o cliente cru com um `as never`, e o `never`
  * calava o compilador exatamente na fronteira que teria acusado o problema:
@@ -48,7 +55,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * Precisa de `pnpm docker:up` e `pnpm db:migrate`.
  */
 
-const prisma = new PrismaClient();
+const prisma = criarPrismaAdmin();
 const suffix = Date.now().toString(36);
 
 const PRICE_ID = `price_teste_${suffix}`;
