@@ -2,12 +2,24 @@
   "$schema": "https://turbo.build/schema.json",
   "globalEnv": [
     "NODE_ENV",
+    "APP_NAME",
+    "APP_VERSION",
+    "BUILT_AT",
+    "GIT_COMMIT",
+    "API_PORT",
+    "WEB_ORIGIN",
     "DATABASE_URL",
-    "DATABASE_URL_APP",
-    "DATABASE_URL_MIGRATOR",
-    "DATABASE_URL_SISTEMA",
+    "DATABASE_URL_*",
     "REDIS_URL",
-    "APP_VERSION"
+    "JWT_*",
+    "COOKIE_*",
+    "SCRAPER_*",
+    "LEAD_SOURCE_PROVIDER",
+    "SITE_AUDIT_PROVIDER",
+    "AI_PROVIDER",
+    "GEMINI_*",
+    "PAYMENT_PROVIDER",
+    "STRIPE_*"
   ],
   "globalDependencies": [".env", "prisma/schema.prisma"],
   "tasks": {
