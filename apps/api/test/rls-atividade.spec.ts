@@ -148,24 +148,28 @@ describe('leitura sem contexto de tenant', () => {
 });
 
 /**
- * **O `include` some em silencio — e e por isto que esta familia e diferente.**
+ * **O `include` e o contexto — reescrito em 03/09, quando a familia 5 entrou.**
  *
  * Quatro destas seis tabelas nunca sao consultadas diretamente pela tela de
- * detalhe do lead: elas chegam por `include` a partir de `lead`. E `leads`
- * ainda **nao** tem politica — ela e da familia 5.
+ * detalhe do lead: elas chegam por `include` a partir de `lead`.
  *
- * Entao esta e a unica janela em que da para observar o modo de falha isolado:
- * a consulta encontra o lead (tabela sem politica) e devolve as listas
- * filhas vazias (tabelas com politica). **Nada falha. Nada avisa.** A tela
- * abriria mostrando um lead sem historico nenhum.
+ * A versao original deste bloco registrava o modo de falha mais silencioso do
+ * RLS, observavel enquanto `leads` ainda estava desprotegida: a consulta
+ * encontrava o lead e devolvia as listas filhas vazias. **Nada falhava, nada
+ * avisava**, e a tela abria mostrando um lead sem historico nenhum.
  *
- * Quando a familia 5 entrar, o proprio lead passa a sumir e o sintoma vira
- * outro — mais barulhento e mais facil. Este teste registra o comportamento
- * enquanto ele ainda e observavel, e continua valendo depois como prova de que
- * as filhas dependem do contexto por conta propria, e nao de carona na mae.
+ * A migration `20260903230000_rls_familia_leads` fechou essa janela, como
+ * aquele comentario previa. O primeiro teste abaixo passou a medir o sintoma
+ * novo — o lead some inteiro, e `null` na raiz quebra rapido.
+ *
+ * **O segundo teste e o que sobrou de valor da versao antiga, e agora sem
+ * depender do estado de `leads`:** as filhas sao lidas direto, pelo `leadId`,
+ * do contexto errado. Se elas dependessem de carona na mae, esta consulta
+ * traria linha. Nao traz — cada uma responde por si. Esse enunciado nao volta a
+ * vencer quando outra familia mudar.
  */
-describe('o include some em silencio', () => {
-  it('lido do contexto errado, o lead vem com as quatro listas vazias', async () => {
+describe('o include e o contexto', () => {
+  it('lido do contexto errado, o lead some inteiro', async () => {
     const lead = await prisma.comTenant(tenantB, (tx) =>
       tx.lead.findFirst({
         where: { id: leadA },
@@ -179,15 +183,31 @@ describe('o include some em silencio', () => {
       }),
     );
 
-    // O lead **e** encontrado: `leads` ainda nao tem politica.
-    expect(lead).not.toBeNull();
+    // Ate 03/09 esta linha era `not.toBeNull()`, e as quatro listas vinham
+    // vazias. O `leads` agora tem politica, e a falha ficou barulhenta.
+    expect(lead).toBeNull();
+  });
 
-    // E tudo o que pende dele veio vazio, sem erro nenhum.
-    expect(lead?.notes).toHaveLength(0);
-    expect(lead?.activities).toHaveLength(0);
-    expect(lead?.contactRecords).toHaveLength(0);
-    expect(lead?.followUps).toHaveLength(0);
-    expect(lead?.digitalPresence).toBeNull();
+  it('as filhas nao dependem de carona na mae', async () => {
+    // Sem passar pelo lead: cada tabela consultada direto pelo `leadId`, do
+    // contexto do vizinho. Denominador primeiro, senao zero nao prova nada.
+    expect(await admin.leadNote.count({ where: { leadId: leadA } })).toBe(1);
+
+    const vistas = await prisma.comTenant(tenantB, async (tx) => ({
+      notas: await tx.leadNote.count({ where: { leadId: leadA } }),
+      atividades: await tx.leadActivity.count({ where: { leadId: leadA } }),
+      contatos: await tx.leadContactRecord.count({ where: { leadId: leadA } }),
+      followUps: await tx.leadFollowUp.count({ where: { leadId: leadA } }),
+      presenca: await tx.leadDigitalPresence.count({ where: { leadId: leadA } }),
+    }));
+
+    expect(vistas).toEqual({
+      notas: 0,
+      atividades: 0,
+      contatos: 0,
+      followUps: 0,
+      presenca: 0,
+    });
   });
 
   it('do contexto certo, as quatro vem preenchidas', async () => {

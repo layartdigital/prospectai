@@ -5,7 +5,6 @@ import path from 'node:path';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
 import type {
   DashboardResponse,
   LeadListResponse,
@@ -16,6 +15,7 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
+import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -38,7 +38,25 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * Precisa de `pnpm docker:up` e `pnpm db:migrate` antes.
  */
 
-const prisma = new PrismaClient();
+/**
+ * **Fixtures pelo papel que ignora a politica** — trocado em 03/09, junto com a
+ * familia 5 (Leads nucleo).
+ *
+ * Era `new PrismaClient()`, que conecta pelo `DATABASE_URL`. Funcionava porque
+ * o dono do banco **hoje** e superusuario, e superusuario ignora RLS mesmo com
+ * `FORCE`. Isso e consequencia da configuracao atual, nao escolha de desenho: o
+ * dia em que o dono deixar de ser superusuario, o `beforeAll` abaixo passaria a
+ * criar o lead e o `afterAll` a nao limpar nada — os dois em silencio.
+ *
+ * **Era o ultimo `new PrismaClient()` do repositorio.** Os outros dois
+ * (`tenant-isolation.spec.ts` e `business-invariants.spec.ts`) sairam na
+ * familia 3.
+ *
+ * O que este arquivo prova continua sendo provado pelo papel da aplicacao: as
+ * assercoes sao todas requisicoes HTTP reais. O client abaixo so monta e
+ * desmonta cenario — e montar cenario e operacao administrativa.
+ */
+const admin = criarPrismaAdmin();
 const suffix = Date.now().toString(36);
 
 let app: INestApplication;
@@ -139,7 +157,7 @@ beforeAll(async () => {
   beta = await register('beta');
 
   // Popula apenas o Alfa. O Beta nasce e permanece vazio.
-  const lead = await prisma.lead.create({
+  const lead = await admin.lead.create({
     data: {
       tenantId: alfa.tenantId,
       name: `Empresa do Alfa ${suffix}`,
@@ -155,14 +173,14 @@ afterAll(async () => {
   await app?.close();
 
   // Cascade leva leads, memberships e estado de onboarding junto.
-  await prisma.tenant.deleteMany({
+  await admin.tenant.deleteMany({
     where: { id: { in: [alfa?.tenantId, beta?.tenantId].filter(Boolean) as string[] } },
   });
-  await prisma.user.deleteMany({
+  await admin.user.deleteMany({
     where: { email: { in: [alfa?.email, beta?.email].filter(Boolean) as string[] } },
   });
 
-  await prisma.$disconnect();
+  await admin.$disconnect();
 }, BOOT_TIMEOUT_MS);
 
 describe('isolamento entre tenants pela API', () => {
