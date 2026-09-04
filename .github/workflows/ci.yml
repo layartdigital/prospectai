@@ -171,6 +171,27 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # `@propectai/types` e compilado, e `dist/` nao e versionado — num
+      # ambiente limpo ele nao existe.
+      #
+      # **Encontrado pela execucao #1**, que morreu aqui com
+      # "Cannot find module '@propectai/types/dist/index.js'".
+      #
+      # O job `tipos` nao tropeca nisto porque `turbo run typecheck` tem
+      # `dependsOn: ["^build"]` e constroi a dependencia sozinho. O `db:seed`
+      # **nao passa pelo turbo**: e script de raiz que roda `tsx
+      # prisma/seed.ts`, e o seed importa `@propectai/types`. A dependencia
+      # existia e nao estava declarada em lugar nenhum fora do turbo.
+      #
+      # Vale igual para clone novo na maquina de quem desenvolve: `pnpm install`
+      # seguido de `pnpm db:seed` falha do mesmo jeito. O CI achou um defeito de
+      # onboarding no primeiro dia.
+      #
+      # `--filter` em vez de `pnpm build`: o segundo construiria tambem o
+      # Next.js do `@propectai/web`, que nada aqui usa.
+      - name: Compilar o pacote de tipos
+        run: pnpm --filter @propectai/types build
+
       - run: pnpm db:generate
 
       # `migrate deploy`, e nao `migrate dev`: o segundo cria shadow database,
