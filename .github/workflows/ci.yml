@@ -1,0 +1,253 @@
+name: CI
+
+# Primeiro pipeline do projeto — 04/09/2026.
+#
+# =============================================================================
+# Por que ele nao existia, e por que isso importava mais do que parecia
+# =============================================================================
+#
+# Ate hoje, **nenhuma garantia deste repositorio tinha gatilho.** As 34 politicas
+# de RLS, os 399 testes e as verificacoes de catalogo da fase B so rodavam quando
+# alguem digitava o comando. Um push que quebrasse qualquer uma delas passava.
+#
+# O item aparecia nas notas do programa RLS como "`typecheck:all` antes de `test`
+# no CI, ainda sem dono" — o que descrevia um pipeline existente precisando de um
+# ajuste de ordem. Nao era isso: nao havia pipeline. A frase foi repetida oito
+# vezes sem ninguem abrir o diretorio.
+#
+# =============================================================================
+# Dois jobs, e a ordem entre eles e o ponto
+# =============================================================================
+#
+# `tipos` nao depende de banco nenhum e termina em menos de um minuto. `testes`
+# depende dele por `needs:`.
+#
+# **Isso e estrutural, e nao uma sequencia de passos que alguem reordena sem
+# perceber.** Oito vezes ao longo do programa RLS um erro de tipo foi
+# diagnosticado primeiro como falha de teste, porque a suite rodou antes do
+# compilador. O caso mais caro: um `PrismaClient` cru passado como `prisma as
+# never` — o `never` calava o compilador exatamente na fronteira que teria
+# acusado o problema, e 56 testes cairam com "comTenant is not a function".
+#
+# O custo e uma segunda instalacao de dependencias, amortizada pelo cache do
+# pnpm. O beneficio e que erro de tipo se chama erro de tipo.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Um push novo cancela a execucao anterior do mesmo ramo. A suite leva ~6 min e
+# nao ha valor em terminar a verificacao de um commit ja substituido.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Versoes fixadas, e nao "latest". `package.json` declara
+  # `packageManager: pnpm@10.30.1` e `engines.node: >=20.11`; divergir aqui
+  # produziria um CI que verifica um ambiente que ninguem usa.
+  NODE_VERSION: '20.11'
+  PNPM_VERSION: '10.30.1'
+
+jobs:
+  # ===========================================================================
+  tipos:
+    name: Tipos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `prisma generate` antes do typecheck: o client tipado e gerado, nao
+      # versionado. Sem ele, o typecheck falha em todo lugar que toca o banco —
+      # e a mensagem nao diz que o motivo e a geracao faltando.
+      - run: pnpm db:generate
+
+      # `typecheck:all`, e nao `typecheck`: o primeiro cobre tambem os testes e
+      # os scripts (`tsconfig.tests.json`, `tsconfig.scripts.json`), e foi em
+      # arquivo de teste que os defeitos apareceram.
+      - run: pnpm typecheck:all
+
+  # ===========================================================================
+  testes:
+    name: Testes e verificacao de RLS
+    runs-on: ubuntu-latest
+    needs: tipos
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          # **`propectai` nao e escolha de estilo.** A migration
+          # `20260826230000_rls_papeis` faz
+          # `ALTER DEFAULT PRIVILEGES FOR ROLE propectai`, com o nome literal.
+          # Com outro dono, os privilegios padrao nao se aplicam e toda tabela
+          # criada por migration futura nasce invisivel para o `propectai_app` —
+          # sintoma "permission denied" numa rota que funcionava ontem.
+          POSTGRES_USER: propectai
+          POSTGRES_PASSWORD: propectai_ci_only
+          POSTGRES_DB: propectai
+        ports:
+          # 5434 para manter uma forma so de URL entre CI e a maquina de quem
+          # desenvolve. Em CI nao ha o Bellvia a evitar — que e o motivo do
+          # deslocamento no `.env.example` —, mas duas formas de URL custam mais
+          # do que a linha economizada.
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U propectai -d propectai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6381:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      APP_VERSION: ci
+
+      # As quatro URLs. As tres de papel sao o que faz a suite de RLS provar
+      # alguma coisa: sem `DATABASE_URL_APP`, o `PrismaService` cai no
+      # `DATABASE_URL`, a aplicacao volta a ser dona superusuaria, e todo teste
+      # de isolamento passa **de graca**.
+      #
+      # A defesa contra isso nao e este arquivo: e a pre-condicao
+      # `current_user = 'propectai_app'` que abre cada `rls-*.spec.ts`. Ela
+      # existe justamente porque este erro e silencioso.
+      DATABASE_URL: postgresql://propectai:propectai_ci_only@localhost:5434/propectai?schema=public
+      DATABASE_URL_MIGRATOR: postgresql://propectai_migrator:migrator_ci_only@localhost:5434/propectai?schema=public
+      DATABASE_URL_APP: postgresql://propectai_app:app_ci_only@localhost:5434/propectai?schema=public
+      DATABASE_URL_SISTEMA: postgresql://propectai_sistema:sistema_ci_only@localhost:5434/propectai?schema=public
+
+      REDIS_URL: redis://localhost:6381
+
+      # Valores descartaveis. **Nao sao segredos, e nao devem virar secrets do
+      # repositorio:** o banco vive dentro de um job, nao aceita conexao de fora
+      # e e destruido ao fim. Guardar isto como secret daria a impressao de que
+      # ha algo a proteger aqui, e diluiria a atencao dos segredos que existem.
+      JWT_ACCESS_SECRET: ci-access-nao-e-segredo-nao-sai-do-job
+      JWT_REFRESH_SECRET: ci-refresh-nao-e-segredo-e-diferente-do-outro
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 7d
+      COOKIE_DOMAIN: localhost
+      COOKIE_SECURE: 'false'
+
+      # `mock` nos dois. O padrao seguro e o que nao sai para a internet, e um CI
+      # que dependesse do Google Maps falharia por motivo alheio ao commit.
+      LEAD_SOURCE_PROVIDER: mock
+      SITE_AUDIT_PROVIDER: mock
+      AI_PROVIDER: mock
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm db:generate
+
+      # `migrate deploy`, e nao `migrate dev`: o segundo cria shadow database,
+      # compara desvio e faz perguntas. Em CI nada disso e desejavel, e a
+      # ausencia de terminal transformaria uma pergunta em travamento.
+      - name: Aplicar migrations
+        run: pnpm db:deploy
+
+      # ---------------------------------------------------------------------
+      - name: Dar senha aos tres papeis
+        # **As migrations criam os papeis SEM senha, e isso e proposital** — o
+        # repositorio nao ganha um segredo. O comentario final da
+        # `20260826230000_rls_papeis` justifica dizendo que "o Postgres local do
+        # projeto autentica por confianca".
+        #
+        # **Essa frase e falsa, e a migration nao pode ser editada** (o Prisma
+        # valida o checksum de migration aplicada). O `pg_hba.conf` da imagem
+        # confia apenas no socket local e no `127.0.0.1` de dentro do container;
+        # conexao vinda de fora chega pelo gateway da ponte Docker e cai em
+        # `scram-sha-256`. **Isso inclui o dono.**
+        #
+        # Aqui os testes conectam de fora do container, entao sem este passo os
+        # tres papeis nao logam — e o sintoma seria "Authentication failed",
+        # tres arquivos longe da causa.
+        #
+        # Este e tambem o item 3 do checklist de primeiro deploy, exercitado
+        # pela primeira vez: as tres credenciais existem antes de qualquer
+        # conexao.
+        env:
+          PGPASSWORD: propectai_ci_only
+        run: |
+          psql -h localhost -p 5434 -U propectai -d propectai -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER ROLE propectai_migrator PASSWORD 'migrator_ci_only';
+          ALTER ROLE propectai_app       PASSWORD 'app_ci_only';
+          ALTER ROLE propectai_sistema   PASSWORD 'sistema_ci_only';
+          SQL
+
+      # ---------------------------------------------------------------------
+      - name: Semear o catalogo
+        # O `rls-conta.spec.ts` precisa de um `Plan`, que e catalogo global e
+        # fica fora das familias de RLS; o `suspension-rules.spec.ts` declara a
+        # dependencia no proprio cabecalho. Criar um plano dentro do teste
+        # poluiria o catalogo com uma linha que nao cai por cascade de tenant.
+        run: pnpm db:seed
+
+      # ---------------------------------------------------------------------
+      - name: Suite completa
+        run: pnpm test
+
+      # ---------------------------------------------------------------------
+      - name: Portao de RLS
+        # **A parte que faz a verificacao da fase B valer alguma coisa.**
+        #
+        # O `verificacoes-fase-b.sql` imprime tabelas para uma pessoa ler — util
+        # em diagnostico, inutil como gatilho: `psql` sai com 0 tendo impresso
+        # qualquer coisa. O `gate-rls.sql` faz as mesmas perguntas e **lanca
+        # excecao** quando a resposta e errada.
+        #
+        # Ele nao afirma "34 tabelas". Afirma invariantes estruturais, e por isso
+        # sobrevive a tabela nova: uma tabela escopada criada daqui a seis meses
+        # sem politica derruba este passo sem que ninguem precise ter lembrado
+        # de acrescenta-la a lista nenhuma.
+        env:
+          PGPASSWORD: propectai_ci_only
+        run: |
+          psql -h localhost -p 5434 -U propectai -d propectai \
+               -v ON_ERROR_STOP=1 \
+               -f docs/intelligence/gate0/gate-rls.sql
+
+      # ---------------------------------------------------------------------
+      - name: Relatorio de RLS
+        # Roda **sempre**, inclusive quando o portao acima falhou — e e nesse
+        # caso que ele importa: o portao diz que quebrou, este diz o que esta
+        # no lugar. Nao falha o build sozinho.
+        if: always()
+        env:
+          PGPASSWORD: propectai_ci_only
+        run: |
+          psql -h localhost -p 5434 -U propectai -d propectai \
+               -f docs/intelligence/gate0/verificacoes-fase-b.sql

@@ -64,3 +64,14 @@ _hotfix-backups/
 gate0/pre-f0.dump
 gate0/cnpjs.txt
 gate0_*.csv
+
+# Pasta onde o app do Claude entrega arquivo salvo de um card. Fica dentro da
+# arvore de trabalho, entao `git add -A` a varre junto — e o arquivo entra
+# versionado no caminho errado, sem ninguem reparar.
+#
+# Aconteceu em 04/09 com o `ci.yml`, que foi para "Claude outputs/ci.yml" em vez
+# de `.github/workflows/`. Um workflow no lugar errado nao roda e nao avisa: o
+# GitHub simplesmente nao o procura ali.
+#
+# O nome tem espaco, e o git aceita sem aspas nem escape.
+Claude outputs/
