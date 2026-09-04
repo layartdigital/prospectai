@@ -1542,11 +1542,32 @@ model Proposal {
   contracts Contract[]
 
   @@index([tenantId, status])
+  // Alvo da FK composta de ProposalItem. Sem esta unicidade o Postgres recusa
+  // a FK: ERROR 42830.
+  @@unique([tenantId, id])
   @@map("proposals")
 }
 
+/// Acrescentado `tenantId` em 04/09, ao fechar a fase B do RLS.
+///
+/// **Era a unica tabela escopada do schema sem a coluna.** As outras oito sem
+/// `tenantId` sao globais por natureza (`users`, `tenants`, `plans`,
+/// `segments`, `segment_locales`, `platform_admins`), por desenho declarado
+/// (`billing_events` — o evento chega antes de sabermos de quem e) ou porque
+/// pertencem a uma pessoa e nao a um workspace (`refresh_tokens`). Esta era
+/// falta, e nao escolha.
+///
+/// Sem a coluna nao havia politica de RLS a escrever aqui: nao ha o que
+/// comparar com `current_setting`. Ligar a politica so em `proposals` deixaria
+/// os itens abertos a quem soubesse o `proposalId` — e o argumento de que "hoje
+/// nada le a tabela diretamente" e propriedade do codigo, nao do banco.
+///
+/// A FK composta faz mais do que a politica: com ela, item ligado a proposta de
+/// outro tenant **deixa de ser representavel**, e isso vale mesmo com o RLS
+/// desligado. Mesmo padrao de `LeadSourceRecord`, `LeadScore` e `LeadTag`.
 model ProposalItem {
   id          String   @id @default(cuid())
+  tenantId    String
   proposalId  String
   description String
   quantity    Int      @default(1)
@@ -1554,9 +1575,13 @@ model ProposalItem {
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
 
-  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  /// FK composta — ver LeadSourceRecord.
+  proposal Proposal @relation(fields: [tenantId, proposalId], references: [tenantId, id], onDelete: Cascade)
 
   @@index([proposalId])
+  // Indice de suporte da FK nova. O Postgres nao cria indice para a coluna
+  // referenciante, e o Prisma tambem nao.
+  @@index([tenantId, proposalId])
   @@map("proposal_items")
 }
 

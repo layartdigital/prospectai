@@ -178,39 +178,45 @@ describe('leitura sem contexto de tenant', () => {
 });
 
 /**
- * **O `include` para de mentir — e e por isto que esta familia e diferente.**
+ * **O `include` nao mente mais — reescrito em 04/09, ao fechar a fase B.**
  *
- * O `rls-atividade.spec.ts` registrou, na familia 4, o modo de falha mais
- * silencioso do RLS: a consulta encontrava o lead (tabela ainda sem politica) e
- * devolvia as listas filhas vazias. Nada falhava, nada avisava, e a tela abria
- * mostrando um lead sem historico nenhum.
+ * Este bloco vinha medindo o modo de falha do `include`, e ele mudou de forma
+ * tres vezes conforme as familias entraram. Vale registrar a progressao, porque
+ * cada degrau e um sintoma diferente e o primeiro era o pior:
  *
- * **Esta migration muda o sintoma.** O lead passa a sumir inteiro, e o que
- * sobra no lugar dele e `null` — que quebra renderizacao ou vira 404, e alguem
- * repara no mesmo dia.
+ *   1. **Familia 4** (`rls-atividade.spec.ts`): o lead era encontrado e as
+ *      listas filhas vinham vazias. Nada falhava, nada avisava, e a tela abria
+ *      mostrando um lead sem historico nenhum.
+ *   2. **Familia 5** (aqui): o lead sumia, mas a proposta que o continha ainda
+ *      aparecia — `proposals` nao tinha politica. O `include` devolvia uma
+ *      proposta com `lead: null`.
+ *   3. **Familia 8**: a proposta some tambem. **Nao sobra nenhuma janela em que
+ *      um `include` devolva estrutura parcial**, porque nao sobra tabela
+ *      escopada sem politica.
  *
- * A janela para observar isso agora e a proposta: `proposals` so ganha politica
- * na familia 8, entao a linha da proposta **e** encontrada do contexto errado, e
- * o `lead` dentro dela volta nulo. E exatamente o mesmo formato do teste da
- * familia 4, um nivel acima — e some quando a familia 8 entrar, do mesmo jeito.
+ * A versao anterior deste bloco afirmava `expect(proposta).not.toBeNull()`, e o
+ * comentario dela previa por escrito que a familia 8 desfaria isso. A previsao
+ * estava certa e nao virou tarefa: o teste quebrou quando a familia 8 entrou.
+ * **A licao ficou registrada aqui e nao numa migration:** "este teste some
+ * quando a familia N entrar" e uma tarefa com data, e comentario de migration e
+ * onde ela nao vai ser vista.
  *
- * Registrar isso importa por um motivo pratico: `proposals.service.ts` le
- * `contract.proposal.lead.name` em tres lugares. Dois saltos de `include`, num
- * arquivo que fala de contratos. Se algum dia esse caminho rodar sem contexto, o
- * nome do lead vira `null` no meio de uma lista de contratos — e o teste abaixo
- * e o registro de que esse comportamento e conhecido e nao acidental.
+ * O que continua importando na pratica: `proposals.service.ts` le
+ * `contract.proposal.lead.name` em tres lugares — dois saltos de `include`, num
+ * arquivo que fala de contratos. Hoje um contexto errado corta esse caminho na
+ * raiz, e alto.
  */
-describe('o include para de mentir', () => {
-  it('do contexto errado, a proposta aparece e o lead dentro dela vem nulo', async () => {
+describe('o include nao mente mais', () => {
+  it('do contexto errado, a proposta some — e com ela a cadeia inteira', async () => {
     const proposta = await prisma.comTenant(tenantB, (tx) =>
       tx.proposal.findFirst({ where: { id: propostaA }, include: { lead: true } }),
     );
 
-    // A proposta **e** encontrada: `proposals` ainda nao tem politica.
-    expect(proposta).not.toBeNull();
+    // Denominador: a proposta existe, e e do tenant A.
+    expect(await admin.proposal.count({ where: { id: propostaA } })).toBe(1);
 
-    // E o lead sumiu. Na familia 4 ele vinha preenchido com filhas vazias.
-    expect(proposta?.lead).toBeNull();
+    // Nao ha mais estrutura parcial: nem proposta, nem lead nulo dentro dela.
+    expect(proposta).toBeNull();
   });
 
   it('do contexto certo, a proposta traz o lead', async () => {
