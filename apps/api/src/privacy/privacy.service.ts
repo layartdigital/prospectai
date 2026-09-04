@@ -16,12 +16,23 @@ import { PrismaSistemaService } from '../prisma/prisma-sistema.service';
  * pelo `actorId`, sem `tenantId` em lugar nenhum — e por isso ele mora num
  * módulo próprio, e não no `AccountService`, onde todo método recebe um tenant.
  *
- * **Consequência para o passo 6 do RLS:** quando a família 7 puser política em
- * `audit_logs`, esta operação passa a enxergar zero linhas com o papel da
- * aplicação. Ela precisará do papel que atravessa tenants — o mesmo
- * `propectai_admin` que o painel administrativo vai exigir. Está anotado no
- * `PLANO-RLS-PASSO6-v1.md`; o que não pode acontecer é descobrir isso quando o
- * método devolver `linhas: 0` sem erro.
+ * **A família 7 pôs política em `audit_logs` em 04/09, e esta previsão se
+ * cumpriu.** Com o papel da aplicação, este método enxergaria zero linhas — sem
+ * erro nenhum, devolvendo `linhas: 0`, que é indistinguível de "essa pessoa não
+ * fez nada". Ele já usa o papel que atravessa tenants desde a fatia 8b, então a
+ * migration não mudou uma linha de código aqui.
+ *
+ * Duas correções ao texto que estava neste lugar:
+ *
+ * - O papel se chama **`propectai_sistema`**, não `propectai_admin`. O nome
+ *   `propectai_admin` nunca existiu no banco; era um rascunho do plano.
+ * - `audit_logs.tenantId` é **anulável**, e a `SetNull` do tenant faz linhas
+ *   órfãs quando um workspace é apagado. Sob a política, `NULL = <qualquer
+ *   coisa>` é `NULL`, que não é `TRUE`: essas linhas ficam invisíveis ao papel
+ *   da aplicação em qualquer contexto. Aqui isso não muda nada — este método
+ *   varre pelo `actorId` e pelo papel que ignora a política —, e é justamente
+ *   por isso que precisa estar escrito: a varredura continua completa, e quem
+ *   ler o código pelo lado da aplicação não teria como saber disso.
  */
 @Injectable()
 export class PrivacyService {

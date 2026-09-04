@@ -4,12 +4,12 @@ import path from 'node:path';
 import { ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
 import type { AdminTenantList, SessionResponse } from '@propectai/types';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
+import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -27,7 +27,22 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * Precisa de `pnpm docker:up` e `pnpm db:migrate`.
  */
 
-const prisma = new PrismaClient();
+/**
+ * **Fixtures pelo papel que ignora a política** — trocado em 04/09, com a
+ * família 7 (Operação e registro).
+ *
+ * Era `new PrismaClient()`, e este arquivo foi o **quarto e último** dos que
+ * ficaram para trás quando a separação de clientes foi feita. Ele sobreviveu às
+ * famílias 3, 5 e 6 porque não tocava nenhuma tabela delas — a única linha em
+ * risco é a leitura de `audit_logs` no teste de auditoria do painel, e
+ * `audit_logs` só ganha política agora.
+ *
+ * Sem a troca, aquela leitura passaria a devolver `null` e o teste falharia
+ * dizendo "não registrou em auditoria" — quando o registro estaria lá,
+ * escondido pela política de uma consulta sem contexto. A falha apontaria para
+ * o `AdminService`, que está certo.
+ */
+const prisma = criarPrismaAdmin();
 const suffix = Date.now().toString(36);
 const SENHA = 'SenhaDeTeste123';
 
