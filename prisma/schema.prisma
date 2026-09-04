@@ -1225,6 +1225,9 @@ model PipelineStage {
   toMoves     PipelineTransition[] @relation("ToStage")
 
   @@unique([tenantId, slug])
+  // Alvo das FKs compostas de PipelineCard e PipelineTransition. Sem esta
+  // unicidade o Postgres recusa a FK: ERROR 42830.
+  @@unique([tenantId, id])
   @@index([tenantId, order])
   @@map("pipeline_stages")
 }
@@ -1244,7 +1247,8 @@ model PipelineCard {
 
   tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   lead        Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  stage       PipelineStage        @relation(fields: [stageId], references: [id])
+  /// FK composta — o tenant do card nao pode divergir do tenant da etapa.
+  stage       PipelineStage        @relation(fields: [tenantId, stageId], references: [tenantId, id])
   owner       User?                @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   transitions PipelineTransition[]
 
@@ -1275,8 +1279,18 @@ model PipelineTransition {
   /// logo Restrict, e SET NULL nao se aplica. E fechavel — falta so
   /// @@unique([tenantId, id]) em PipelineStage. Esta na fila, nao bloqueado.
   card      PipelineCard   @relation(fields: [tenantId, cardId], references: [tenantId, id], onDelete: Cascade)
-  fromStage PipelineStage? @relation("FromStage", fields: [fromStageId], references: [id])
-  toStage   PipelineStage  @relation("ToStage", fields: [toStageId], references: [id])
+  /// FKs compostas — ver PipelineCard.stage.
+  ///
+  /// **`fromStage` deixou de ser `SetNull`, e nao por estilo.** Numa FK composta
+  /// o `SET NULL` anula a tupla inteira, `tenantId` incluido — e ele e
+  /// `NOT NULL`. `Restrict` grava o invariante que sobra: **etapa que aparece
+  /// no historico nao pode ser apagada.**
+  ///
+  /// Custo hoje: zero. Nada no produto, no seed ou nos testes apaga etapa de
+  /// pipeline — foi conferido. Quem implementar essa exclusao vai encontrar a
+  /// restricao ao escrever, e nao em producao.
+  fromStage PipelineStage? @relation("FromStage", fields: [tenantId, fromStageId], references: [tenantId, id], onDelete: Restrict)
+  toStage   PipelineStage  @relation("ToStage", fields: [tenantId, toStageId], references: [tenantId, id])
   changedBy User?          @relation(fields: [changedById], references: [id], onDelete: SetNull)
 
   @@index([cardId, createdAt])
