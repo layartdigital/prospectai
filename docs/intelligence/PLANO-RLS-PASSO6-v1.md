@@ -308,4 +308,94 @@ Eu generalizei o canário de uma amostra de dois: aquelas duas tabelas tinham ex
 
 **A medição de latência foi feita em consulta barata e isolada.** Uma tela de pipeline com cinco consultas é outro caso, e merece o `rls:bench` apontado para ela antes de assumir que os ~5 ms se diluem. Já errei essa previsão uma vez, no passo 3.
 
+---
+
+## Fase B concluída — 04/09
+
+**34 das 42 tabelas sob política.** As oito de fora são as globais listadas no inventário, e a nona que era buraco — `proposal_items` — ganhou a coluna.
+
+### A tabela real, contra a que este documento previa
+
+| # | família | previa | foram | migration | testes |
+|---|---|---:|---:|---|---:|
+| 1 | Auditoria | 2 | 2 | `20260827140000_rls_canario_auditoria` | — |
+| 2 | Pipeline | 3 | 3 | `20260903200000_..._pipeline_religar` | 333 |
+| 3 | Coleta | 2 | 2 | `20260903210000_rls_familia_coleta` | 340 |
+| 4 | Atividade do lead | 6 | 6 | `20260903220000_rls_familia_atividade` | 349 |
+| 5 | Leads núcleo | 7 | 7 | `20260903230000_rls_familia_leads` | 362 |
+| 6 | Conta e cobrança | 6 | **5** | `20260904100000_rls_familia_conta` | 374 |
+| 7 | Operação e registro | 5 | **6** | `20260904140000_rls_familia_operacao` | 388 |
+| 8 | Comercial | 2 (+1) | **3** | `20260904170000_rls_familia_comercial` | 399 |
+
+**Duas contagens erradas, em sentidos opostos.**
+
+`billing_events` estava contada na família 6 e **não tem `tenantId`** — o próprio schema documenta por quê: o evento do provedor chega antes de sabermos de quem é, e evento de preço não pertence a tenant nenhum. Sem coluna não há política a escrever. São cinco.
+
+`feature_flags` não estava na família 7 e **tem `tenantId`** como todas as outras — flag é por workspace. São seis.
+
+As duas só apareceram porque a varredura de cada família abriu o schema em vez de repetir esta tabela. **É o argumento contra confiar num plano na hora de executá-lo**, mesmo num plano cuidadoso: ele foi escrito com menos informação do que quem o executa tem.
+
+### Correções ao inventário, acima
+
+**"`proposal_items` … Hoje não há interface para Propostas (`0` usos no código da API)" — falso.** São **11 acessos** a `proposal`, `proposalItem` e `contract`, todos no `proposals.service.ts`. A linha da família 8 na tabela original já se corrigia sozinha dizendo "**22 chamadas**, não zero" — e 22 também não é o número. O correto é 11, medido em 04/09.
+
+Que o mesmo documento carregasse "0" num parágrafo e "22" numa tabela, sobre a mesma coisa, é o sintoma: **uma correção que não apaga o texto corrigido deixa duas afirmações em pé.**
+
+**A resolução do buraco:** `proposal_items` ganhou `tenantId` com FK composta para `proposals(tenantId, id)`, na `20260904160000_proposal_items_tenant` — separada da migration de política de propósito, porque uma pode falhar por dado preexistente e a outra não pode falhar por nada.
+
+### O §2 — serviços que usam o próprio client
+
+"Vale varrer por serviços chamados de dentro de um `comTenant` antes da família 6, não depois." **Foi feito**, na fatia 8a: o `EntitlementsService.currentUsage` passou a aceitar um `tx` opcional, e **os dois ramos declaram contexto** — nenhum roda sem. `availableLeadCredits` e `availableAuditCredits` repassam.
+
+A previsão do sintoma estava certa: seria zero linhas num gate de saldo, isto é, "sem créditos" para todo mundo.
+
+### Onde este plano errou a dificuldade
+
+Ele diz: *"as famílias 2 a 5 são mecânicas, e as 6 e 7 têm decisão de desenho antes."*
+
+Errado nos dois lados. As decisões de 6 e 7 já estavam resolvidas quando chegaram — o `propectai_sistema` tinha sido criado na fatia 8b, e os caminhos que atravessam tenants já usavam `atravessandoTenants`. O que apareceu de difícil apareceu onde o plano previa mecânica:
+
+- **Família 5** quebrou o método de varredura. Ver a emenda à receita, abaixo.
+- **Família 7** trouxe a única tabela com `tenantId` anulável do sistema, `audit_logs`, e com ela um comportamento que nenhuma outra tem: linha órfã invisível em **todo** contexto.
+- **Família 8** exigiu mudança de schema.
+
+O padrão: a dificuldade não estava onde havia decisão em aberto, e sim onde a forma do dado era diferente do que o plano assumia como uniforme.
+
+### Emenda à receita — o passo 1 não bastava
+
+O passo 1 diz: *"Varrer os chamadores — `grep` pelo delegate em todo `apps/*/src`."*
+
+**Isso encontrou todo mundo nas famílias 1 a 4, e não encontrou na 5.** A tabela `leads` é alcançada por `include` a partir de `pipelineCard`, `proposal`, `contract` e `outreachMessage` — e um `include` não escreve o nome do delegate em lugar nenhum.
+
+Concretamente: `pipeline.service.ts` **não tem um único acesso direto** a nenhuma tabela da família 5. Só chega ao lead pelo `include` do card. A varredura por delegate o teria declarado não envolvido, e a tela do funil abriria com card sem nome, sem cidade e sem score.
+
+O mesmo formato reapareceu na família 8: `proposal_items` não aparece na varredura por delegate, porque só é alcançada aninhada em `proposal`.
+
+**O passo 1 passa a ter duas metades:**
+
+1. `grep` pelo delegate em todo `apps/*/src`, `$queryRaw`/`$executeRaw` incluídos.
+2. `grep` pelos **nomes de relação** da tabela nos `include` e `select` de qualquer outra — e pelos caminhos de dois saltos, do tipo `contract.proposal.lead.name`, que aparecem em arquivos cujo nome não sugere relação com a tabela.
+
+A segunda metade não tem como ser mecânica: ela exige ler os nomes de relação no schema primeiro. É mais lenta, e é a que encontra o que a primeira não encontra.
+
+### O que a fase B não fecha
+
+1. **As duas FKs compostas adiadas do Pipeline** — `pipeline_cards.stageId` e `pipeline_transitions.toStageId`, fecháveis com `@@unique([tenantId, id])` em `PipelineStage`. Continuam adiadas por escolha, e agora com um precedente a mais de que o padrão funciona: a família 8 aplicou exatamente esse padrão em `Proposal`, com backfill em três passos, e passou.
+
+2. **O `prisma/seed.ts` escreve pelo `DATABASE_URL`**, que é o dono superusuário, e superusuário ignora RLS mesmo com `FORCE`. Vale para todas as tabelas que ele toca. **Continua sendo sorte estrutural e não desenho** — no dia em que o dono deixar de ser superusuário, ou o seed rodar por um papel comum, ele precisa do `propectai_migrator`.
+
+3. **Três credenciais a provisionar no primeiro deploy** — `propectai_migrator`, `propectai_app` e `propectai_sistema`. Nenhuma entra sem senha: o `pg_hba.conf` do container só confia no socket local e no `127.0.0.1` de dentro; conexão vinda de fora chega pelo gateway da ponte Docker e cai em `scram-sha-256`. **Isso inclui o dono.** A primeira migration não roda antes disso.
+
+4. **`typecheck:all` antes de `test` no CI.** Oito ocorrências ao longo do programa em que o typecheck teria pego o defeito primeiro. Sem dono.
+
+5. **A medição de latência** continua feita em consulta barata e isolada, como diz a seção acima. Nada na fase B mudou isso, e agora há 34 tabelas sob política em vez de duas.
+
+### A verificação de fechamento
+
+`docs/intelligence/gate0/verificacoes-fase-b.sql`, oito checagens, todas ao catálogo — o resultado não depende de haver dado.
+
+**A checagem 3 é a razão do arquivo existir: ela não conhece nome de tabela nenhum.** Parte de "tem coluna `tenantId`" e cobra RLS ligado, `FORCE` ligado, política de base e política de isolamento. Uma tabela criada daqui a seis meses por quem nunca leu este documento aparece nela sozinha.
+
+Uma verificação que enumera o que ela mesma espera só prova que a lista foi copiada corretamente.
+
 `F:\drmind` não foi modificado.
