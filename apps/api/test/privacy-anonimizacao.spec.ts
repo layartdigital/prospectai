@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
 import { PrivacyService } from '../src/privacy/privacy.service';
+import { aoLimpar } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -70,8 +71,8 @@ beforeAll(async () => {
 }, TIMEOUT_MS);
 
 afterAll(async () => {
-  if (tenantId) await admin.tenant.delete({ where: { id: tenantId } }).catch(() => {});
-  await admin.user.deleteMany({ where: { id: { in: [usuarioId, outroUsuarioId] } } }).catch(() => {});
+  if (tenantId) await admin.tenant.delete({ where: { id: tenantId } }).catch(aoLimpar('tenant'));
+  await admin.user.deleteMany({ where: { id: { in: [usuarioId, outroUsuarioId] } } }).catch(aoLimpar('usuarios'));
   await admin.$disconnect();
   await app.close();
 }, TIMEOUT_MS);

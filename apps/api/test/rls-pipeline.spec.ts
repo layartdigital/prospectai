@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { aoLimpar } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -120,8 +121,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (PAUSADO) return;
-  if (tenantA) await admin.tenant.delete({ where: { id: tenantA } }).catch(() => {});
-  if (tenantB) await admin.tenant.delete({ where: { id: tenantB } }).catch(() => {});
+  if (tenantA) await admin.tenant.delete({ where: { id: tenantA } }).catch(aoLimpar('tenant A'));
+  if (tenantB) await admin.tenant.delete({ where: { id: tenantB } }).catch(aoLimpar('tenant B'));
   await admin.$disconnect();
   await app.close();
 }, TIMEOUT_MS);

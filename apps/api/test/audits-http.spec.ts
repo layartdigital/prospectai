@@ -13,6 +13,7 @@ import dotenv from 'dotenv';
 import IORedis from 'ioredis';
 
 import { AppModule } from '../src/app.module';
+import { exigirFilaSemWorker } from './fila';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -171,6 +172,11 @@ async function criarLead(tenantId: string, rotulo: string, website: string | nul
 }
 
 beforeAll(async () => {
+  // Antes de tudo: esta suite publica job de verdade, e worker ligado trava o
+  // banco no `afterAll`. A recusa vem aqui, em segundos, e nao 108s depois com
+  // "deadlock detected". Ver `fila.ts` para o registro do caso.
+  await exigirFilaSemWorker(['audit']);
+
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   app = moduleRef.createNestApplication();
 
@@ -206,10 +212,23 @@ beforeAll(async () => {
 afterAll(async () => {
   await app?.close();
 
-  // Os jobs ficam na fila porque nenhum worker roda aqui. Sem esta limpeza eles
-  // se acumulam no Redis a cada execucao da suite — e, pior, um worker ligado
-  // depois os processaria contra tenants ja apagados, gerando uma rajada de
-  // "Auditoria inexistente" sem causa aparente.
+  /**
+   * Os jobs ficam na fila porque nenhum worker roda aqui. Sem esta limpeza eles
+   * se acumulam no Redis a cada execucao da suite — e, pior, um worker ligado
+   * depois os processaria contra tenants ja apagados, gerando uma rajada de
+   * "Auditoria inexistente" sem causa aparente.
+   *
+   * **Este comentario estava certo pela metade, e a outra metade aconteceu em
+   * 08/09/2026.** O worker ligado nao gera so rajada de aviso: ele processa o
+   * job *enquanto* o `deleteMany` abaixo roda, e os dois se travam. O Postgres
+   * registrou o par — `DELETE FROM tenants` de um lado, o `INSERT INTO
+   * audit_logs` do `process-audit-job.ts` do outro.
+   *
+   * A remocao dos jobs continua necessaria e **nao basta**: ela so alcanca job
+   * que ainda esta na fila, e o que ja foi retirado por um worker esta fora do
+   * alcance daqui. Por isso a defesa de verdade e o `exigirFilaSemWorker` do
+   * `beforeAll`: recusar antes, em vez de limpar depois.
+   */
   if (auditoriasCriadas.length > 0) {
     const connection = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6381', {
       maxRetriesPerRequest: null,
