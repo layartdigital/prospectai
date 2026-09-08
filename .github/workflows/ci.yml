@@ -45,11 +45,18 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Versoes fixadas, e nao "latest". `package.json` declara
-  # `packageManager: pnpm@10.30.1` e `engines.node: >=20.11`; divergir aqui
-  # produziria um CI que verifica um ambiente que ninguem usa.
+  # `NODE_VERSION` e o Node **do projeto**, e nao o runtime das acoes — sao
+  # coisas diferentes. O `package.json` declara `engines.node: >=20.11`;
+  # divergir aqui produziria um CI que verifica um ambiente que ninguem usa.
+  #
+  # ⚠ O Node 20 chegou ao fim de vida em abril de 2026. Subir o projeto e
+  # decisao propria, com consequencia em modulo nativo (`@node-rs/argon2`), e
+  # nao entra de carona numa troca de versao de acao.
+  #
+  # A variavel do pnpm saiu em 04/09: o `package.json` ja declara
+  # `packageManager: pnpm@10.30.1`, e a acao le isso sozinha. Fixar nos dois
+  # lugares duplicava a fonte da verdade, e as duas podiam divergir calada.
   NODE_VERSION: '20.11'
-  PNPM_VERSION: '10.30.1'
 
 jobs:
   # ===========================================================================
@@ -57,13 +64,17 @@ jobs:
     name: Tipos
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
+      # v6, e sem `with: version` — ver o bloco `env`.
+      #
+      # ⚠ Esta acao tem sucessor: a v6.0.10 aponta os usuarios para `pnpm/setup`.
+      # Continua mantida (a v6.1.0 e de 01/09 e ja suporta pnpm 12), entao a
+      # troca nao e urgente — e trocar de acao no mesmo commit que sobe tres
+      # versoes misturaria duas coisas.
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -158,13 +169,17 @@ jobs:
       AI_PROVIDER: mock
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
+      # v6, e sem `with: version` — ver o bloco `env`.
+      #
+      # ⚠ Esta acao tem sucessor: a v6.0.10 aponta os usuarios para `pnpm/setup`.
+      # Continua mantida (a v6.1.0 e de 01/09 e ja suporta pnpm 12), entao a
+      # troca nao e urgente — e trocar de acao no mesmo commit que sobe tres
+      # versoes misturaria duas coisas.
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
