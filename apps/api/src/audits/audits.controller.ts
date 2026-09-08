@@ -1,5 +1,15 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Res,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 
 import { CurrentTenant, CurrentUser } from '../common/decorators';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
@@ -59,5 +69,45 @@ export class AuditsController {
   @ApiResponse({ status: 404, description: 'Auditoria não encontrada neste workspace' })
   async detalhe(@CurrentTenant() tenant: ActiveTenant, @Param('id') id: string) {
     return this.audits.detalhe(tenant.id, id);
+  }
+
+  /**
+   * **Não há risco de ordem de rota aqui, e vale dizer por quê.**
+   *
+   * O `/leads/export` precisa ser declarado antes de `:id` — carrega um
+   * comentário sobre isso — porque `export` é *um* segmento e casaria com o
+   * parâmetro. `:id/export` são **dois** segmentos: `@Get(':id')` casa um só, e
+   * as duas rotas não competem. Declarada depois de propósito, para ficar ao
+   * lado do `detalhe`, que é a rota de que ela é o download.
+   */
+  @Get(':id/export')
+  @ApiOperation({
+    summary: 'Exportar a auditoria em CSV',
+    description:
+      'Uma linha por checagem, com os campos da auditoria repetidos — o ' +
+      'arquivo abre direto numa planilha. Inclui a coluna **Disponível até**, ' +
+      'que é o prazo de retenção de cada checagem: passado ele, o dado sai do ' +
+      'sistema, e este arquivo é a cópia que fica com o cliente. Separador ' +
+      '`;` e BOM UTF-8, para abrir corretamente no Excel em português. ' +
+      'Não consome cota nem exige direito de plano, e continua disponível com ' +
+      'a conta suspensa: levar embora o que já é seu não é funcionalidade de ' +
+      'plano. Grava AuditLog.',
+  })
+  @ApiResponse({ status: 200, description: 'Arquivo CSV' })
+  @ApiResponse({ status: 404, description: 'Auditoria não encontrada neste workspace' })
+  async exportar(
+    @CurrentTenant() tenant: ActiveTenant,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    const { filename, content } = await this.audits.exportarCsv(tenant.id, id, user.id);
+
+    response.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(Buffer.from(content, 'utf-8'));
   }
 }

@@ -11,6 +11,7 @@ import {
   type WhatsAppStatus,
 } from '@propectai/types';
 
+import { montarCsv } from '../common/csv';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { LeadQueryDto } from './leads.dto';
@@ -41,17 +42,16 @@ const WHATSAPP_STATUS_LABEL: Record<string, string> = {
   UNKNOWN: 'Não verificado',
 };
 
-/**
- * Escapa um campo de CSV.
+/*
+ * `csvCampo` e a montagem do arquivo saíram daqui em 04/09/2026, para
+ * `common/csv.ts`, quando o export de auditoria passou a precisar das mesmas
+ * regras.
  *
- * Aspas, ponto e vírgula e quebra de linha dentro do valor quebram o arquivo
- * silenciosamente — a planilha abre, com as colunas deslocadas a partir da
- * linha ruim. Nome de empresa com aspas não é caso raro.
+ * **A extração não foi por reuso, foi por divergência.** Duas cópias da regra
+ * de escape em dois arquivos concordam no dia em que são escritas e param de
+ * concordar sem ninguém perceber — e o sintoma aparece num arquivo que o
+ * cliente abriu, não num teste.
  */
-function csvCampo(valor: string): string {
-  if (!/[";\r\n]/.test(valor)) return valor;
-  return `"${valor.replace(/"/g, '""')}"`;
-}
 
 /**
  * ## O hub, e as duas ajudantes que decidem a forma do arquivo
@@ -880,15 +880,9 @@ export class LeadsService {
       'Descoberto em',
     ];
 
-    // BOM + separador ponto e vírgula.
-    //
-    // O Excel em português abre CSV assumindo `;` e latin-1. Sem o BOM, acento
-    // vira caractere quebrado; com vírgula, tudo cai numa coluna só. Os dois
-    // detalhes decidem se o arquivo é útil ou se a pessoa desiste na primeira
-    // tentativa — e o público deste produto abre planilha no Excel, não no pandas.
-    const conteudo =
-      '﻿' +
-      [cabecalho, ...linhas].map((linha) => linha.map(csvCampo).join(';')).join('\r\n');
+    // BOM, separador ponto e vírgula, quebra CRLF — as três decisões estão em
+    // `common/csv.ts`, com o motivo de cada uma.
+    const conteudo = montarCsv(cabecalho, linhas);
 
     await this.prisma.comTenant(tenantId, async (tx) => {
       /**

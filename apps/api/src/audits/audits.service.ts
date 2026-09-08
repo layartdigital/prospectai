@@ -12,6 +12,7 @@ import { AUDIT_VERSION, type SiteCheckResult } from '@propectai/types';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 
+import { montarCsv } from '../common/csv';
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateAuditDto } from './audits.dto';
@@ -24,6 +25,23 @@ import type { CreateAuditDto } from './audits.dto';
  */
 const QUEUE_NAME = 'audit';
 const QUEUE_PREFIX = 'propectai';
+
+/**
+ * O prazo da auditoria e o da checagem que expira primeiro.
+ *
+ * Ver o comentario no `detalhe`: menor, nunca maior.
+ */
+function prazoDaAuditoria(
+  checks: Array<{ retentionUntil: Date | null }>,
+): string | null {
+  const prazos = checks
+    .map((c) => c.retentionUntil)
+    .filter((d): d is Date => d !== null);
+
+  if (prazos.length === 0) return null;
+
+  return new Date(Math.min(...prazos.map((d) => d.getTime()))).toISOString();
+}
 
 /** Tem de bater com `AUDIT_TENTATIVAS` do worker: e o que decide o `FAILED`. */
 const TENTATIVAS = 3;
@@ -331,6 +349,16 @@ export class AuditsService implements OnModuleDestroy {
     durationMs: number | null;
     errorCode: string | null;
     finishedAt: string | null;
+    /**
+     * Ate quando as medicoes ficam disponiveis. Nulo enquanto nao ha checagem.
+     *
+     * **E o MENOR `retentionUntil` das checagens, e nao o maior.** Elas sao
+     * gravadas na mesma execucao e hoje coincidem, mas o schema permite
+     * divergir — e nesse caso o maior seria uma promessa que o sistema nao
+     * cumpre: a primeira medicao some antes. Prometer a data em que ainda esta
+     * tudo la e a unica leitura honesta.
+     */
+    retentionUntil: string | null;
     checks: Array<Omit<SiteCheckResult, 'observedAt'> & { observedAt: string | null }>;
   }> {
     const a = await this.prisma.comTenant(tenantId, (tx) =>
@@ -351,8 +379,18 @@ export class AuditsService implements OnModuleDestroy {
       durationMs: a.durationMs,
       errorCode: a.errorCode,
       finishedAt: a.finishedAt?.toISOString() ?? null,
-      // `retentionUntil` e `id` ficam de fora: sao internos, e o que o cliente
-      // precisa e a medicao.
+      /**
+       * **Isto reverte uma decisao explicita, e a reversao e da D6.**
+       *
+       * Onde esta linha esta havia: "`retentionUntil` e `id` ficam de fora: sao
+       * internos, e o que o cliente precisa e a medicao". O argumento estava
+       * certo enquanto o prazo era so contabilidade nossa. A D6 mudou o que o
+       * campo significa: com expurgo de verdade, a data deixa de ser interna e
+       * passa a ser o aviso de que a medicao tem validade.
+       *
+       * O `id` da checagem continua de fora — esse segue interno.
+       */
+      retentionUntil: prazoDaAuditoria(a.checks),
       checks: a.checks.map((c) => ({
         check: c.check,
         outcome: c.outcome,
@@ -362,6 +400,124 @@ export class AuditsService implements OnModuleDestroy {
         errorCode: c.errorCode,
         confidence: c.confidence,
       })),
+    };
+  }
+
+  /**
+   * Exporta a auditoria e suas checagens em CSV — peca 2 da D6.
+   *
+   * **Por que existe:** as medicoes tem prazo (180 dias), e prazo sem saida e
+   * so perda agendada. Esta rota e o que transforma "vamos apagar" em "leve
+   * antes de apagarmos".
+   *
+   * ---
+   *
+   * **CSV, e nao JSON.** A D6 admitia os dois. CSV porque e o mesmo formato do
+   * `GET /leads/export` — o publico deste produto abre planilha, e duas rotas de
+   * export com formatos diferentes obrigam a pessoa a aprender duas vezes. O
+   * unico campo que sofre e o `result`, que e Json e vira texto numa celula;
+   * nada se perde, so fica feio de ler. Acrescentar `?format=json` depois e
+   * aditivo e nao quebra ninguem.
+   *
+   * **Uma linha por checagem, com os campos da auditoria repetidos.**
+   * Desnormalizar e o que faz o arquivo abrir direto numa planilha; um CSV em
+   * duas secoes exige quem o leia saber que ha duas secoes.
+   *
+   * ---
+   *
+   * **Nao consome cota, e nao exige direito de plano.**
+   *
+   * O `GET /leads/export` exige `export.csv` porque exportar a base inteira e
+   * uma funcionalidade do plano. Aqui e outra coisa: e levar embora **uma**
+   * auditoria que o cliente ja pagou e cujo prazo nos definimos. Cobrar plano
+   * para isso seria cobrar pelo direito de nao perder o que ja e dele.
+   *
+   * A D6 nao pediu porta nenhuma, e **acrescentar restricao que ninguem pediu e
+   * pior do que omitir uma que se pode acrescentar depois** — a primeira quebra
+   * quem ja usava, a segunda nao quebra ninguem.
+   *
+   * **Fica liberado sob suspensao, e sem precisar de nada.** O `TenantGuard`
+   * decide por metodo HTTP: `GET` passa, salvo se marcado `@ConsomeRecurso()`.
+   * Nao marcar e o que basta — e e o comportamento que a §10.4 pede.
+   *
+   * ---
+   *
+   * **Dois blocos, com a montagem entre eles**, como no `leads.exportCsv`: nao
+   * segurar conexao durante trabalho de CPU que nao e consulta.
+   */
+  async exportarCsv(
+    tenantId: string,
+    auditId: string,
+    userId: string,
+  ): Promise<{ filename: string; content: string; rows: number }> {
+    const a = await this.prisma.comTenant(tenantId, (tx) =>
+      tx.digitalPresenceAudit.findUnique({
+        where: { tenantId_id: { tenantId, id: auditId } },
+        include: { checks: { orderBy: { createdAt: 'asc' } } },
+      }),
+    );
+
+    // Mesma resposta do `detalhe`: auditoria de outro tenant e auditoria
+    // inexistente sao indistinguiveis de fora, de proposito.
+    if (a === null) throw new NotFoundException('Auditoria não encontrada');
+
+    const cabecalho = [
+      'Auditoria',
+      'Lead',
+      'Situação',
+      'Versão',
+      'Provedor',
+      'Concluída em',
+      'Checagem',
+      'Resultado',
+      'URL observada',
+      'Observado em',
+      'Código de erro',
+      'Confiança',
+      'Detalhe',
+      'Disponível até',
+    ];
+
+    const comuns = [
+      a.id,
+      a.leadId,
+      a.status,
+      a.auditVersion,
+      a.providerName ?? '',
+      a.finishedAt?.toISOString() ?? '',
+    ];
+
+    const linhas = a.checks.map((c) => [
+      ...comuns,
+      c.check,
+      c.outcome,
+      c.observedUrl ?? '',
+      c.observedAt?.toISOString() ?? '',
+      c.errorCode ?? '',
+      c.confidence === null ? '' : String(c.confidence),
+      c.result === null ? '' : JSON.stringify(c.result),
+      c.retentionUntil?.toISOString() ?? '',
+    ]);
+
+    const conteudo = montarCsv(cabecalho, linhas);
+
+    await this.prisma.comTenant(tenantId, (tx) =>
+      tx.auditLog.create({
+        data: {
+          tenantId,
+          actorId: userId,
+          action: 'audit.exported',
+          entityType: 'DigitalPresenceAudit',
+          entityId: a.id,
+          after: { rows: a.checks.length } as unknown as object,
+        },
+      }),
+    );
+
+    return {
+      filename: `auditoria-${a.id}.csv`,
+      content: conteudo,
+      rows: a.checks.length,
     };
   }
 }

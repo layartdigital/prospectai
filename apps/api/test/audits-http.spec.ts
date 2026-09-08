@@ -109,6 +109,43 @@ async function pedir<T>(
   };
 }
 
+/**
+ * Baixa uma rota que devolve arquivo.
+ *
+ * O `pedir` faz `response.json()`, e CSV nao e JSON — usa-lo aqui devolveria
+ * `null` em silencio e o teste passaria a afirmar sobre nada. Este devolve o
+ * texto **e os cabecalhos**, porque no caso de um download metade do contrato
+ * esta neles.
+ *
+ * ---
+ *
+ * **Nao usa `response.text()`, e a razao custou uma execucao vermelha.**
+ *
+ * O `text()` do fetch e definido como "UTF-8 decode", e essa operacao
+ * **descarta o BOM inicial**. O byte esta no arquivo; a string devolvida nao o
+ * tem. Um teste de BOM escrito sobre `text()` afirma sobre um texto que a
+ * propria funcao ja limpou — e falha mesmo com o servidor correto, que foi
+ * exatamente o que aconteceu aqui.
+ *
+ * `arrayBuffer()` mais `TextDecoder` com `ignoreBOM` entrega o que o cliente
+ * realmente recebeu. **Assertiva sobre bytes precisa comecar nos bytes.**
+ */
+async function baixar(
+  actor: Actor,
+  rota: string,
+): Promise<{ status: number; tipo: string | null; disposicao: string | null; texto: string }> {
+  const response = await fetch(`${baseUrl}/api/v1${rota}`, {
+    headers: { Cookie: actor.cookie },
+  });
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return {
+    status: response.status,
+    tipo: response.headers.get('content-type'),
+    disposicao: response.headers.get('content-disposition'),
+    texto: new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
+  };
+}
+
 function inicioDoPeriodo(): Date {
   const agora = new Date();
   return new Date(agora.getFullYear(), agora.getMonth(), 1);
@@ -315,6 +352,156 @@ describe('isolamento entre tenants', () => {
     const id = auditoriasCriadas[0]!;
     const r = await pedir(beta, `/audits/${id}`);
     expect(r.status).toBe(404);
+  });
+});
+
+/**
+ * D6 — o prazo aparece, e a auditoria pode ser levada embora.
+ *
+ * As duas pecas se testam juntas porque respondem a mesma pergunta: **o
+ * `retentionUntil` existia no banco desde 25/08 e ninguem o lia.** O worker
+ * gravava 180 dias em cada checagem e nada no produto dizia isso a quem pagou.
+ * Prazo sem saida e perda agendada.
+ *
+ * A auditoria daqui e **fixture, criada pela borda do banco** — nao por `POST
+ * /audits`. Duas razoes: nao consumir credito do plano (o teste do gate abaixo
+ * depende do saldo) e nao deixar job orfao no Redis. E, sobretudo, porque
+ * nenhum worker roda nesta suite: sem inserir checagens a mao, a auditoria nao
+ * teria nem prazo nem linha para exportar, e os dois testes ficariam verdes
+ * afirmando sobre um arquivo vazio.
+ */
+describe('prazo e export', () => {
+  let auditoria = '';
+  const cedo = new Date('2027-01-10T00:00:00.000Z');
+  const tarde = new Date('2027-06-10T00:00:00.000Z');
+
+  beforeAll(async () => {
+    const a = await prisma.digitalPresenceAudit.create({
+      data: {
+        tenantId: alfa.tenantId,
+        leadId: leadComSite,
+        auditVersion: 'teste-export',
+        providerName: 'mock',
+        status: 'COMPLETED',
+        finishedAt: new Date('2026-09-04T12:00:00.000Z'),
+      },
+    });
+    auditoria = a.id;
+
+    await prisma.digitalPresenceCheck.createMany({
+      data: [
+        {
+          tenantId: alfa.tenantId,
+          auditId: auditoria,
+          check: 'HTTPS',
+          outcome: 'OK',
+          observedUrl: 'https://exemplo-auditoria.com.br',
+          observedAt: new Date('2026-09-04T12:00:00.000Z'),
+          confidence: 1,
+          // Aspas dentro do valor. E o unico campo de texto livre do arquivo, e
+          // e por ele que a regra de escape compartilhada passa a ser testada
+          // de verdade — nome de empresa com aspas nao e caso raro.
+          result: { titulo: 'Padaria "Do Zé"; a melhor' },
+          retentionUntil: tarde,
+          // `createdAt` explicito nas duas. O `orderBy` do export e por ele, e
+          // um `createMany` grava as duas linhas com o mesmo `now()` — a ordem
+          // ficaria a criterio do Postgres, e o teste falharia um dia em dez
+          // sem nada ter mudado.
+          createdAt: new Date('2026-09-04T12:00:00.000Z'),
+        },
+        {
+          tenantId: alfa.tenantId,
+          auditId: auditoria,
+          check: 'TTFB',
+          outcome: 'FAILED',
+          errorCode: 'TIMEOUT',
+          retentionUntil: cedo,
+          createdAt: new Date('2026-09-04T12:00:01.000Z'),
+        },
+      ],
+    });
+  });
+
+  it('o detalhe traz o prazo, e e o MENOR dos dois', async () => {
+    const r = await pedir<{ retentionUntil: string | null }>(alfa, `/audits/${auditoria}`);
+    expect(r.status).toBe(200);
+    // O maior seria uma promessa que o sistema nao cumpre: a checagem de
+    // janeiro some antes, e quem leu junho descobriria pela ausencia.
+    expect(r.body.retentionUntil).toBe(cedo.toISOString());
+  });
+
+  it('sem checagem, o prazo e nulo — e nao uma data inventada', async () => {
+    // Regra 4: ausencia de sinal e DESCONHECIDO. A auditoria enfileirada do
+    // comeco da suite nao tem checagem nenhuma.
+    const r = await pedir<{ retentionUntil: string | null }>(
+      alfa,
+      `/audits/${auditoriasCriadas[0]!}`,
+    );
+    expect(r.body.retentionUntil).toBe(null);
+  });
+
+  it('o CSV sai com uma linha por checagem, e o cabecalho traz o prazo', async () => {
+    const r = await baixar(alfa, `/audits/${auditoria}/export`);
+
+    expect(r.status).toBe(200);
+    expect(r.tipo).toContain('text/csv');
+    expect(r.disposicao).toContain(`filename="auditoria-${auditoria}.csv"`);
+
+    // BOM primeiro. Sem ele o Excel em portugues quebra os acentos, e o arquivo
+    // chega ilegivel a quem mais precisa dele. So e visivel porque o `baixar`
+    // decodifica com `ignoreBOM` — ver o comentario la.
+    expect(r.texto.startsWith('﻿')).toBe(true);
+
+    const linhas = r.texto.slice(1).split('\r\n');
+    expect(linhas.length).toBe(3); // cabecalho + duas checagens
+    expect(linhas[0]!.split(';').at(-1)).toBe('Disponível até');
+    // Cada linha carrega o prazo da SUA checagem, nao o da auditoria.
+    expect(linhas[1]!.endsWith(tarde.toISOString())).toBe(true);
+    expect(linhas[2]!.endsWith(cedo.toISOString())).toBe(true);
+  });
+
+  it('o escape compartilhado protege o arquivo', async () => {
+    const r = await baixar(alfa, `/audits/${auditoria}/export`);
+
+    const linha = r.texto.split('\r\n')[1]!;
+
+    // Celula inteira entre aspas, com as internas dobradas. Sem isso o `;` de
+    // dentro do titulo deslocaria as colunas a partir dali — e a planilha
+    // abriria, torta, sem erro nenhum.
+    expect(linha).toContain(';"{""titulo"":');
+
+    /**
+     * **Sao DUAS camadas de escape, e a primeira nao e nossa.**
+     *
+     * O `result` e Json e passa por `JSON.stringify` antes do CSV, que ja
+     * transforma a aspa interna em `\"`. So depois o `csvCampo` dobra **todas**
+     * as aspas do resultado, a barra invertida incluida no meio. O que chega ao
+     * arquivo e `\""Do Zé\""`, e nao `""Do Zé""`.
+     *
+     * Escrevi a segunda forma na primeira versao deste teste e ela falhou —
+     * contra um servidor correto. **A asserção estava errada, o codigo nao.**
+     */
+    expect(linha).toContain('\\""Do Zé\\""');
+    expect(linha).toContain('; a melhor""}"');
+  });
+
+  it('auditoria de outro tenant nao exporta', async () => {
+    const r = await baixar(beta, `/audits/${auditoria}/export`);
+    // 404, e nao 403: mesma escolha do `detalhe`.
+    expect(r.status).toBe(404);
+    expect(r.texto).not.toContain('Do Zé');
+  });
+
+  it('a exportacao fica registrada', async () => {
+    const antes = await prisma.auditLog.count({
+      where: { tenantId: alfa.tenantId, action: 'audit.exported' },
+    });
+    await baixar(alfa, `/audits/${auditoria}/export`);
+    expect(
+      await prisma.auditLog.count({
+        where: { tenantId: alfa.tenantId, action: 'audit.exported' },
+      }),
+    ).toBe(antes + 1);
   });
 });
 
