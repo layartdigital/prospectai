@@ -19,12 +19,13 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
+
+import { criarPrismaScript } from './cliente';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-const prisma = new PrismaClient();
+const prisma = criarPrismaScript();
 
 /** Colunas da base, na ordem em que aparecem. */
 const COLUNAS = [

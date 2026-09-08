@@ -9,12 +9,13 @@
 
 import path from 'node:path';
 
-import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
+
+import { criarPrismaScript } from './cliente';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-const prisma = new PrismaClient();
+const prisma = criarPrismaScript();
 
 async function main(): Promise<void> {
   const demoTenants = await prisma.tenant.findMany({

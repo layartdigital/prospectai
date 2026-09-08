@@ -15,16 +15,17 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-import { PrismaClient, type PipelineStage, type Prisma } from '@prisma/client';
+import { type PipelineStage, type Prisma } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { PLAN_LIMITS, computeScore, type ScoreInput } from '@propectai/types';
 import dotenv from 'dotenv';
 
+import { criarPrismaScript } from './cliente';
 import { SEED_LEADS, SEED_PREFERENCES, SEED_SEARCHES, SEED_STAGES } from './seed-data';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-const prisma = new PrismaClient();
+const prisma = criarPrismaScript();
 
 const TENANT_SLUG = 'layart-demo';
 
