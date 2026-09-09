@@ -46,17 +46,43 @@ concurrency:
 
 env:
   # `NODE_VERSION` e o Node **do projeto**, e nao o runtime das acoes — sao
-  # coisas diferentes. O `package.json` declara `engines.node: >=20.11`;
-  # divergir aqui produziria um CI que verifica um ambiente que ninguem usa.
+  # coisas diferentes. O `package.json` declara `engines.node`; divergir aqui
+  # produziria um CI que verifica um ambiente que ninguem usa.
   #
-  # ⚠ O Node 20 chegou ao fim de vida em abril de 2026. Subir o projeto e
-  # decisao propria, com consequencia em modulo nativo (`@node-rs/argon2`), e
-  # nao entra de carona numa troca de versao de acao.
+  # A distincao acima importou em 09/09/2026, quando quase misturamos duas
+  # coisas: **o prazo de 23/09 e do runtime das acoes** (o `runs: using:` de
+  # `checkout`, `setup-node` e afins), e nao deste valor. Este aqui nao tinha
+  # data nenhuma — tinha coisa pior, que era estar **sem correcao de seguranca
+  # desde 30/04/2026**, quando o Node 20 morreu. Prazo que ninguem cobra e o
+  # que fica para depois indefinidamente.
+  #
+  # ---
+  #
+  # **Por que 24, e por que so o major.**
+  #
+  # O Node 24 e o Active LTS de hoje: vira Maintenance em 20/10/2026 e so morre
+  # em 30/04/2028. E e o que os runners do GitHub ja usam por padrao desde
+  # 16/06/2026, entao o CI passa a ter um ambiente so em vez de dois.
+  #
+  # As alternativas, e o motivo de nao serem: o **22** ja esta em Maintenance e
+  # morre em 30/04/2027, o que seria trocar divida vencida por divida vencendo;
+  # o **26** dura ate 2029 mas so vira LTS em outubro, e seis semanas de CI numa
+  # versao `Current` e risco sem retorno quando o 24 cobre dezenove meses.
+  #
+  # **`'24'` e nao `'24.x.y'`, de proposito.** O valor antigo era `'20.11'`, um
+  # minor fixo — e fixar minor congela justamente a correcao de seguranca que
+  # este commit existe para voltar a receber. O `setup-node` resolve `'24'` como
+  # o 24 mais recente a cada execucao.
+  #
+  # ⚠ O que isto **pode** quebrar e modulo nativo: o `@node-rs/argon2` traz
+  # binario compilado. Ele usa N-API, que e estavel entre majors, entao a
+  # expectativa e que nao doa — mas expectativa nao e medicao, e quem mede e a
+  # execucao do CI logo abaixo.
   #
   # A variavel do pnpm saiu em 04/09: o `package.json` ja declara
   # `packageManager: pnpm@10.30.1`, e a acao le isso sozinha. Fixar nos dois
   # lugares duplicava a fonte da verdade, e as duas podiam divergir calada.
-  NODE_VERSION: '20.11'
+  NODE_VERSION: '24'
 
 jobs:
   # ===========================================================================
