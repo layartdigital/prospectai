@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
 import { PrivacyService } from '../src/privacy/privacy.service';
-import { aoLimpar } from './limpeza';
+import { aoLimpar, conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -73,8 +73,14 @@ beforeAll(async () => {
 afterAll(async () => {
   if (tenantId) await admin.tenant.delete({ where: { id: tenantId } }).catch(aoLimpar('tenant'));
   await admin.user.deleteMany({ where: { id: { in: [usuarioId, outroUsuarioId] } } }).catch(aoLimpar('usuarios'));
+
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(admin, sufixo);
   await admin.$disconnect();
   await app.close();
+
+  if (sobras !== null) throw new Error(sobras);
 }, TIMEOUT_MS);
 
 describe('anonimizarAtor', () => {

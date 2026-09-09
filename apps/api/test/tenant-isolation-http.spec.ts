@@ -15,6 +15,7 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
+import { conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -180,7 +181,13 @@ afterAll(async () => {
     where: { email: { in: [alfa?.email, beta?.email].filter(Boolean) as string[] } },
   });
 
+
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(admin, suffix);
   await admin.$disconnect();
+
+  if (sobras !== null) throw new Error(sobras);
 }, BOOT_TIMEOUT_MS);
 
 describe('isolamento entre tenants pela API', () => {

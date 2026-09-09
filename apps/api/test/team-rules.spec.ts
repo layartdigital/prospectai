@@ -9,6 +9,7 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
+import { conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -138,11 +139,33 @@ afterAll(async () => {
   if (dono?.tenantId) {
     await prisma.tenant.deleteMany({ where: { id: dono.tenantId } });
   }
+  /**
+   * O filtro e `-${suffix}@`, sem dominio — e a correcao veio do
+   * `conferirLimpeza` logo abaixo, na primeira execucao dele.
+   *
+   * A linha dizia `-${suffix}@teste.propectai.local`, que e o dominio do
+   * `registrar()`. **Mas os convites usam outro**: `@teste.local`. E convite
+   * aceito cria `User` de verdade — o `admin-` e o `duplo-` chegam ate aqui
+   * como conta, nao como convite.
+   *
+   * Apagar o tenant nao os leva junto: `Membership` cai por cascade, o `User`
+   * nao, porque uma conta pode pertencer a varios workspaces. Entao cada
+   * execucao desta suite deixava duas contas no banco, em silencio, desde
+   * sempre.
+   *
+   * O sufixo e a assinatura da execucao; o dominio e detalhe de quem criou a
+   * linha. **Filtrar por dominio foi supor que so um caminho cria usuario.**
+   */
   await prisma.user.deleteMany({
-    where: { email: { contains: `-${suffix}@teste.propectai.local` } },
+    where: { email: { contains: `-${suffix}@` } },
   });
 
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(prisma, suffix);
   await prisma.$disconnect();
+
+  if (sobras !== null) throw new Error(sobras);
 }, BOOT_TIMEOUT_MS);
 
 describe('workspace recém-criado', () => {

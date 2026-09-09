@@ -9,6 +9,7 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
+import { conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -155,7 +156,13 @@ afterAll(async () => {
     where: { email: { contains: `-${suffix}@teste.propectai.local` } },
   });
 
+
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(prisma, suffix);
   await prisma.$disconnect();
+
+  if (sobras !== null) throw new Error(sobras);
 }, BOOT_TIMEOUT_MS);
 
 describe('a fronteira do painel', () => {

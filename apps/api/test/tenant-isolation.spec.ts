@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { fingerprintInput } from '@propectai/types';
 import dotenv from 'dotenv';
+import { conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -72,7 +73,13 @@ beforeAll(async () => {
 afterAll(async () => {
   // Cascade remove leads, scores e o resto junto.
   await admin.tenant.deleteMany({ where: { slug: { in: [slugA, slugB] } } });
+
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(admin, suffix);
   await admin.$disconnect();
+
+  if (sobras !== null) throw new Error(sobras);
 }, DB_TIMEOUT_MS);
 
 describe('isolamento entre tenants', () => {

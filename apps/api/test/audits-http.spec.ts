@@ -14,6 +14,7 @@ import IORedis from 'ioredis';
 
 import { AppModule } from '../src/app.module';
 import { exigirFilaSemWorker } from './fila';
+import { conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -247,7 +248,13 @@ afterAll(async () => {
   await prisma.user.deleteMany({
     where: { email: { in: [alfa?.email, beta?.email].filter(Boolean) as string[] } },
   });
+
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(prisma, suffix);
   await prisma.$disconnect();
+
+  if (sobras !== null) throw new Error(sobras);
 }, BOOT_TIMEOUT_MS);
 
 describe('saldo', () => {

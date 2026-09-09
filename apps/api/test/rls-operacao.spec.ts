@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 import { AppModule } from '../src/app.module';
 import { PrismaSistemaService } from '../src/prisma/prisma-sistema.service';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { aoLimpar } from './limpeza';
+import { aoLimpar, conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -157,8 +157,14 @@ afterAll(async () => {
     .deleteMany({ where: { entityId: { contains: sufixo } } })
     .catch(aoLimpar('audit_logs do sufixo'));
   await admin.auditLog.deleteMany({ where: { id: registroOrfao } }).catch(aoLimpar('audit_log orfao'));
+
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(admin, sufixo);
   await admin.$disconnect();
   await app.close();
+
+  if (sobras !== null) throw new Error(sobras);
 }, TIMEOUT_MS);
 
 describe('pre-condicao', () => {

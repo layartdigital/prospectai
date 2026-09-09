@@ -11,6 +11,7 @@ import dotenv from 'dotenv';
 import { BillingService } from '../src/billing/billing.service';
 import { PrismaSistemaService } from '../src/prisma/prisma-sistema.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -224,9 +225,15 @@ afterAll(async () => {
     });
   }
 
+
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(prisma, suffix);
   await sistema.onModuleDestroy();
   await prismaDoServico.$disconnect();
   await prisma.$disconnect();
+
+  if (sobras !== null) throw new Error(sobras);
 });
 
 describe('§10.3 — suspensão segue o estado da assinatura', () => {
