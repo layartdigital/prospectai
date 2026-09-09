@@ -82,20 +82,41 @@ import IORedis from 'ioredis';
  *
  * **Residuo conhecido, medido em 09/09/2026 e deixado de proposito.**
  *
- * Rodando **so este arquivo** (`jest test/fila.spec.ts`), o Jest ainda imprime
- * "did not exit one second after the test run has completed". Na **suite
- * completa** — que e como o CI roda — nao imprime, e as 18 suites encerram
- * limpas.
+ * Rodando **so este arquivo** (`jest test/fila.spec.ts`), o Jest imprime "did
+ * not exit one second after the test run has completed".
  *
  * O que foi consertado esta medido: o caso patologico levava 94 s e agora leva
- * 10 s. O que sobra e uma alca pequena, que atrasa a saida do processo isolado
- * alem do segundo de tolerancia e nao aparece no unico cenario que decide o
- * verde do CI.
+ * 10 s. O que sobra e uma alca pequena, que atrasa a saida do processo alem do
+ * segundo de tolerancia.
  *
- * **Fica anotado em vez de fingir que fechou.** Se um dia a suite completa
- * comecar a imprimir o mesmo aviso, comece por aqui — e comece pela biseccao
- * por nome de teste, que foi o que funcionou: os tres primeiros falam com o
- * Redis de verdade, o quarto nao.
+ * ---
+ *
+ * **A frase que estava aqui dizia que a suite completa nao imprimia. Errado —
+ * e o proprio dia derrubou.**
+ *
+ * O texto original afirmava: *"Na suite completa — que e como o CI roda — nao
+ * imprime, e as 18 suites encerram limpas"*, e concluia que o residuo nao
+ * aparece no unico cenario que decide o verde do CI.
+ *
+ * **Ele aparece.** Em 09/09/2026, quatro execucoes da suite completa da API, no
+ * mesmo dia e com o mesmo codigo de API: duas encerraram limpas, duas
+ * imprimiram o aviso — a primeira e a ultima. Todas passaram; o aviso vem
+ * depois do resultado.
+ *
+ * **O residuo e intermitente, e isso e pior do que constante.** Constante se
+ * mede; intermitente se persegue. A conclusao anterior nao era so otimista: ela
+ * era uma generalizacao feita sobre uma amostra de uma execucao, escrita com
+ * confianca de medicao.
+ *
+ * ---
+ *
+ * **Fica anotado em vez de fingir que fechou.** O caminho de investigacao
+ * continua o mesmo, e foi o que funcionou da outra vez: **biseccao por nome de
+ * teste** (`jest -t`), lembrando que os tres primeiros testes do
+ * `fila.spec.ts` falam com o Redis de verdade e o quarto nao.
+ *
+ * O que a intermitencia acrescenta: nao basta uma execucao limpa para declarar
+ * consertado. Precisa de uma serie.
  */
 
 const PREFIXO = 'propectai';

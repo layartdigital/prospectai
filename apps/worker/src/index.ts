@@ -6,6 +6,7 @@ import { criarPrismaApp } from './db/prisma-app';
 import { criarPrismaSistema } from './db/prisma-sistema';
 import { logger } from './logger';
 import { avisarExpiracao } from './pipeline/avisar-expiracao';
+import { expurgarMedicoes } from './pipeline/expurgar-medicoes';
 import {
   processAuditJob,
   type AuditJobPayload,
@@ -140,8 +141,23 @@ const notifyQueue = new Queue(QUEUE_NAMES.notify, { connection, prefix: QUEUE_PR
 const notifyWorker = new Worker(
   QUEUE_NAMES.notify,
   async (job: Job) => {
-    const resultado = await avisarExpiracao(prismaSistema, prisma);
-    logger.info({ jobId: job.id, ...resultado }, 'Aviso de expiracao concluido');
+    /**
+     * **Avisa, depois apaga — e a ordem e o que torna a promessa executavel.**
+     *
+     * As duas metades da D6 moram no mesmo job de proposito. Se o aviso subir
+     * erro, o `await` abaixo nunca acontece e **nada e apagado naquele dia** —
+     * a direcao segura da falha, sem nenhuma trava extra para isso.
+     *
+     * Junta-las tambem faz a sequencia ser codigo em vez de convencao: nao ha
+     * como alguem agendar o expurgo sozinho por engano.
+     */
+    const aviso = await avisarExpiracao(prismaSistema, prisma);
+    const expurgo = await expurgarMedicoes(prismaSistema, prisma);
+
+    const resultado = { aviso, expurgo };
+    // Aninhado, e nao espalhado: os dois relatorios tem `tenantsVarridos`, e
+    // espalhar faria um sobrescrever o outro em silencio.
+    logger.info({ jobId: job.id, aviso, expurgo }, 'Retencao processada');
     return resultado;
   },
   {
