@@ -100,3 +100,42 @@ export const RETENCAO_CHECK_DIAS = 180;
 export function retencaoAte(agora: Date): Date {
   return new Date(agora.getTime() + RETENCAO_CHECK_DIAS * 24 * 60 * 60 * 1000);
 }
+
+/**
+ * Antecedencia do aviso de expiracao. D6, peca 3.
+ *
+ * **Quinze, e o numero tem motivo escrito na decisao:** perto o bastante para a
+ * pessoa agir, longe o bastante para caber um fim de semana. Trinta viraria
+ * ruido que ninguem le; sete nao sobrevive a ferias.
+ *
+ * Nao confundir com o `RETENCAO_CHECK_DIAS` acima: aquele e quanto tempo a
+ * medicao fica, este e quanto antes do fim se avisa. Sao numeros de naturezas
+ * diferentes — o primeiro e produto, o segundo e cortesia — e mexer num nao
+ * implica mexer no outro.
+ */
+export const AVISO_ANTECEDENCIA_DIAS = 15;
+
+/** Ate onde o aviso enxerga: hoje mais a antecedencia. */
+export function limiteDoAviso(agora: Date): Date {
+  return new Date(agora.getTime() + AVISO_ANTECEDENCIA_DIAS * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * A chave que registra que uma auditoria ja foi avisada.
+ *
+ * **Existe como funcao, e nao como template solto, porque tem dois leitores em
+ * epocas diferentes.** A peca 3 escreve; a peca 4 — o expurgo — le, para
+ * responder "esta auditoria foi avisada?" antes de apagar qualquer coisa. Duas
+ * copias do mesmo formato concordariam no dia em que fossem escritas e
+ * parariam de concordar em silencio; e o preco da divergencia aqui nao e um
+ * aviso repetido, e apagar dado que ninguem avisou.
+ *
+ * Mesma razao pela qual o `csv.ts` da API foi extraido: *"o motivo da extracao
+ * nao e reuso, e divergencia"*.
+ *
+ * O prefixo existe para o proximo assunto que precisar de dedupe nao colidir
+ * com este por acidente.
+ */
+export function chaveDeAviso(auditId: string): string {
+  return `retencao:${auditId}`;
+}

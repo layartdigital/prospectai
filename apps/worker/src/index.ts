@@ -1,9 +1,11 @@
-import { Worker, type Job } from 'bullmq';
+import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 
 import { QUEUE_NAMES, QUEUE_PREFIX, config } from './config';
 import { criarPrismaApp } from './db/prisma-app';
+import { criarPrismaSistema } from './db/prisma-sistema';
 import { logger } from './logger';
+import { avisarExpiracao } from './pipeline/avisar-expiracao';
 import {
   processAuditJob,
   type AuditJobPayload,
@@ -26,6 +28,13 @@ import { createSiteAuditProvider } from './providers/site-audit';
 // Passo 4: papel sujeito a politica. Ver `db/prisma-app.ts` para o motivo de
 // isto ser variavel propria e nao troca do `DATABASE_URL`.
 const prisma = criarPrismaApp();
+
+/**
+ * So a descoberta do aviso de expiracao usa este. Ver `db/prisma-sistema.ts`
+ * para por que ela nao pode usar o de cima.
+ */
+const prismaSistema = criarPrismaSistema();
+
 const provider = createLeadSourceProvider();
 const auditProvider = createSiteAuditProvider();
 
@@ -98,6 +107,81 @@ const auditWorker = new Worker<AuditJobPayload>(
   },
 );
 
+// =============================================================================
+// Aviso de expiracao das medicoes — D6, peca 3.
+// =============================================================================
+
+/**
+ * **O primeiro trabalho deste processo que ninguem pede.**
+ *
+ * Ate aqui o worker so consumia: todo job chegava por uma acao de alguem na
+ * API. Este chega por relogio, e por isso o worker passa a ser tambem
+ * **produtor** — a `Queue` abaixo e a primeira do arquivo.
+ *
+ * A alternativa era um cron fora do repositorio. Foi descartada pelo que este
+ * projeto ja pagou uma vez: um gatilho que mora fora do codigo e um gatilho que
+ * ninguem ve faltar. O CI nao existiu por semanas enquanto oito notas
+ * descreviam um ajuste nele.
+ */
+const AVISO_AGENDADOR = 'aviso-retencao-diario';
+
+/**
+ * Nove da manha, no fuso de quem le.
+ *
+ * A hora importa pouco e o fuso importa: um aviso disparado a meia-noite UTC
+ * chega no fim da tarde anterior em Sao Paulo, e "voce tem 15 dias" que aparece
+ * no dia 14 e um aviso que ja comecou errado.
+ */
+const AVISO_CRON = '0 9 * * *';
+const AVISO_TZ = 'America/Sao_Paulo';
+
+const notifyQueue = new Queue(QUEUE_NAMES.notify, { connection, prefix: QUEUE_PREFIX });
+
+const notifyWorker = new Worker(
+  QUEUE_NAMES.notify,
+  async (job: Job) => {
+    const resultado = await avisarExpiracao(prismaSistema, prisma);
+    logger.info({ jobId: job.id, ...resultado }, 'Aviso de expiracao concluido');
+    return resultado;
+  },
+  {
+    connection,
+    prefix: QUEUE_PREFIX,
+    // Uma de cada vez: e uma varredura, e duas simultaneas so produziriam
+    // colisao de chave unica uma contra a outra.
+    concurrency: 1,
+  },
+);
+
+notifyWorker.on('failed', (job, error) => {
+  logger.error(
+    { jobId: job?.id, attempt: job?.attemptsMade, error: error.message },
+    'Aviso de expiracao falhou',
+  );
+});
+
+/**
+ * Registrar o agendador e idempotente — `upsert`, e nao `add`. Reiniciar o
+ * worker nao multiplica execucoes.
+ *
+ * **Falha aqui nao derruba o processo, e a escolha e desconfortavel.** Um
+ * worker sem agendador para de avisar em silencio; um worker que nao sobe para
+ * de coletar e de auditar, que e o que o cliente paga. Entao registra-se a
+ * falha em voz alta e segue-se — e fica dito aqui que, se este aviso aparecer,
+ * a peca 4 nao pode apagar nada ate ele parar de aparecer.
+ */
+void notifyQueue
+  .upsertJobScheduler(AVISO_AGENDADOR, { pattern: AVISO_CRON, tz: AVISO_TZ })
+  .then(() => {
+    logger.info({ pattern: AVISO_CRON, tz: AVISO_TZ }, 'Aviso de expiracao agendado');
+  })
+  .catch((error: unknown) => {
+    logger.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      'NAO foi possivel agendar o aviso de expiracao — ninguem sera avisado',
+    );
+  });
+
 auditWorker.on('failed', (job, error) => {
   logger.error(
     { jobId: job?.id, attempt: job?.attemptsMade, error: error.message },
@@ -118,9 +202,12 @@ scrapeWorker.on('completed', (job) => {
 
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Encerrando worker');
-  await Promise.all([scrapeWorker.close(), auditWorker.close()]);
+  await Promise.all([scrapeWorker.close(), auditWorker.close(), notifyWorker.close()]);
+  // A fila depois dos workers: fecha-la antes deixaria quem ainda esta
+  // encerrando falando com uma conexao ja recolhida.
+  await notifyQueue.close();
   await connection.quit();
-  await prisma.$disconnect();
+  await Promise.all([prisma.$disconnect(), prismaSistema.$disconnect()]);
   process.exit(0);
 }
 
