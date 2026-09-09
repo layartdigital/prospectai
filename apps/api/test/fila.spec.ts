@@ -48,10 +48,19 @@ const TIMEOUT_MS = 30_000;
 let conexao: IORedis;
 let worker: Worker | null = null;
 
+/** Porta sem nada escutando. Serve de "Redis fora" sem desligar o de verdade. */
+const REDIS_MORTO = 'redis://127.0.0.1:1';
+
 beforeAll(() => {
   conexao = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6381', {
     maxRetriesPerRequest: null,
   });
+
+  // Erro de conexao sem ouvinte e excecao nao tratada, e no Node isso derruba o
+  // processo. Em 09/09/2026 derrubou: com o Docker fora, o `Worker` abaixo
+  // emitiu `error`, o Jest morreu inteiro e levou junto as suites que ainda nem
+  // tinham comecado — e o relatorio culpou o banco, tres arquivos longe daqui.
+  conexao.on('error', () => undefined);
 }, TIMEOUT_MS);
 
 afterAll(async () => {
@@ -72,6 +81,9 @@ describe('guarda de fila', () => {
       prefix: PREFIXO,
     });
 
+    // Mesma razao do ouvinte no `beforeAll`, e aqui e onde doeu.
+    worker.on('error', () => undefined);
+
     // `waitUntilReady` e o que separa medir do worker de medir da corrida: sem
     // ele o teste as vezes perguntaria antes de a conexao existir, e o gate
     // apareceria intermitente sem ser.
@@ -89,5 +101,28 @@ describe('guarda de fila', () => {
     // **voltar** a liberar — so entao ela esta reagindo ao worker, e nao a
     // qualquer coisa.
     await expect(exigirFilaSemWorker([FILA])).resolves.toBeUndefined();
+  }, TIMEOUT_MS);
+
+  /**
+   * O quarto caso, e o unico que nasceu de um defeito em producao de teste.
+   *
+   * O cabecalho do `fila.ts` prometia, desde o primeiro dia: "se a checagem em
+   * si falhar, ela avisa e deixa passar". **Em 09/09/2026 a promessa era
+   * falsa** — com o Redis fora a guarda pendurava ate o timeout de 30 s do
+   * Jest, e o `catch` nunca era alcancado.
+   *
+   * O tempo faz parte da afirmacao, e nao e enfeite: uma guarda que "deixa
+   * passar" depois de meio minuto ja custou a execucao. O limite generoso aqui
+   * (10 s contra um teto interno de 5 s) mede a diferenca entre desistir e
+   * pendurar, sem transformar lentidao de maquina em reprovacao.
+   */
+  it('com o Redis fora, avisa e deixa passar — sem pendurar', async () => {
+    const comecou = Date.now();
+
+    await expect(
+      exigirFilaSemWorker([FILA], REDIS_MORTO),
+    ).resolves.toBeUndefined();
+
+    expect(Date.now() - comecou).toBeLessThan(10_000);
   }, TIMEOUT_MS);
 });
