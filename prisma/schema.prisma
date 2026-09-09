@@ -210,6 +210,18 @@ enum NotificationType {
   LIMIT_NEAR
   WEEKLY_SUMMARY
   LEAD_PROFILE_UPDATED
+
+  /// Medicoes de presenca digital perto do fim da retencao — D6, peca 3.
+  ///
+  /// Quinze dias antes, e o numero tem motivo escrito na decisao: perto o
+  /// bastante para a pessoa agir, longe o bastante para caber um fim de
+  /// semana. Trinta viraria ruido que ninguem le; sete nao sobrevive a ferias.
+  ///
+  /// O aviso e por AUDITORIA, nao por checagem — pelo menor `retentionUntil`
+  /// das checagens dela, mesma escolha do `prazoDaAuditoria`. Avisar por
+  /// checagem seria ruido, e daria a peca 4 uma pergunta sem resposta unica na
+  /// hora de decidir se pode apagar.
+  RETENTION_EXPIRING
 }
 
 enum SuppressionReason {
@@ -1435,11 +1447,35 @@ model Notification {
   title     String
   body      String?
   payload   Json             @default("{}")
+  /// Identidade do que este aviso ja cobriu. Nulo em aviso que nao precisa.
+  ///
+  /// **Nao e conveniencia contra aviso repetido — e a prova que a peca 4 da D6
+  /// vai exigir do banco antes de destruir.** A decisao esta escrita:
+  /// *"o expurgo nao apaga checagem cuja notificacao nao foi registrada — ele
+  /// adia. Sem essa trava, um defeito no notificador vira perda silenciosa de
+  /// dado"*. Sem uma coluna consultavel, "ja foi avisado?" so teria como
+  /// resposta uma varredura de JSON, que alem de lenta nao serve de prova.
+  ///
+  /// A forma e a mesma do `DigitalPresenceAudit.idempotencyKey`, e pelo mesmo
+  /// motivo ja escrito la: conferir antes de gravar nao bastaria, porque entre
+  /// a leitura e a escrita cabe outro pedido. Quem grava tenta e trata a
+  /// colisao; quem decide apagar consulta.
+  ///
+  /// **Nulavel de proposito, e sem custo.** Os sete tipos que existiam antes
+  /// nao tem o que deduplicar — um `SEARCH_COMPLETED` por busca ja e unico por
+  /// natureza. E no Postgres varios NULL convivem sob indice unico, entao o
+  /// campo nao impoe nada a quem nao o usa.
+  ///
+  /// O formato e `<assunto>:<id>`, hoje so `retencao:<auditId>`. O prefixo
+  /// existe para que o proximo assunto nao colida com este por acidente.
+  dedupeKey String?
   readAt    DateTime?
   createdAt DateTime         @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  /// O que torna "avisar uma vez" garantia do banco, e nao esperanca do job.
+  @@unique([tenantId, dedupeKey])
   @@index([tenantId, readAt, createdAt])
   @@map("notifications")
 }

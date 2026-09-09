@@ -6,6 +6,7 @@ export const NOTIFICATION_TYPES = [
   'LIMIT_NEAR',
   'WEEKLY_SUMMARY',
   'LEAD_PROFILE_UPDATED',
+  'RETENTION_EXPIRING',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -17,6 +18,7 @@ export const NOTIFICATION_LABELS: Record<NotificationType, string> = {
   LIMIT_NEAR: 'Limite do plano',
   WEEKLY_SUMMARY: 'Resumo semanal',
   LEAD_PROFILE_UPDATED: 'Perfil atualizado',
+  RETENTION_EXPIRING: 'Medições expirando',
 };
 
 /**
@@ -24,6 +26,10 @@ export const NOTIFICATION_LABELS: Record<NotificationType, string> = {
  *
  * Só `SEARCH_FAILED` e `FOLLOWUP_OVERDUE` pedem atenção imediata. Pintar
  * tudo de vermelho faz o usuário parar de olhar para o vermelho.
+ *
+ * `RETENTION_EXPIRING` é `warning` e não `danger` pela mesma régua: quando ele
+ * chega, faltam quinze dias e existe uma ação simples — exportar. Vermelho
+ * seria para o dado já perdido, e nesse ponto não haveria aviso a dar.
  */
 export const NOTIFICATION_SEVERITY: Record<
   NotificationType,
@@ -36,6 +42,7 @@ export const NOTIFICATION_SEVERITY: Record<
   LIMIT_NEAR: 'warning',
   WEEKLY_SUMMARY: 'info',
   LEAD_PROFILE_UPDATED: 'info',
+  RETENTION_EXPIRING: 'warning',
 };
 
 export interface NotificationView {
