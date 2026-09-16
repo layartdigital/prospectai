@@ -725,7 +725,7 @@ export class LeadsService {
 
       const input: ScoreInput = {
         websiteStatus: lead.websiteStatus as WebsiteStatus,
-        websiteHasHttps: lead.digitalPresence?.websiteHasHttps ?? null,
+        websiteHasHttps: lead.digitalPresence?.websiteHasHttps ?? 'DESCONHECIDO',
         hasPhone: Boolean(lead.phoneE164),
         whatsappStatus: (lead.digitalPresence?.whatsappStatus ??
           'UNKNOWN') as WhatsAppStatus,

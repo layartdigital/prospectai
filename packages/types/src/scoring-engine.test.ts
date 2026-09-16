@@ -9,7 +9,7 @@ import { computeScore, type ScoreInput } from './scoring-engine';
 
 const base: ScoreInput = {
   websiteStatus: 'SITE_PROPRIO',
-  websiteHasHttps: true,
+  websiteHasHttps: 'PRESENTE',
   hasPhone: false,
   whatsappStatus: 'UNKNOWN',
   email: null,
@@ -190,5 +190,39 @@ describe('computeScore', () => {
       expect(result.value).toBe(0);
       expect(withWebsite.level).toBe(level);
     }
+  });
+
+  /**
+   * A regra 4 no motor de score — e ela nao tinha teste.
+   *
+   * O `WEBSITE_NO_HTTPS` pontua quando o site declarado usa `http://`. Antes
+   * de 16/09/2026 o campo era `boolean | null` e a regra comparava
+   * `=== false`, o que estava correto — **mas nenhum teste cobria o ramo**, e
+   * um `if (input.websiteHasHttps)` teria passado despercebido, pontuando o
+   * lead que ninguem mediu.
+   *
+   * Os tres casos vem juntos de proposito. Provar que `AUSENTE` pontua, sem
+   * provar que `DESCONHECIDO` nao pontua, deixaria passar exatamente o defeito
+   * que a regra 4 existe para impedir: tratar "nao verificado" como "nao tem".
+   */
+  describe('regra 4 — HTTPS do site', () => {
+    const motivos = (entrada: Partial<ScoreInput>): string[] =>
+      computeScore(build({ websiteStatus: 'SITE_PROPRIO', ...entrada })).reasons.map(
+        (r) => r.code,
+      );
+
+    it('AUSENTE pontua: o site declarado usa http://', () => {
+      expect(motivos({ websiteHasHttps: 'AUSENTE' })).toContain('WEBSITE_NO_HTTPS');
+    });
+
+    it('PRESENTE nao pontua: o site declarado usa https://', () => {
+      expect(motivos({ websiteHasHttps: 'PRESENTE' })).not.toContain('WEBSITE_NO_HTTPS');
+    });
+
+    it('DESCONHECIDO nao pontua — nao verificado nao e o mesmo que nao tem', () => {
+      // Se esta linha reprovar, o motor voltou a tratar ausencia de medicao
+      // como medicao negativa, e o lead recebe pontos que ninguem apurou.
+      expect(motivos({ websiteHasHttps: 'DESCONHECIDO' })).not.toContain('WEBSITE_NO_HTTPS');
+    });
   });
 });

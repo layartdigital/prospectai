@@ -5,6 +5,7 @@ import {
   classifyWebsite,
   computeScore,
   fingerprintInput,
+  sinalDeBooleano,
   toE164BR,
   toStateUf,
   whatsappStatusFromPhone,
@@ -426,7 +427,12 @@ async function upsertLead(
         hasFacebook: 'DESCONHECIDO',
         hasReviews: (raw.reviewCount ?? 0) > 0 ? 'PRESENTE' : 'AUSENTE',
         whatsappStatus: whatsappStatusFromPhone(raw.phone),
-        websiteHasHttps: website.hasHttps,
+        // `classificarWebsite` responde sobre a string da URL, e responde em
+        // tres valores: `null` quando nao ha site ou a URL nao e analisavel.
+        // O `sinalDeBooleano` e quem garante que esse `null` vire
+        // `DESCONHECIDO` e nunca `AUSENTE` — a conversao mora la porque o seed
+        // faz a mesma coisa, e duas copias divergiriam em silencio.
+        websiteHasHttps: sinalDeBooleano(website.hasHttps),
         lastCheckedAt: new Date(),
       },
     });
@@ -466,7 +472,7 @@ async function scoreLead(
 
     const scoreInput: ScoreInput = {
       websiteStatus: lead.websiteStatus,
-      websiteHasHttps: lead.digitalPresence?.websiteHasHttps ?? null,
+      websiteHasHttps: lead.digitalPresence?.websiteHasHttps ?? 'DESCONHECIDO',
       hasPhone: Boolean(lead.phoneE164),
       whatsappStatus: lead.digitalPresence?.whatsappStatus ?? 'UNKNOWN',
       email: lead.email,

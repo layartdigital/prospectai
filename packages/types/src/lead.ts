@@ -48,7 +48,8 @@ export interface LeadDigitalPresence {
   whatsappStatus: WhatsAppStatus;
   instagramUrl: string | null;
   facebookUrl: string | null;
-  websiteHasHttps: boolean | null;
+  /** Inferencia da URL, nao medicao. Ver a nota no `schema.prisma`. */
+  websiteHasHttps: SignalState;
   lastCheckedAt: string | null;
 }
 

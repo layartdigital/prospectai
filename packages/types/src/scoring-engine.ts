@@ -1,3 +1,4 @@
+import type { SignalState } from './common';
 import type { ScoreLevelName, WebsiteStatus, WhatsAppStatus } from './lead';
 import {
   DEFAULT_SCORE_WEIGHTS,
@@ -39,7 +40,7 @@ const RECENT_CONTACT_DAYS = 30;
 
 export interface ScoreInput {
   websiteStatus: WebsiteStatus;
-  websiteHasHttps: boolean | null;
+  websiteHasHttps: SignalState;
   hasPhone: boolean;
   whatsappStatus: WhatsAppStatus;
   email: string | null;
@@ -129,7 +130,10 @@ export function computeScore(
       'Site em construtor gratuito ou rede social',
       'domínio na lista de construtores gratuitos',
     );
-  } else if (input.websiteStatus === 'SITE_PROPRIO' && input.websiteHasHttps === false) {
+  } else if (input.websiteStatus === 'SITE_PROPRIO' && input.websiteHasHttps === 'AUSENTE') {
+    // `=== 'AUSENTE'`, e nao negacao de `PRESENTE`: `DESCONHECIDO` nao pontua.
+    // A comparacao anterior era `=== false` — correta, mas por disciplina de
+    // quem escreveu. Com tres estados nomeados, o compilador cobra a escolha.
     add('WEBSITE_NO_HTTPS', 'Site sem HTTPS', 'website inicia com http://');
   }
 

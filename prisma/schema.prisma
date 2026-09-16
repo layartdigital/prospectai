@@ -1044,7 +1044,28 @@ model LeadDigitalPresence {
   whatsappStatus WhatsAppStatus @default(UNKNOWN)
   instagramUrl   String?
   facebookUrl    String?
-  websiteHasHttps Boolean?
+  /// O site declarado usa `https://`. **Inferencia da URL, nao medicao.**
+  ///
+  /// Era `Boolean?` ate 16/09/2026, e foi o ultimo sinal fora do vocabulario
+  /// dos seis irmaos acima. `Boolean?` tambem tem tres estados, entao a
+  /// migracao nao ganha cardinalidade — ganha que `if (x)` deixa de compilar
+  /// como se `null` fosse `false`, que e a regra 4 virando estrutura em vez de
+  /// depender do cuidado de quem le.
+  ///
+  /// **Nao recebe invariante de proveniencia, e isso segue o criterio escrito.**
+  /// O `PROVIDER-CONTRACT-v5.md` §7.2 exclui da invariante os sinais que ja tem
+  /// proveniencia via `LeadSourceRecord` — `hasWebsite`, `hasEmail`, `hasPhone`
+  /// e `hasReviews`. Aquele documento poe este campo na outra linha da tabela,
+  /// como produzido pelo `WEBSITE_HEALTH_AUDIT`; **o codigo diz o contrario**:
+  /// quem o escreve e o `process-scrape-job`, a partir do payload do Maps, e a
+  /// evidencia que o score imprime e *"website inicia com http://"*. Pelo
+  /// proprio criterio do v5, ele pertence a linha dos quatro.
+  ///
+  /// **Quando a auditoria medir HTTPS de verdade, isso e um sinal NOVO.** O
+  /// `SiteCheck.HTTPS` responde "o site atende em HTTPS", que e outro fato — e
+  /// reaproveitar este campo trocaria o significado por baixo de um score que
+  /// ja explica a si mesmo com outra frase.
+  websiteHasHttps SignalState    @default(DESCONHECIDO)
   lastCheckedAt  DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt

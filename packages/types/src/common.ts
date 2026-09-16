@@ -27,6 +27,27 @@ export type Role = (typeof ROLES)[number];
 export const SIGNAL_STATES = ['PRESENTE', 'AUSENTE', 'DESCONHECIDO'] as const;
 export type SignalState = (typeof SIGNAL_STATES)[number];
 
+/**
+ * Converte uma determinacao de tres valores para o vocabulario de sinal.
+ *
+ * `null` e `undefined` viram `DESCONHECIDO` — nao `AUSENTE`. E a regra 4 na
+ * unica fronteira onde ela pode ser perdida por descuido.
+ *
+ * **Existe como funcao por causa dos dois chamadores.** O worker e o seed
+ * gravam o mesmo sinal a partir da mesma classificacao de URL, e duas copias
+ * da conversao concordariam no dia em que fossem escritas e parariam de
+ * concordar em silencio — mesmo motivo pelo qual o `csv.ts` da API foi
+ * extraido: *o motivo da extracao nao e reuso, e divergencia.*
+ *
+ * Nao use isto para converter qualquer booleano: `false` so vira `AUSENTE`
+ * quando a fonte mediu e a resposta foi negativa. Quando `false` significar
+ * "nao consegui medir", quem chama precisa passar `null`.
+ */
+export function sinalDeBooleano(valor: boolean | null | undefined): SignalState {
+  if (valor === null || valor === undefined) return 'DESCONHECIDO';
+  return valor ? 'PRESENTE' : 'AUSENTE';
+}
+
 export interface PaginationQuery {
   page?: number;
   pageSize?: number;
