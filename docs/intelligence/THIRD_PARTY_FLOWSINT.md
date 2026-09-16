@@ -32,16 +32,35 @@ O próprio §3 antecipa a possibilidade e instrui: *"NÃO considere a documenta�
 | Repository URL | `https://github.com/reconurge/flowsint` |
 | Release escolhida | **v1.2.10** — a mais recente que existe |
 | Data da release | 05/06/2024 |
-| Commit SHA | `PENDENTE` — exige `git ls-remote`, não executável neste ambiente |
+| Commit SHA | `12bf2937c172cd4cb71cb649b73c9e95645e0fa9` — resolvido em 09/09/2026 |
 | Branch default | `main` — 875 commits |
 
-**Ação requerida antes de qualquer integração:**
+**A referência deixou de ser flutuante em 09/09/2026.**
+
+O valor anterior era `PENDENTE`, com a razão registrada: *"exige `git ls-remote`, não executável neste ambiente"*. O ambiente mudou, o comando rodou, e a saída é a que está na tabela:
 
 ```bash
 git ls-remote --tags https://github.com/reconurge/flowsint v1.2.10
+# 12bf2937c172cd4cb71cb649b73c9e95645e0fa9  refs/tags/v1.2.10
 ```
 
-O §3.6 proíbe desenvolver contra `main` flutuante sem decisão registrada. A tag v1.2.10 é o alvo de pinning proposto.
+Isto também desfaz uma contradição entre documentos: o `IMPLEMENTATION-ROADMAP.md` §5 afirmava que o 03A fora absorvido pelo Prompt 01 porque a *"versão está pinada"* — e ela não estava. Agora está.
+
+O §3.6 proíbe desenvolver contra `main` flutuante sem decisão registrada. A tag v1.2.10 é o alvo pinado.
+
+> ⚠ **Uma afirmação desta seção ficou em dúvida, e não foi resolvida.**
+>
+> A linha "Release escolhida" diz **"a mais recente que existe"**, com data 05/06/2024. O texto do Prompt 01 §3 afirma outra coisa: que a release mais recente é a **v1.2.11**, publicada em **01/07/2026**.
+>
+> As duas não podem estar certas. Isso importa menos para a licença — que a v1.2.10 já fixa — e mais para a base do **ADR-002**, cuja crítica registrada foi exatamente essa: tabela de capabilities como `HYPOTHESIS` promovida a `Accepted`. Uma decisão de não adotar apoiada numa leitura desatualizada do que existe é frágil pelo mesmo motivo.
+>
+> Resolve-se com um comando, e ele lista tudo em vez de perguntar por uma tag:
+>
+> ```bash
+> git ls-remote --tags https://github.com/reconurge/flowsint
+> ```
+>
+> Se houver tag posterior à v1.2.10, esta seção precisa dizer **por que** a escolhida não é a mais nova — e "era a mais nova quando escrevi" é uma razão válida, desde que escrita.
 
 ---
 
