@@ -1,6 +1,6 @@
 # GATE 1 — o que falta para vender três diagnósticos com pagamento
 
-**Data:** 16/09/2026
+**Data:** 16/09/2026 · *revisto no mesmo dia, depois da leitura dos três arquivos que a §5 pedia — ver §6*
 **Origem:** `PROMPT-01-EXECUTION-REPORT.md` §5 — *"O Gate 1 — vender três diagnósticos com pagamento — desapareceu do roadmap. É o mesmo defeito que a pesquisa de mercado deste programa diagnosticou e mandou corrigir."*
 **Tipo:** medição. **Não decide prioridade nem preço.**
 
@@ -90,13 +90,37 @@ O caminho está escrito e ensaiado: `PRIMEIRO-DEPLOY-CREDENCIAIS.md` tem seis pa
 
 Quatro produtos e quatro preços na Stripe, e o `stripePriceId` de cada um gravado no `Plan` do ambiente. O schema já tem a coluna e o seed já a preserva.
 
-### 3.3 A tela
+### 3.3 A tela — ~~escrever~~ **ligar**
 
-Um caminho que leve o usuário ao `POST /billing/checkout`, e as duas páginas de retorno — sucesso e cancelamento. Mais o `POST /billing/portal` para quem já assina gerenciar.
+> **Esta seção foi reescrita pela §6.** A redação original dizia "um caminho que leve o usuário ao `POST /billing/checkout`, e as duas páginas de retorno". Estava errada por excesso: a tela existe.
 
-**A regra 7 do projeto proíbe que isso seja mock**, então a tela nasce ligada ao endpoint real ou não nasce.
+`/subscription` já mostra os quatro planos, o plano atual destacado, o consumo do período em barras e a lista de recursos por plano. O que falta são **três ligações curtas**:
 
-> Existe um `apps/web/e2e/fluxo-4-planos-e-gates.spec.ts`. Planos e gates já têm cobertura ponta a ponta; **não foi lido nesta medição**, e vale abrir antes de escrever tela nova — pode já haver mais caminho pronto do que este documento afirma.
+1. O `onClick` do botão. Ele hoje é um `<button type="button">` sem manipulador nenhum, rotulado *"Falar sobre este plano"*.
+2. As duas rotas de retorno, que **não existem** — ver 3.4, que é defeito e não falta.
+3. O caminho para o `POST /billing/portal` de quem já assina.
+
+**A regra 7 do projeto proíbe que isso seja mock**, então a ligação nasce no endpoint real ou não nasce.
+
+O rodapé da tela é honesto sobre o estado — *"A contratação ainda não é automática nesta versão"* — mas a frase seguinte envelheceu: *"o provedor de pagamento é uma abstração no código e nenhuma integração financeira foi ativada"*. A primeira metade subestima o que existe: o `stripe.provider.ts` está implementado inteiro. A segunda continua verdadeira, e é sobre chave, não sobre código.
+
+### 3.4 O retorno do pagamento cai em 404 — e isso é defeito, não lacuna
+
+`medido`. O `billing.service.ts` manda o cliente de volta para:
+
+```ts
+successUrl: this.url('/settings/subscription?checkout=ok'),
+cancelUrl:  this.url('/settings/subscription?checkout=cancelado'),
+returnUrl:  this.url('/settings/subscription'),        // portal
+```
+
+A rota do Next é `apps/web/src/app/(app)/subscription/page.tsx` → **`/subscription`**. Não há `settings/subscription` na árvore de rotas, e o `next.config.mjs` não tem `redirects` nem `rewrites` — são doze linhas, sem nenhum dos dois.
+
+**O cliente pagaria e cairia num 404.** Três linhas erradas, e nenhuma delas pode falhar hoje: nada chama o checkout, então nada exercita o retorno. É o tipo de defeito que só aparece no dia em que o dinheiro entra.
+
+Corrigir é trocar `/settings/subscription` por `/subscription` nas três — ou criar a rota no endereço que o serviço já anuncia. A segunda opção tem a vantagem de agrupar assinatura com o resto de `settings`, mas move uma tela que o e2e e o menu já alcançam; a primeira é uma linha de diff e nenhuma mudança de navegação.
+
+> **Como isso passou despercebido até aqui:** `apps/web/e2e/fluxo-4-planos-e-gates.spec.ts` cobre planos e *gates* — o que o plano libera e o que ele bloqueia, em quatro planos. Não cobre **compra**, porque não há compra. O plano é trocado por `pnpm db:plan <plano> --reset`, linha de comando. A cobertura ponta a ponta existe e é boa; ela simplesmente termina antes do ponto onde este defeito mora.
 
 ---
 
@@ -108,13 +132,49 @@ Um caminho que leve o usuário ao `POST /billing/checkout`, e as duas páginas d
 
 ---
 
-## 5. Limite desta medição
+## 5. Limite da primeira medição — e por que ele foi fechado no mesmo dia
 
-Foi medida a **superfície**: existência de modelos, rotas, capacidades, planos e chamadas do front-end, cada uma com o comando no anexo.
+A primeira versão deste documento mediu a **superfície**: existência de modelos, rotas, capacidades, planos e chamadas do front-end. Declarou o próprio limite — *"não foi lido o corpo do `billing.service.ts`, do `stripe.provider.ts` nem do e2e de planos"* — e disse que lê-los era o passo barato que podia encurtar a lista.
 
-**Não foi lido o corpo** do `billing.service.ts`, do `stripe.provider.ts` nem do e2e de planos. Que as rotas existam não prova que o fluxo esteja completo — prova que a arquitetura está, e que o que falta é ligação, não fundação.
+Foram lidos. A §6 é o resultado, e ele justifica o passo: **o limite declarado escondia um defeito e uma seção errada.**
 
-Antes de escrever tela, ler esses três é o passo barato que pode encurtar ainda mais a lista.
+---
+
+## 6. O que a leitura dos três acrescentou
+
+### 6.1 O corpo está completo — nenhum `TODO`, nenhum atalho
+
+`billing.service.ts` (21.699 bytes) e `stripe.provider.ts` (13.508 bytes) não têm lacuna de implementação. O que têm é decisão difícil já tomada e documentada:
+
+| Decisão | Onde | Por quê importa |
+|---|---|---|
+| Grava o evento **antes** de processar | `receberWebhook` | processar primeiro perderia exatamente os eventos que falharam |
+| Relê a assinatura no provedor em vez de confiar no payload | `processar` | o Stripe não garante ordem; um `updated` atrasado reativaria quem cancelou |
+| `PAST_DUE` **não** suspende | `ajustarAcesso` | é o provedor ainda tentando cobrar; suspender aí perde cliente por cartão vencido |
+| Só desfaz a suspensão que a própria cobrança criou | `MOTIVO_INADIMPLENCIA` | um pagamento não revoga suspensão por abuso |
+| Preço desconhecido **não** rebaixa o plano | `aplicarAssinatura` | o cliente não perde o recurso que acabou de comprar |
+| `incomplete_expired` → `CANCELED` | `traduzirStatus` | senão fica uma assinatura fantasma "em processamento" para sempre |
+| Lê período no item **e** na assinatura | `periodo()` | o Stripe moveu o campo na versão Basil; ler só o antigo daria `currentPeriodEnd` nulo em silêncio |
+| `amount_due` e não `total` | `traduzirFatura` | registrar o total mostraria dívida já quitada por crédito |
+
+Há também a nota no topo da classe sobre **descobrir fora, escrever dentro** — o webhook é o único caminho em que o `tenantId` é o *resultado* da consulta, não a entrada dela — e o registro de que uma política de RLS em `tenants` derrubaria todo webhook do produto. Isso está escrito lá desde antes desta medição.
+
+### 6.2 O que isso muda na lista da §3
+
+A lacuna **encolheu de três itens para dois e meio**, e ganhou um defeito:
+
+| Item | Antes desta leitura | Depois |
+|---|---|---|
+| Deploy (3.1) | gargalo | **gargalo, sem mudança** |
+| `stripePriceId` (3.2) | falta | falta — e é só configuração |
+| A tela (3.3) | "escrever a tela e duas páginas de retorno" | **a tela existe; falta o `onClick`** |
+| Retorno do checkout (3.4) | *não existia nesta lista* | **defeito: aponta para rota inexistente** |
+
+### 6.3 A frase da §1 sobrevive, com uma emenda
+
+> A API sabe cobrar. A interface não sabe pedir.
+
+Continua exata — e agora com nome próprio: a interface sabe **mostrar** (quatro planos, preço, recursos, plano atual, consumo). O que ela não sabe é **pedir**. A distância entre mostrar e pedir, medida, é um manipulador de clique e três linhas de URL.
 
 ---
 
@@ -137,4 +197,25 @@ Select-String -Path prisma\seed.ts -Pattern "code: '"
 Get-ChildItem -Recurse apps\web\src -Include *.tsx,*.ts |
   Select-String -Pattern "billing/checkout|billing/portal"
 # → vazio
+```
+
+### Anexo B — a leitura da §6
+
+```powershell
+# As URLs de retorno que o servico anuncia
+Select-String -Path apps\api\src\billing\billing.service.ts -Pattern "settings/subscription"
+# → 3 ocorrencias: successUrl, cancelUrl, returnUrl
+
+# A rota que o Next realmente publica
+Get-ChildItem -Recurse apps\web\src\app -Filter page.tsx |
+  Where-Object FullName -match "subscription"
+# → apps\web\src\app\(app)\subscription\page.tsx   ...e nada em settings\
+
+# Existe redirect ou rewrite que salve?
+Select-String -Path apps\web\next.config.mjs -Pattern "redirects|rewrites"
+# → vazio (o arquivo tem 12 linhas)
+
+# O botao da tela de planos tem manipulador?
+Select-String -Path "apps\web\src\app\(app)\subscription\page.tsx" -Pattern "onClick|Falar sobre"
+# → so o rotulo: 'Falar sobre este plano'
 ```
