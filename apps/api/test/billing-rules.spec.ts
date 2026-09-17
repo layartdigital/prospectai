@@ -1,6 +1,8 @@
+import fs from 'node:fs';
 import path from 'node:path';
 
 import type {
+  CheckoutInput,
   PaymentProvider,
   RemoteSubscription,
   RemoteSubscriptionStatus,
@@ -66,6 +68,8 @@ const MOTIVO_INADIMPLENCIA = 'billing:inadimplencia';
 
 let tenantId = '';
 let planId = '';
+/** O dono do workspace. `criarCheckout` recusa tenant sem ele. */
+let donoId = '';
 let service: BillingService;
 /** O cliente que o serviço usa. Separado do `prisma` das asserções. */
 let prismaDoServico: PrismaService;
@@ -84,11 +88,29 @@ let proximoEvento: VerifiedWebhook;
 /** Liga a falha para provar que o erro é gravado e propagado. */
 let falharAoLer = false;
 
+/**
+ * O que o serviço **pediu** ao provedor, e não o que o provedor devolveu.
+ *
+ * Até 16/09/2026 estes dois dublês descartavam a entrada e devolviam uma URL
+ * fixa. Parecia inofensivo — o que se testa aqui é a nossa reação, e a resposta
+ * do Stripe não interessa. Só que as URLs de retorno *são* entrada nossa, e
+ * descartá-las deixou passar três endereços apontando para uma rota que não
+ * existe. Guardar o pedido custa duas linhas e fecha essa classe inteira.
+ */
+let ultimoCheckout: CheckoutInput | null = null;
+let ultimoPortalReturnUrl: string | null = null;
+
 const dubleProvider: PaymentProvider = {
   name: 'stub',
   configurado: true,
-  createCheckout: async () => ({ externalId: 'cs_stub', url: 'https://stub/checkout' }),
-  createPortalSession: async () => ({ url: 'https://stub/portal' }),
+  createCheckout: async (input) => {
+    ultimoCheckout = input;
+    return { externalId: 'cs_stub', url: 'https://stub/checkout' };
+  },
+  createPortalSession: async (input) => {
+    ultimoPortalReturnUrl = input.returnUrl;
+    return { url: 'https://stub/portal' };
+  },
   getSubscription: async () => {
     if (falharAoLer) throw new Error('provedor indisponível');
     return assinaturaRemota;
@@ -138,6 +160,39 @@ async function tenant() {
   return prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
 }
 
+// ---------------------------------------------------------------------------
+// As rotas que o `apps/web` realmente publica
+// ---------------------------------------------------------------------------
+
+const RAIZ = path.resolve(__dirname, '../../..');
+const ROTEADOR = path.join(RAIZ, 'apps', 'web', 'src', 'app');
+
+/**
+ * Lê o roteador do Next e devolve os caminhos que ele serve.
+ *
+ * Lê o disco, e é de propósito. A alternativa seria uma lista de rotas escrita
+ * à mão aqui — que é mais uma cópia da verdade, pelo mesmo mecanismo que
+ * produziu o defeito que este teste existe para impedir.
+ */
+function rotasPublicadas(dir: string = ROTEADOR, prefixo = ''): string[] {
+  const rotas: string[] = [];
+
+  for (const entrada of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entrada.isDirectory()) {
+      // `(app)`, `(auth)` e `(admin)` sao grupos de layout: organizam arquivos
+      // e nao entram na URL. Somar o nome do grupo inventaria rotas que
+      // ninguem consegue abrir, e o teste passaria acreditando nelas.
+      const segmento = /^\(.+\)$/.test(entrada.name) ? '' : `/${entrada.name}`;
+      rotas.push(...rotasPublicadas(path.join(dir, entrada.name), prefixo + segmento));
+      continue;
+    }
+
+    if (entrada.name === 'page.tsx') rotas.push(prefixo || '/');
+  }
+
+  return rotas;
+}
+
 beforeAll(async () => {
   await prisma.$connect();
 
@@ -183,6 +238,29 @@ beforeAll(async () => {
   });
   tenantId = criado.id;
 
+  /**
+   * O dono existe porque `criarCheckout` recusa workspace sem ele — é o e-mail
+   * que vai para o provedor abrir a conta do cliente.
+   *
+   * Apagado à mão no `afterAll`: `User` **não** cai junto com o tenant, porque
+   * uma pessoa pertence a vários workspaces. Foi exatamente esse o resíduo que
+   * o `conferirLimpeza` encontrou no `team-rules` em 09/09, e o sufixo no
+   * e-mail é o que faz a conferência acusar se alguém esquecer de novo.
+   */
+  const dono = await prisma.user.create({
+    data: {
+      email: `cobranca-${suffix}@teste.propectai.local`,
+      name: 'Dono Cobranca',
+      // Hash literal: este arquivo nunca autentica.
+      passwordHash: 'nao-usado-neste-arquivo',
+    },
+  });
+  donoId = dono.id;
+
+  await prisma.membership.create({
+    data: { userId: donoId, tenantId, role: 'OWNER', isDefault: true },
+  });
+
   await prisma.subscription.create({
     data: { tenantId, planId, status: 'TRIALING', stripeSubscriptionId: SUB_ID },
   });
@@ -214,6 +292,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await prisma.billingEvent.deleteMany({ where: { provider: 'stub' } });
   await prisma.tenant.deleteMany({ where: { id: tenantId } });
+  // Depois do tenant: a `Membership` cai com ele, e o `User` fica.
+  await prisma.user.deleteMany({ where: { id: donoId } });
 
   if (planoOriginal) {
     await prisma.plan.update({
@@ -340,5 +420,78 @@ describe('falha de processamento', () => {
     expect(registro.error).toContain('provedor indisponível');
     expect(registro.processedAt).toBeNull();
     expect(registro.attempts).toBe(1);
+  });
+});
+
+/**
+ * O retorno do pagamento.
+ *
+ * Este bloco nasceu de um defeito real, encontrado em 16/09/2026 por leitura e
+ * não por falha: o serviço mandava o cliente de volta para
+ * `/settings/subscription` — sucesso, cancelamento e portal — e a rota que o
+ * Next publica é `/subscription`. Quem pagasse cairia num 404.
+ *
+ * O defeito sobreviveu porque nada o exercita. Nenhuma tela chama o checkout,
+ * e o e2e `fluxo-4-planos-e-gates` cobre o que cada plano libera e bloqueia
+ * trocando de plano por `pnpm db:plan` — cobertura boa, que termina antes do
+ * ponto onde este defeito mora.
+ *
+ * **Por que o teste lê o disco.** A asserção óbvia seria comparar a URL com a
+ * string `/subscription`. Isso provaria que o serviço diz o que o teste espera,
+ * e não que o destino existe — que é precisamente o erro que se cometeu. Ler o
+ * roteador do `apps/web` transforma a afirmação em "o endereço anunciado é
+ * servido por alguém", e ela quebra nas duas direções: se a URL mudar aqui, ou
+ * se a tela mudar de lugar lá.
+ *
+ * Isso acopla a suíte da API à árvore de arquivos do front. O acoplamento já
+ * existia — três URLs hard-coded apontando para uma rota do Next —, só que
+ * calado. Declará-lo num teste é o que faz alguém ser avisado quando ele se
+ * rompe.
+ */
+describe('o retorno do pagamento', () => {
+  it('aponta para rotas que o front realmente publica', async () => {
+    // O `stripeCustomerId` é o que o portal exige. Posto aqui e não herdado dos
+    // blocos acima: teste que depende da ordem de execução dos vizinhos falha
+    // no dia em que alguém rodar um `-t` sozinho.
+    await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { stripeCustomerId: CUSTOMER_ID },
+    });
+
+    await service.criarCheckout(tenantId, 'PRO');
+    await service.abrirPortal(tenantId);
+
+    expect(ultimoCheckout).not.toBeNull();
+    expect(ultimoPortalReturnUrl).not.toBeNull();
+
+    const rotas = rotasPublicadas();
+
+    // Guarda do próprio guarda: se a leitura do roteador devolver vazio — pasta
+    // movida, teste rodando de outro diretório — todas as asserções abaixo
+    // falhariam por um motivo que não é o que este teste investiga.
+    expect(rotas).toContain('/dashboard');
+
+    const anunciadas = [
+      ultimoCheckout!.successUrl,
+      ultimoCheckout!.cancelUrl,
+      ultimoPortalReturnUrl!,
+    ];
+
+    for (const url of anunciadas) {
+      // Só o caminho: `?checkout=ok` é parâmetro, não rota.
+      expect(rotas).toContain(new URL(url).pathname);
+    }
+  });
+
+  it('registra no log de auditoria que o checkout foi aberto', async () => {
+    const registros = await prisma.auditLog.findMany({
+      where: { tenantId, action: 'billing.checkout.created' },
+    });
+
+    // O par do teste acima. Sem ele, um `criarCheckout` que devolvesse a URL
+    // certa e não gravasse nada passaria — e a primeira pergunta depois de uma
+    // cobrança contestada é quem abriu o checkout, e quando.
+    expect(registros.length).toBeGreaterThan(0);
+    expect(registros[0]?.after).toMatchObject({ planCode: 'PRO', currency: 'BRL' });
   });
 });

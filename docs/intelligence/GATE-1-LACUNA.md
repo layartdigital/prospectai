@@ -106,6 +106,8 @@ O rodapé da tela é honesto sobre o estado — *"A contratação ainda não é 
 
 ### 3.4 O retorno do pagamento cai em 404 — e isso é defeito, não lacuna
 
+> **Corrigido em 16/09/2026**, no mesmo dia em que foi encontrado. As três URLs viraram a constante `TELA_DA_ASSINATURA` no `billing.service.ts`, e o teste `o retorno do pagamento › aponta para rotas que o front realmente publica` passou a ler o roteador do `apps/web` e conferir. O relato abaixo fica como estava: é o registro de um defeito que existiu, e de como ele conseguiu existir.
+
 `medido`. O `billing.service.ts` manda o cliente de volta para:
 
 ```ts

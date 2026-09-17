@@ -22,6 +22,27 @@ import { PaymentProviderFactory } from './providers/payment-provider.factory';
 const MOTIVO_INADIMPLENCIA = 'billing:inadimplencia';
 
 /**
+ * A tela para onde o cliente volta depois de pagar.
+ *
+ * Constante, e nao tres literais. Ate 16/09/2026 eram tres copias de
+ * `/settings/subscription` — sucesso, cancelamento e retorno do portal —, e a
+ * rota que o Next publica e `/subscription`
+ * (`apps/web/src/app/(app)/subscription/page.tsx`). Nao ha `redirects` nem
+ * `rewrites` no `next.config.mjs`. **Quem pagasse cairia num 404**, nas tres
+ * pontas, porque as tres estavam erradas juntas.
+ *
+ * Nada podia acusar: nenhuma tela chama o checkout, entao o retorno nunca era
+ * exercitado; e o duble de `billing-rules.spec.ts` devolvia uma URL fixa sem
+ * olhar a entrada, entao o unico teste que passava por aqui descartava
+ * justamente o campo errado.
+ *
+ * O teste `o retorno do pagamento aponta para rotas que o front publica`
+ * fechou as duas portas: le o roteador do `apps/web` e confere. Se esta tela
+ * mudar de endereco, mude esta linha — o teste acusa quem esquecer.
+ */
+const TELA_DA_ASSINATURA = '/subscription';
+
+/**
  * ## O tenant deste serviço nem sempre existe quando a chamada começa
  *
  * Duas portas de entrada, com naturezas opostas:
@@ -141,8 +162,8 @@ export class BillingService {
       email: dono.user.email,
       priceId: plan.stripePriceId,
       currency: moeda,
-      successUrl: this.url('/settings/subscription?checkout=ok'),
-      cancelUrl: this.url('/settings/subscription?checkout=cancelado'),
+      successUrl: this.url(`${TELA_DA_ASSINATURA}?checkout=ok`),
+      cancelUrl: this.url(`${TELA_DA_ASSINATURA}?checkout=cancelado`),
       taxId: tenant.taxId ? { type: 'unknown', value: tenant.taxId } : null,
       // O tenantId viaja com a assinatura para sempre. É o que liga um webhook
       // recebido daqui a um ano ao workspace certo.
@@ -178,7 +199,7 @@ export class BillingService {
 
     return this.provider.createPortalSession({
       customerId: tenant.stripeCustomerId,
-      returnUrl: this.url('/settings/subscription'),
+      returnUrl: this.url(TELA_DA_ASSINATURA),
     });
   }
 
