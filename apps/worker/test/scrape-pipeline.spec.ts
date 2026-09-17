@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type { LeadSourceProvider } from '@propectai/types';
+import type { LeadSourceProvider, RawLead } from '@propectai/types';
 import dotenv from 'dotenv';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -51,6 +51,58 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 const admin = criarPrismaAdmin();
 const prisma = criarPrismaApp();
 const suffix = Date.now().toString(36);
+
+/**
+ * As unicas chaves que podem chegar ao `LeadSourceRecord.payload`.
+ *
+ * O tipo `Record<keyof RawLead, true>` e o ponto do desenho, e nao enfeite:
+ * se alguem acrescentar um campo a `RawLead` e esquecer de acrescenta-lo
+ * aqui, **o `typecheck` reprova**. A lista deixa de ser copia a mao da
+ * interface e passa a ser derivada dela em tempo de compilacao.
+ *
+ * Isso importa porque a linha que grava e
+ * `payload: raw as unknown as Prisma.InputJsonValue`, e `as unknown as`
+ * desliga a checagem de tipo. Do lado do banco, o que protegia a regra 6 era
+ * convencao mais comentario: o `toRawLead` do provider monta o objeto campo a
+ * campo, sem espalhamento. No dia em que alguem escrever
+ * `return { ...entry, title: ... }` — que e a forma natural de escrever isso —
+ * o compilador nao reclama, porque tipo nao remove chave em tempo de
+ * execucao, e o dado pessoal passa a ser persistido em silencio.
+ *
+ * Sao 21 campos.
+ */
+const CHAVES_DE_RAWLEAD: Record<keyof RawLead, true> = {
+  title: true,
+  category: true,
+  phone: true,
+  email: true,
+  website: true,
+  addressFull: true,
+  street: true,
+  neighborhood: true,
+  city: true,
+  stateName: true,
+  postalCode: true,
+  latitude: true,
+  longitude: true,
+  reviewCount: true,
+  reviewRating: true,
+  openHours: true,
+  timezone: true,
+  placeId: true,
+  cid: true,
+  sourceUrl: true,
+  status: true,
+};
+
+/**
+ * `Set` e nao o objeto acima, e a diferenca nao e estetica.
+ *
+ * `'toString' in CHAVES_DE_RAWLEAD` e `true` — a busca com `in` sobe pela
+ * cadeia de prototipos. Um payload com chave chamada `toString`,
+ * `constructor` ou `valueOf` passaria pela conferencia sem ser vista.
+ */
+const AUTORIZADAS = new Set(Object.keys(CHAVES_DE_RAWLEAD));
 
 const REQUESTED = 10;
 
@@ -322,6 +374,59 @@ describe('regra 5.4 — nenhum lead concluído sem score explicado', () => {
       take: 50,
     });
 
+    /**
+     * A linha que faltava.
+     *
+     * Até 17/09/2026 este teste era um `for` sobre `records` com as asserções
+     * dentro e nada fora. **Em lista vazia o laço não executa e o teste
+     * passa** — verde por não ter olhado nada. É o mesmo defeito que o e2e de
+     * planos descreve sobre si mesmo: teste condicional que passa na ausência
+     * do que deveria checar aparece como cobertura no relatório, e é pior que
+     * teste nenhum, porque desencoraja quem faria a pergunta de novo.
+     *
+     * Hoje há linhas — o `MockLeadSourceProvider` roda o pipeline de verdade.
+     * O ponto não é que falte: é que nada garantia, e no dia em que a fixture
+     * mudasse o teste emudeceria sem ficar vermelho.
+     */
+    expect(records.length).toBeGreaterThan(0);
+
+    const foraDoContrato = new Set<string>();
+
+    for (const record of records) {
+      const conteudo = record.payload;
+
+      // Objeto, e não lista nem escalar. Um payload que virasse array faria
+      // `Object.keys` devolver índices, e a conferência abaixo passaria
+      // achando que `0`, `1`, `2` são chaves desconhecidas — ou, pior, um
+      // escalar daria `{}` e passaria calado.
+      expect(
+        conteudo !== null && typeof conteudo === 'object' && !Array.isArray(conteudo),
+      ).toBe(true);
+
+      for (const chave of Object.keys(conteudo as object)) {
+        if (!AUTORIZADAS.has(chave)) foraDoContrato.add(chave);
+      }
+    }
+
+    /**
+     * Lista de autorizados, e não de proibidos.
+     *
+     * A versão anterior procurava dois nomes conhecidos, `user_reviews` e
+     * `owner`. Isso exige adivinhar como o campo indesejado vai se chamar:
+     * `reviewer`, `author`, `profile_url` ou `photos_uploaded_by` passariam
+     * inteiros. Afirmar o conjunto autorizado não depende de adivinhação — o
+     * que não está em `RawLead` reprova, tenha o nome que tiver.
+     */
+    expect([...foraDoContrato].sort()).toEqual([]);
+
+    /**
+     * A varredura por texto continua, e não é redundante com a de cima.
+     *
+     * A conferência de chaves só enxerga o primeiro nível. Se um dado pessoal
+     * entrasse aninhado dentro de uma chave autorizada — digamos um
+     * `openHours` que trouxesse junto quem publicou o horário —, o conjunto de
+     * chaves de topo continuaria correto. Esta olha o documento inteiro.
+     */
     for (const record of records) {
       const serialized = JSON.stringify(record.payload ?? {});
       expect(serialized).not.toContain('user_reviews');
