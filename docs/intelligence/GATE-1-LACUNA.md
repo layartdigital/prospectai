@@ -76,15 +76,47 @@ A auditoria de presença digital tem verificação nativa, nove categorias, evid
 
 ## 3. O que falta, em ordem de dependência
 
-### 3.1 O deploy — e ele deixou de estar corretamente adiado
+### 3.1 ~~O deploy~~ **O nome de domínio**
 
-A D5 vem sendo classificada como *"bloqueada por ausência de produção, e isso está correto"*. **Não está mais.**
+> **Reescrita em 17/09/2026, depois de medir o servidor.** Esta seção dizia que a D5 *"deixou de estar corretamente adiada"* e que era *"o gargalo do Gate 1"*, por **ausência de produção**. Errado em três camadas, e cada uma só apareceu quando eu parei de ler documento e fui olhar a máquina. O texto original está preservado ao final da seção.
 
-O checkout da Stripe não termina no navegador: ela confirma o pagamento chamando **de volta** um endereço público. Sem um ambiente publicado, o `POST /billing/webhook` não tem endereço, e sem ele nenhuma assinatura muda de estado — o cliente paga e o sistema não fica sabendo.
+O que a medição encontrou em `108.174.144.216`:
 
-**A D5 não é mais uma dependência adiada. É o gargalo do Gate 1.**
+| | |
+|---|---|
+| Máquina | existe — Ubuntu 24.04.4 |
+| Deploy do PropectAI | **existe** — sete containers no ar desde 05–11/08/2026 |
+| Aplicação | **viva** — `/api/v1/health` responde `database ok, redis ok, scraper ok` |
+| nginx com TLS no host | existe, escutando em `0.0.0.0:443` |
+| vhost `app.prospectai.com.br` | existe, com `proxy_pass` para o gateway |
+| **DNS para esse nome** | **não existe** |
 
-O caminho está escrito e ensaiado: `PRIMEIRO-DEPLOY-CREDENCIAIS.md` tem seis passos em ordem obrigatória, e o CI executa a mesma sequência a cada push — criar banco e dono, migrations, senha aos três papéis, quatro variáveis, semear, verificar.
+Não faltava produção. Faltava — e falta — **um nome**.
+
+A cadeia toda está montada e termina no vazio: o vhost aponta para o gateway, o gateway para a aplicação, a aplicação responde. Mas `app.prospectai.com.br` não resolve para lugar nenhum, o certificado em `ssl-certificates/` é o autoassinado que o CloudPanel gera ao criar o site, e o acesso real acontece por `http://108.174.144.216:3102` — que entra pelo gateway publicado e passa **por fora** do nginx do host.
+
+**Por que isso trava o Gate 1, e não é detalhe de infraestrutura:**
+
+A Stripe não entrega webhook em endereço IP e não aceita certificado autoassinado, então o `POST /billing/webhook` continua sem endereço alcançável. Mas o problema maior é anterior ao webhook: **ninguém paga numa página em `http://108.174.144.216:3102`**. Sem nome e sem cadeado, o cliente desiste antes do checkout. O Gate 1 é vender, e a venda morre na barra de endereço.
+
+**O tamanho disso:** um registro no registro.br, um apontamento A para o IP, e a emissão do certificado pelo CloudPanel. O vhost já está escrito esperando o nome.
+
+O segundo item, separado do primeiro: o que está no ar é de agosto, e **não tem nada** do que foi feito desde então — RLS, os três papéis, a D6, o `SignalState`, a correção do retorno do checkout, o FREE com uma auditoria. A sequência de atualização está medida e escrita em `ATUALIZAR-AMBIENTE-ONLINE.md`, com um risco em destaque: aplicar as migrations sem acrescentar `DATABASE_URL_APP` instala 34 políticas e deixa a aplicação contornando todas elas, em silêncio.
+
+<details>
+<summary>O texto original desta seção, de 16/09/2026</summary>
+
+> A D5 vem sendo classificada como *"bloqueada por ausência de produção, e isso está correto"*. **Não está mais.**
+>
+> O checkout da Stripe não termina no navegador: ela confirma o pagamento chamando **de volta** um endereço público. Sem um ambiente publicado, o `POST /billing/webhook` não tem endereço, e sem ele nenhuma assinatura muda de estado — o cliente paga e o sistema não fica sabendo.
+>
+> **A D5 não é mais uma dependência adiada. É o gargalo do Gate 1.**
+>
+> O caminho está escrito e ensaiado: `PRIMEIRO-DEPLOY-CREDENCIAIS.md` tem seis passos em ordem obrigatória, e o CI executa a mesma sequência a cada push — criar banco e dono, migrations, senha aos três papéis, quatro variáveis, semear, verificar.
+
+A última frase é a que mais enganou, e é minha: o `PRIMEIRO-DEPLOY-CREDENCIAIS.md` abre declarando **"Escopo: só o banco (…) não é um checklist de deploy completo — não fala de DNS, TLS, orquestração"**. Eu li o sumário dos seis passos e relatei como se fosse o caminho inteiro, contra o aviso escrito na primeira linha do documento.
+
+</details>
 
 ### 3.2 A conta na Stripe e os `stripePriceId`
 
