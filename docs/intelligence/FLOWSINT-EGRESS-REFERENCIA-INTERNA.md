@@ -165,7 +165,9 @@ E há uma decisão anterior aos dois: **o 03A §75 (Capability Gate) decide *se*
 
 **Segunda, e é a correção.** Eu disse, ao ler o 03B, que este achado *"muda a aritmética que o ADR-002 fez"*. **Está errado, e a imprecisão importa.** A aritmética do ADR-002 é de custo operacional — Neo4j, Celery, FastAPI e um Redis adicional contra um teto de 4 serviços — e nada aqui remove um serviço dessa conta. O que este adendo muda é outra coisa: **o custo estimado do trabalho de isolamento**, que o 03B trata como projeto inteiro e que aqui tem precedente aproveitável. São dois números diferentes, e misturá-los é o mesmo tipo de erro que esta semana já produziu duas vezes — ler uma coisa e relatá-la como outra.
 
-O `ADR-002` segue válido pelos motivos que ele mesmo dá: a única área de força do Flowsint que o produto não cobre é a de dados pessoais, e é a que a regra 6 proíbe. Este documento não reabre o ADR-002. Reabri-lo depende dos gatilhos que ele lista — e um deles, o nº 2 (*"o projeto cortar release nova com suíte de testes completa"*), disparou parcialmente e está registrado à parte.
+O `ADR-002` segue válido pelos motivos que ele mesmo dá: a única área de força do Flowsint que o produto não cobre é a de dados pessoais, e é a que a regra 6 proíbe. Este documento não reabre o ADR-002. Reabri-lo depende dos gatilhos que ele lista — e um deles, o nº 2 (*"o projeto cortar release nova com suíte de testes completa"*), disparou **pela metade**: releases novas existem (v1.2.11 de 01/07/2026, v1.2.12 de 26/08/2026), a suíte continua declarada incompleta no README da v1.2.12. A medição está no `THIRD_PARTY_FLOWSINT.md` §1 e a consequência na seção "Correção de fato" do `ADR-002`.
+
+> Quando esta seção foi escrita, no dia 17/09/2026, ela dizia que o gatilho *"está registrado à parte"* — **e não estava**. Era promessa escrita como fato, que é o defeito que o §8 abaixo acusa. O registro foi feito no mesmo dia, e esta frase substituiu a anterior.
 
 ---
 
