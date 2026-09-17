@@ -120,6 +120,20 @@ async function seedPlans(): Promise<Map<string, string>> {
         priceCents: plan.priceCents,
         pricesByCurrency: { BRL: plan.priceCents },
         sortOrder: plan.sortOrder,
+        // `limits` FICA no update, e desde 17/09/2026 isso é escolha escrita,
+        // não descuido.
+        //
+        // Enquanto não existir a tela do Master, esta linha é o único caminho
+        // para mudar um limite de plano num banco já semeado: **nenhuma rota
+        // da API escreve em `Plan.limits`** — o painel de admin lista tenants,
+        // troca o plano de um tenant, suspende e reativa, e mais nada. Tirá-la
+        // daqui hoje deixaria SQL à mão como alternativa.
+        //
+        // **No dia em que a tela do Master existir, esta linha tem de sair**,
+        // pela mesma razão do `stripePriceId` logo abaixo: o primeiro deploy
+        // depois de um ajuste operacional reverteria o ajuste em silêncio, e
+        // limite de plano é dinheiro. A nota longa está em
+        // `packages/types/src/auth.ts`, sobre o `PLAN_LIMITS`.
         limits: PLAN_LIMITS[plan.code] as unknown as Prisma.InputJsonValue,
         // `stripePriceId` fica de fora do update de propósito: ele é
         // configurado uma vez por ambiente e o seed roda muitas. Sobrescrever
