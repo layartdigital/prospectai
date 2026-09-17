@@ -46,6 +46,30 @@ function UsageBar({
   );
 }
 
+/**
+ * A linha de diagnósticos do card.
+ *
+ * Existe desde 17/09/2026, e a ausência dela tinha consequência comercial. O
+ * diagnóstico de presença digital é o que o Gate 1 vende, e **nenhum dos quatro
+ * cards dizia quantos o plano inclui** — as sete linhas iam de leads a
+ * usuários e pulavam exatamente o produto.
+ *
+ * Dois dias antes, o FREE havia caído de três auditorias por mês para uma
+ * (`bb7f3a9`), justamente para pôr o alvo do Gate 1 do outro lado do pagamento.
+ * **Essa diferença não chegava a quem decide pagar.** Limite que o banco aplica
+ * e a vitrine não conta não muda decisão nenhuma: é restrição sentida como
+ * defeito em vez de razão para assinar.
+ *
+ * O singular é tratado à mão porque o FREE é precisamente o caso de um, e
+ * "1 diagnósticos" faz a página parecer gerada em vez de escrita.
+ */
+function rotuloDiagnosticos(auditsPerMonth: number): string {
+  if (auditsPerMonth <= 0) return 'Diagnóstico de presença digital';
+
+  const substantivo = auditsPerMonth === 1 ? 'diagnóstico' : 'diagnósticos';
+  return `${formatInteger(auditsPerMonth)} ${substantivo} de presença digital`;
+}
+
 export default async function SubscriptionPage() {
   const data = await serverApi<SubscriptionResponse>('/subscription');
 
@@ -118,6 +142,12 @@ export default async function SubscriptionPage() {
                 label={`${formatInteger(plan.limits.searchesPerMonth)} buscas por mês`}
                 on
               />
+              {/* Depois das buscas e antes da IA de propósito: a ordem conta a
+                  história do uso — descobrir, diagnosticar, abordar. */}
+              <Feature
+                label={rotuloDiagnosticos(plan.limits.auditsPerMonth)}
+                on={plan.limits.auditsPerMonth > 0}
+              />
               <Feature
                 label={
                   plan.limits.aiGenerationsPerMonth > 0
@@ -161,7 +191,15 @@ export default async function SubscriptionPage() {
       </div>
 
       {/* Honestidade sobre o estado real do produto vale mais do que um
-          botão de compra que não compra nada. */}
+          botão de compra que não compra nada.
+
+          Nota de 17/09/2026: este parágrafo está certo **por configuração, não
+          por ausência de código**. A integração existe — `POST /billing/checkout`,
+          `/portal`, `/webhook` e um `stripe.provider.ts` inteiro. Quem decide é
+          `PAYMENT_PROVIDER`, cujo padrão é `mock`. No dia em que alguém puser
+          `stripe` nessa variável, este texto passa a mentir e nada aqui avisa.
+          O conserto é o botão e este parágrafo dependerem do mesmo campo vindo
+          da API, e é a próxima mudança desta tela. */}
       <p className="mt-4 rounded-card border border-dashed border-line px-4 py-3 text-xs text-muted">
         A contratação ainda não é automática nesta versão. O provedor de
         pagamento é uma abstração no código e nenhuma integração financeira foi

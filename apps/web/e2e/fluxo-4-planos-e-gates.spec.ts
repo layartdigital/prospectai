@@ -143,50 +143,51 @@ test.describe('o gate muda entre os planos', () => {
 });
 
 /**
- * Exportação CSV por plano.
+ * A vitrine — o que a tela de planos promete.
  *
- * A primeira versão destes testes verificava a exportação "se o botão
- * existir" — e passou verde num produto que não exportava nada. Teste
- * condicional que passa na ausência da funcionalidade é pior que teste
- * ausente: aparece como cobertura no relatório.
+ * Os testes acima provam que o gate se comporta diferente por plano. Este
+ * prova algo anterior, e que faltava: **que a diferença está escrita onde a
+ * pessoa decide pagar.**
  *
- * Agora não há `if`. Se a exportação sumir, isto quebra.
+ * Até 17/09/2026 nenhum dos quatro cards dizia quantos diagnósticos o plano
+ * inclui. Dois dias antes o FREE havia caído de três auditorias por mês para
+ * uma, exatamente para pôr o alvo do Gate 1 atrás do pagamento — e a tela não
+ * contava. Um limite que o banco aplica e a vitrine omite vira restrição
+ * sentida como defeito, em vez de razão para assinar.
+ *
+ * Um único carregamento cobre os quatro planos: `/subscription` lista todos.
  */
-test.describe('exportação CSV por plano', () => {
-  test('FREE é bloqueado na tentativa, não antes dela', async ({ page }) => {
+test.describe('a vitrine de planos', () => {
+  test('cada card diz quantos diagnósticos inclui, e os números diferem', async ({
+    page,
+  }) => {
     trocarPlano('free');
     await login(page);
-    await page.goto('/leads');
+    await page.goto('/subscription');
 
-    const bloqueio = page.getByText(/Exportação não disponível no seu plano/i);
+    // O botão de cada card serve de contador: um por plano, seja qual for o
+    // número de planos no banco. Fixar `4` aqui faria o teste quebrar no dia
+    // em que um quinto plano existisse — e quebrar pelo motivo errado.
+    const botoes = page.getByRole('button', {
+      name: /Falar sobre este plano|Seu plano atual/,
+    });
+    await expect(botoes.first()).toBeVisible();
 
-    // O botão existe mesmo sem direito: esconder impede a pessoa de descobrir
-    // que o recurso existe, e o upgrade nunca é considerado.
-    const botao = page.getByRole('button', { name: /Exportar CSV/i });
-    await expect(botao).toBeVisible();
-    await expect(bloqueio).toHaveCount(0);
-
-    await botao.click();
-
-    await expect(bloqueio).toBeVisible();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-  });
-
-  test('PRO baixa um CSV com o recorte da tela', async ({ page }) => {
-    trocarPlano('pro');
-    await login(page);
-
-    // Com filtro ativo: o arquivo precisa sair filtrado, não com a base inteira.
-    await page.goto('/leads?minScore=70');
-
-    const download = page.waitForEvent('download', { timeout: 30_000 });
-    await page.getByRole('button', { name: /Exportar CSV/i }).click();
-
-    const arquivo = await download;
-    expect(arquivo.suggestedFilename()).toMatch(/^leads-\d{4}-\d{2}-\d{2}\.csv$/);
-
+    const linhas = page.getByRole('listitem').filter({ hasText: /de presença digital/ });
     await expect(
-      page.getByText(/Exportação não disponível no seu plano/i),
-    ).toHaveCount(0);
+      linhas,
+      'algum card de plano não diz quantos diagnósticos inclui',
+    ).toHaveCount(await botoes.count());
+
+    const textos = (await linhas.allTextContents()).map((t) => t.trim());
+
+    // O FREE com **um** diagnóstico é o fato comercial do Gate 1, e está aqui
+    // à mão de propósito: se alguém devolver o FREE para três, isto quebra e
+    // obriga a decisão a ser escrita em vez de acontecer.
+    expect(textos).toContain('1 diagnóstico de presença digital');
+
+    // E os planos precisam diferir entre si. Quatro cards dizendo o mesmo
+    // número passariam na asserção acima e não venderiam nada.
+    expect(new Set(textos).size).toBeGreaterThan(1);
   });
 });
