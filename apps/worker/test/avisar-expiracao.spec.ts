@@ -8,6 +8,7 @@ import { criarPrismaApp } from '../src/db/prisma-app';
 import { criarPrismaSistema } from '../src/db/prisma-sistema';
 import { AVISO_ANTECEDENCIA_DIAS, chaveDeAviso } from '../src/pipeline/audit-decisoes';
 import { avisarExpiracao } from '../src/pipeline/avisar-expiracao';
+import { aoLimpar, conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -142,18 +143,19 @@ beforeAll(async () => {
 }, TIMEOUT_HOOK_MS);
 
 afterAll(async () => {
-  // Alto de proposito, ao contrario das outras suites deste diretorio: limpeza
-  // que falha em silencio deixa lixo que reprova outra suite, longe daqui.
-  // Ver `apps/api/test/limpeza.ts`.
+  // Alto desde a origem, ao contrario das outras suites deste diretorio. Em
+  // 17/09/2026 as outras foram alinhadas, e a versao a mao que morava aqui deu
+  // lugar ao `aoLimpar`: mesmo comportamento, uma implementacao so.
   for (const id of [tenantA, tenantB]) {
     if (!id) continue;
-    await admin.tenant.delete({ where: { id } }).catch((erro: unknown) => {
-      console.error(`[limpeza] FALHOU: tenant ${id}`, erro);
-      throw erro;
-    });
+    await admin.tenant.delete({ where: { id } }).catch(aoLimpar(`tenant ${id}`));
   }
 
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(admin, sufixo);
   await Promise.all([admin.$disconnect(), sistema.$disconnect(), app.$disconnect()]);
+  if (sobras !== null) throw new Error(sobras);
 }, TIMEOUT_HOOK_MS);
 
 describe('aviso de expiracao', () => {

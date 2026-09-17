@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { criarPrismaApp } from '../src/db/prisma-app';
 import { processAuditJob } from '../src/pipeline/process-audit-job';
+import { aoLimpar, conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 import { MockSiteAuditProvider } from '../src/providers/site-audit/mock.provider';
 
@@ -123,9 +124,14 @@ beforeAll(async () => {
 }, TIMEOUT_HOOK_MS);
 
 afterAll(async () => {
-  if (tenantA) await admin.tenant.delete({ where: { id: tenantA } }).catch(() => {});
-  if (tenantB) await admin.tenant.delete({ where: { id: tenantB } }).catch(() => {});
+  if (tenantA) await admin.tenant.delete({ where: { id: tenantA } }).catch(aoLimpar('tenant A'));
+  if (tenantB) await admin.tenant.delete({ where: { id: tenantB } }).catch(aoLimpar('tenant B'));
+
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(admin, sufixo);
   await Promise.all([admin.$disconnect(), prisma.$disconnect()]);
+  if (sobras !== null) throw new Error(sobras);
 }, TIMEOUT_HOOK_MS);
 
 describe('caminho feliz', () => {

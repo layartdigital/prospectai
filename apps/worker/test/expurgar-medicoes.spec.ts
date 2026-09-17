@@ -8,6 +8,7 @@ import { criarPrismaApp } from '../src/db/prisma-app';
 import { criarPrismaSistema } from '../src/db/prisma-sistema';
 import { chaveDeAviso } from '../src/pipeline/audit-decisoes';
 import { expurgarMedicoes } from '../src/pipeline/expurgar-medicoes';
+import { aoLimpar, conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -112,12 +113,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (tenantId) {
-    await admin.tenant.delete({ where: { id: tenantId } }).catch((erro: unknown) => {
-      console.error(`[limpeza] FALHOU: tenant ${tenantId}`, erro);
-      throw erro;
-    });
+    await admin.tenant.delete({ where: { id: tenantId } }).catch(aoLimpar('tenant'));
   }
+
+  // Ver `conferirLimpeza`: devolve o relato, nao lanca — para o fechamento
+  // abaixo acontecer antes da falha.
+  const sobras = await conferirLimpeza(admin, sufixo);
   await Promise.all([admin.$disconnect(), sistema.$disconnect(), app.$disconnect()]);
+  if (sobras !== null) throw new Error(sobras);
 }, TIMEOUT_HOOK_MS);
 
 describe('expurgo das medicoes', () => {
