@@ -1,6 +1,6 @@
 # GATE 1 — o que falta para vender três diagnósticos com pagamento
 
-**Data:** 16/09/2026 · *revisto no mesmo dia, depois da leitura dos três arquivos que a §5 pedia — ver §6*
+**Data:** 16/09/2026 · *revisto no mesmo dia, depois da leitura dos três arquivos que a §5 pedia — ver §6* · **§3.1 reescrita e §7 acrescentada em 17/09/2026**
 **Origem:** `PROMPT-01-EXECUTION-REPORT.md` §5 — *"O Gate 1 — vender três diagnósticos com pagamento — desapareceu do roadmap. É o mesmo defeito que a pesquisa de mercado deste programa diagnosticou e mandou corrigir."*
 **Tipo:** medição. **Não decide prioridade nem preço.**
 
@@ -19,6 +19,10 @@ Get-ChildItem -Recurse apps\web\src -Include *.tsx,*.ts |
 ```
 
 O que se supunha ser uma lacuna de fundação é uma lacuna de superfície — e ela está encostada numa dependência que vinha sendo tratada como corretamente adiada.
+
+> **Emenda de 17/09/2026, ao fim do dia — e é a mais importante deste documento.**
+>
+> A frase acima continua exata e continua pequena demais. A interface não saber pedir é o quarto elo de uma corrente de quatro, e os três primeiros não são código. **O produto não tem nenhuma porta pela qual um cliente entre** — nem pagamento, nem contato, nem endereço. A §7 mede a corrente inteira e registra a consequência que ela tem sobre o próprio enunciado do Gate 1.
 
 ---
 
@@ -136,6 +140,14 @@ Quatro produtos e quatro preços na Stripe, e o `stripePriceId` de cada um grava
 
 O rodapé da tela é honesto sobre o estado — *"A contratação ainda não é automática nesta versão"* — mas a frase seguinte envelheceu: *"o provedor de pagamento é uma abstração no código e nenhuma integração financeira foi ativada"*. A primeira metade subestima o que existe: o `stripe.provider.ts` está implementado inteiro. A segunda continua verdadeira, e é sobre chave, não sobre código.
 
+> **Atualização de 17/09/2026 — metade feita, metade recusada de propósito.**
+>
+> **Feito (`a646470`):** a tela passou a dizer **quantos diagnósticos cada plano inclui**. Nenhum dos quatro cards dizia, e isso era pior que uma omissão: dois dias antes o FREE havia caído de três auditorias para uma, justamente para pôr o alvo do Gate 1 atrás do pagamento, e a mudança existia só no banco. Limite que o produto aplica e a vitrine não conta vira restrição sentida como defeito, em vez de razão para assinar. Tem guarda no `fluxo-4-planos-e-gates.spec.ts`, falsificado antes do commit.
+>
+> **Recusado: o `onClick`.** A ligação foi projetada — botão que muda de papel conforme o provedor ativo consiga ou não cobrar, com o rodapé saindo do mesmo campo em vez de ser texto fixo — e **não foi construída**. A razão está na §7: o botão precisaria levar a algum lugar, e não existe lugar nenhum. Um `Falar sobre este plano` que abrisse um `mailto:` não lido ou um WhatsApp inexistente seria pior que o botão inerte de hoje — o inerte não promete atendimento.
+>
+> O que a mudança de hoje deixou no lugar do código foi um comentário, no `page.tsx`, exatamente onde quem for ligar o Stripe vai ler: **o rodapé está certo por configuração, não por ausência de código.** `PAYMENT_PROVIDER` tem padrão `mock`; no minuto em que alguém escrever `stripe` ali, a tela passa a mentir e nada avisa.
+
 ### 3.4 O retorno do pagamento cai em 404 — e isso é defeito, não lacuna
 
 > **Corrigido em 16/09/2026**, no mesmo dia em que foi encontrado. As três URLs viraram a constante `TELA_DA_ASSINATURA` no `billing.service.ts`, e o teste `o retorno do pagamento › aponta para rotas que o front realmente publica` passou a ler o roteador do `apps/web` e conferir. O relato abaixo fica como estava: é o registro de um defeito que existiu, e de como ele conseguiu existir.
@@ -163,6 +175,8 @@ Corrigir é trocar `/settings/subscription` por `/subscription` nas três — ou
 - **Se o Gate 1 é a próxima prioridade.** O relatório de 22/08 diz que ele sumiu do roadmap e trata isso como defeito. Este documento confirma que o custo de trazê-lo de volta é baixo. Priorizar continua sendo decisão de produto.
 - **Se vende por assinatura ou por diagnóstico avulso.** Os quatro planos existem; "três diagnósticos com pagamento" pode ser assinatura do plano Base ou venda unitária, e o modelo hoje suporta a primeira.
 - **Onde hospedar.** O `PRIMEIRO-DEPLOY-CREDENCIAIS.md` §1 abre com *"uma exigência que elimina opções"* — e é ali que essa conversa começa.
+- **Acrescentado em 17/09/2026 — e passou a ser a primeira da lista: o nome do projeto.** Ele pode mudar, e enquanto não mudar ou for confirmado, o domínio não se registra e a conta de pagamento não se abre. Ver §7.
+- **Acrescentado em 17/09/2026: se o Gate 1 será fechado por checkout ou à mão.** As duas satisfazem o enunciado; provam coisas diferentes e custam ordens de grandeza diferentes. Ver §7.2.
 
 ---
 
@@ -209,6 +223,56 @@ A lacuna **encolheu de três itens para dois e meio**, e ganhou um defeito:
 > A API sabe cobrar. A interface não sabe pedir.
 
 Continua exata — e agora com nome próprio: a interface sabe **mostrar** (quatro planos, preço, recursos, plano atual, consumo). O que ela não sabe é **pedir**. A distância entre mostrar e pedir, medida, é um manipulador de clique e três linhas de URL.
+
+---
+
+## 7. A corrente — por que o Gate 1 não anda
+
+Escrita em 17/09/2026, depois de perguntar ao dono do projeto por qual canal um cliente falaria com ele hoje. A resposta foi: **"nenhum existe de verdade hoje... tudo é protótipo/rascunho."**
+
+Essa frase reorganiza o documento inteiro. As seções 3.1 a 3.4 tratam cada ausência como um item de lista, e elas não são uma lista: **são uma corrente, e três dos quatro elos não são código.**
+
+| # | Elo | Estado | Depende de | Custo |
+|---|---|---|---|---|
+| 1 | **O nome do projeto** | **não decidido** — pode mudar, por causa das funcionalidades novas em estudo | nada. É decisão | uma decisão |
+| 2 | **O domínio** | ausente. O vhost `app.prospectai.com.br` existe e o nome não resolve | elo 1 — registrar um domínio que o projeto vai abandonar é jogar fora | registro + apontamento A + certificado |
+| 3 | **A conta de pagamento** | ausente. `PAYMENT_PROVIDER=mock`; sem `STRIPE_SECRET_KEY` | elo 2 — a Stripe não entrega webhook em IP nem aceita certificado autoassinado | cadastro + 4 produtos + 4 preços + `stripePriceId` no `Plan` |
+| 4 | **Um canal de contato** | **ausente** — nem e-mail monitorado, nem WhatsApp, nem tela de contato | do elo 1 se for `@dominio`; **de nada**, se for um endereço que já exista | minutos |
+
+**A ordem importa mais que os custos.** Cada elo espera o anterior, e o primeiro é uma decisão de produto que ainda não foi tomada. É por isso que o Gate 1 não se move, e a explicação não é de engenharia: **a lacuna que este documento vinha medindo em código estava sempre abaixo do elo que trava tudo.**
+
+### 7.1 O que isso diz sobre construir mais tela
+
+A ligação do botão foi projetada e recusada hoje (§3.3), e a regra que isso estabelece vale para o que vier: **nenhuma tela deste fluxo deve prometer o que o mundo não cumpre.** Um botão que abre um canal inexistente não é um esboço — é uma afirmação falsa, entregue ao cliente, no momento em que ele decidiu confiar.
+
+A proteção que *estaria* certa em outro contexto — um campo no `SubscriptionResponse` dizendo se o ambiente consegue cobrar, para o rodapé e o botão saírem da mesma fonte — **também foi recusada, e por um motivo que é a mesma doença do outro lado**: ela protege contra uma mentira que só pode acontecer quando alguém ligar `PAYMENT_PROVIDER=stripe`, o que exige o elo 3, que exige o 2, que exige o 1. Guarda para cenário que ainda não consegue ocorrer é construção adiantada — precisamente o que o `ADR-004` recusou quando escreveu *"produção não existe — e é por isso que este ADR não bloqueia F0"*.
+
+### 7.2 O enunciado do Gate 1 não pede checkout
+
+E aqui está o achado que muda o problema, em vez de medi-lo melhor.
+
+O Gate 1 está escrito, no `PROMPT-01-EXECUTION-REPORT.md` §5, como:
+
+> **"vender três diagnósticos com pagamento"**
+
+**Não diz por checkout automático.** Um cliente real, uma auditoria rodada à mão, um PIX e a nota satisfazem a frase inteira — e não dependem de nenhum dos quatro elos.
+
+A diferença entre os dois caminhos não é de rigor. É de qual pergunta fica respondida:
+
+| Caminho | O que prova | O que custa |
+|---|---|---|
+| Checkout automático | **que o software cobra** | os quatro elos, em ordem |
+| Três vendas à mão | **que alguém paga por isto** | conversas |
+
+A segunda é a única coisa que ainda não se sabe, e é a que todo o resto está esperando. Se a resposta for *ninguém paga*, o domínio, a conta na Stripe e o botão terão sido construídos para nada. Se for *pagam*, a automação passa a ter um número do outro lado justificando o custo — que é exatamente o tipo de justificativa que o `00-REGRAS-COMUNS.md` §2 exige para qualquer serviço novo.
+
+**Isto não é recomendação de abandonar a automação.** É a observação de que ela está na ordem errada: hoje ela é pré-requisito de uma prova que não precisa dela.
+
+### 7.3 Procedência desta seção
+
+Três dos quatro elos foram medidos contra a máquina e o código, e estão documentados nas seções anteriores e no `ATUALIZAR-AMBIENTE-ONLINE.md`. **O elo 4 — a ausência de canal de contato — não é medição: é declaração do dono do projeto**, em 17/09/2026, e está registrado como tal de propósito.
+
+A distinção é a lição mais cara desta semana, e custou duas correções públicas: [a §3.1](#31-o-deploy-o-nome-de-domínio), que confundiu ler configuração com medir, e o `THIRD_PARTY_FLOWSINT.md` §1, que confundiu ler uma página com medir uma tag. **Quem escreve precisa dizer de onde soube.**
 
 ---
 
