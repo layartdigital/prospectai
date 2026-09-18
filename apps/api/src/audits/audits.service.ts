@@ -336,6 +336,68 @@ export class AuditsService implements OnModuleDestroy {
     };
   }
 
+  /**
+   * As auditorias de um lead, da mais recente para a mais antiga.
+   *
+   * **Por que esta rota passou a existir em 18/09/2026.** Ate aqui a auditoria
+   * tinha quatro rotas — `quota`, `POST`, `:id` e `:id/export` — e **nenhuma
+   * delas dizia quais auditorias um lead tem**. As tres ultimas exigem um id,
+   * e nao havia de onde tirar esse id. A consequencia foi medida no mesmo dia:
+   * a palavra `/audits` nao aparecia em nenhum arquivo de `apps/web/src`. A
+   * interface nao chamava a auditoria porque nao tinha por onde comecar.
+   *
+   * **Nao devolve as checagens, e isso e desenho.** Quem quer a medicao pede o
+   * `:id`. Esta lista existe para escolher *qual*, e carregar as checagens de
+   * todas as auditorias de um lead para exibir uma linha de cada seria pagar
+   * caro por dado que ninguem vai ler.
+   *
+   * Pela mesma razao nao ha `retentionUntil` aqui: ele e o menor prazo entre
+   * as checagens, entao calcula-lo exigiria justamente o que esta linha evita.
+   * Quem precisa do prazo esta olhando uma auditoria especifica, e o `detalhe`
+   * o entrega.
+   *
+   * **Teto de 20, sem paginacao.** Uma auditoria por lead por minuto e o teto
+   * que a chave de idempotencia impoe, mas um lead auditado todo mes por anos
+   * acumula. Vinte cobre qualquer uso real de uma ficha, e paginar uma lista
+   * que ninguem vai rolar seria interface a mais. Se o teto encostar em uso
+   * real, ele vira paginacao — e a evidencia vem antes.
+   */
+  async listarPorLead(
+    tenantId: string,
+    leadId: string,
+  ): Promise<
+    Array<{
+      auditId: string;
+      status: string;
+      auditVersion: string;
+      providerName: string | null;
+      errorCode: string | null;
+      createdAt: string;
+      finishedAt: string | null;
+    }>
+  > {
+    const auditorias = await this.prisma.comTenant(tenantId, (tx) =>
+      tx.digitalPresenceAudit.findMany({
+        where: { tenantId, leadId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+    );
+
+    // Lead inexistente e lead sem auditoria devolvem a mesma lista vazia, pela
+    // mesma razao que `detalhe` nao distingue auditoria de outro tenant de
+    // auditoria inexistente: a resposta nao conta o que o pedinte nao sabia.
+    return auditorias.map((a) => ({
+      auditId: a.id,
+      status: a.status,
+      auditVersion: a.auditVersion,
+      providerName: a.providerName,
+      errorCode: a.errorCode,
+      createdAt: a.createdAt.toISOString(),
+      finishedAt: a.finishedAt?.toISOString() ?? null,
+    }));
+  }
+
   async detalhe(
     tenantId: string,
     auditId: string,

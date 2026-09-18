@@ -13,3 +13,15 @@ export class CreateAuditDto {
   @MaxLength(40)
   leadId!: string;
 }
+
+export class ListAuditsQueryDto {
+  @ApiProperty({
+    description:
+      'Lead cujas auditorias listar. Obrigatorio: listar as auditorias do ' +
+      'workspace inteiro nao e caso de uso de nenhuma tela, e uma rota que ' +
+      'devolve tudo por omissao do filtro e a que alguem chama sem querer.',
+  })
+  @IsString()
+  @MaxLength(40)
+  leadId!: string;
+}

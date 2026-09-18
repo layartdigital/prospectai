@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Res,
   StreamableFile,
   UseGuards,
@@ -15,7 +16,7 @@ import { CurrentTenant, CurrentUser } from '../common/decorators';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import type { ActiveTenant, AuthenticatedUser } from '../common/request-context';
 import { TenantGuard } from '../common/tenant.guard';
-import { CreateAuditDto } from './audits.dto';
+import { CreateAuditDto, ListAuditsQueryDto } from './audits.dto';
 import { AuditsService } from './audits.service';
 
 @ApiTags('audits')
@@ -34,6 +35,36 @@ export class AuditsController {
   })
   async quota(@CurrentTenant() tenant: ActiveTenant) {
     return this.audits.saldo(tenant.id, tenant.planCode);
+  }
+
+  /**
+   * **Raiz com filtro obrigatório, e não `/leads/:id/audits`.**
+   *
+   * A segunda forma é a mais idiomática em REST e foi descartada por uma razão
+   * de dependência: `/leads/:id/...` pertence ao `LeadsController`, e pendurar
+   * esta rota lá faria o `LeadsModule` depender do `AuditsService` para
+   * devolver dados que são inteiramente do módulo de auditoria. A raiz com
+   * `leadId` mantém o dado e a rota no mesmo lugar, e não inventa fronteira
+   * nova.
+   *
+   * Não há conflito de ordem com `@Get(':id')`: a raiz não tem segmento, e o
+   * `quota` acima já resolve o único caso que competiria.
+   */
+  @Get()
+  @ApiOperation({
+    summary: 'Auditorias de um lead',
+    description:
+      'Da mais recente para a mais antiga, sem as checagens — quem quer a ' +
+      'medição pede a auditoria pelo id. Existe porque até 18/09/2026 não ' +
+      'havia como a interface descobrir que uma auditoria existia: as outras ' +
+      'rotas exigem um id, e nenhuma o fornecia.',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de auditorias do lead' })
+  async listar(
+    @CurrentTenant() tenant: ActiveTenant,
+    @Query() query: ListAuditsQueryDto,
+  ) {
+    return this.audits.listarPorLead(tenant.id, query.leadId);
   }
 
   @Post()

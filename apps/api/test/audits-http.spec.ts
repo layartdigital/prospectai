@@ -554,3 +554,75 @@ describe('gate de plano', () => {
     expect(r.body.capability).toBe('audit.run');
   });
 });
+
+/**
+ * A lista por lead — a rota que faltava para as outras serem alcançáveis.
+ *
+ * Ela não acrescenta capacidade nova ao produto. Acrescenta a única coisa que
+ * faltava: **um id**. Até 18/09/2026 `:id`, `:id/export` e o próprio `detalhe`
+ * exigiam um identificador que nenhuma tela tinha de onde tirar, e a medição
+ * do mesmo dia mostrou a consequência — a palavra `/audits` não aparecia em
+ * nenhum arquivo de `apps/web/src`.
+ *
+ * Roda no fim da suíte de propósito: a esta altura o `leadComSite` já tem a
+ * auditoria enfileirada do `pedido valido` e a fixture completa do `prazo e
+ * export`, que é o que torna a asserção de ordem possível sem criar dado novo.
+ */
+describe('lista por lead', () => {
+  type ItemDaLista = {
+    auditId: string;
+    status: string;
+    createdAt: string;
+    finishedAt: string | null;
+  };
+
+  it('devolve as auditorias do lead, da mais recente para a mais antiga', async () => {
+    const r = await pedir<ItemDaLista[]>(alfa, `/audits?leadId=${leadComSite}`);
+
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body)).toBe(true);
+    // Duas, no mínimo: a enfileirada e a fixture. `toBeGreaterThanOrEqual` e
+    // não igualdade porque os testes de idempotência acima podem ter criado
+    // outras — fixar o número aqui faria este teste quebrar por mudança em
+    // outro bloco, o que é o oposto de um guarda útil.
+    expect(r.body.length).toBeGreaterThanOrEqual(2);
+
+    const datas = r.body.map((a) => a.createdAt);
+    // Ordenar a cópia e comparar com o original prova a ordem sem depender de
+    // saber quais auditorias existem. Se o `orderBy` sumir, isto reprova.
+    expect(datas).toEqual([...datas].sort().reverse());
+  });
+
+  it('não traz as checagens', async () => {
+    const r = await pedir<Array<Record<string, unknown>>>(
+      alfa,
+      `/audits?leadId=${leadComSite}`,
+    );
+
+    // A fixture do `prazo e export` tem duas checagens gravadas, então se a
+    // lista fosse carregá-las, seria aqui que apareceriam. Quem quer a medição
+    // pede a auditoria pelo id.
+    for (const item of r.body) {
+      expect(item).not.toHaveProperty('checks');
+      expect(item).not.toHaveProperty('retentionUntil');
+    }
+  });
+
+  it('lead de outro workspace devolve lista vazia, e não 404', async () => {
+    const r = await pedir<ItemDaLista[]>(beta, `/audits?leadId=${leadComSite}`);
+
+    // Mesma escolha do `detalhe`: 404 e lista vazia são indistinguíveis de
+    // fora. Um 404 aqui confirmaria a existência do lead a quem não pode
+    // vê-lo — a resposta não conta o que o pedinte não sabia.
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual([]);
+  });
+
+  it('sem leadId, recusa em vez de listar o workspace inteiro', async () => {
+    const r = await pedir<{ statusCode: number }>(alfa, '/audits');
+
+    // O filtro é obrigatório por desenho. Uma rota que devolve tudo quando o
+    // filtro falta é a que alguém chama sem querer.
+    expect(r.status).toBe(400);
+  });
+});
