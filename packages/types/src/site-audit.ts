@@ -129,3 +129,39 @@ export interface SiteAuditProvider {
   readonly name: string;
   auditar(input: SiteAuditInput): Promise<SiteAuditResult>;
 }
+
+/**
+ * Uma auditoria na lista de um lead — `GET /audits?leadId=`.
+ *
+ * **Sem as checagens, e isso e o contrato e nao economia.** A lista existe para
+ * escolher qual auditoria abrir; a medicao vem do `GET /audits/:id`. Pelo mesmo
+ * motivo nao ha `retentionUntil`: ele e o menor prazo entre as checagens, e
+ * calcula-lo exigiria carrega-las.
+ */
+export interface AuditListItem {
+  readonly auditId: string;
+  readonly status: AuditStatusName;
+  readonly auditVersion: string;
+  /**
+   * **Qual implementacao mediu.** Nulo enquanto a auditoria nao rodou.
+   *
+   * A interface precisa disto para nao apresentar como medicao o que saiu do
+   * mock. Ver o comentario de `DigitalPresenceAudit.providerName` no schema: ja
+   * aconteceu tres vezes de medido e inventado ficarem indistinguiveis.
+   */
+  readonly providerName: string | null;
+  /** So quando `status` e `FAILED` — ou seja, quando a falha e nossa. */
+  readonly errorCode: string | null;
+  readonly createdAt: string;
+  readonly finishedAt: string | null;
+}
+
+/**
+ * Saldo de auditorias do periodo — `GET /audits/quota`.
+ *
+ * Consultar nunca bloqueia (regra 5). O gate so age na tentativa.
+ */
+export interface AuditQuotaView {
+  readonly disponivel: number;
+  readonly incluidas: number;
+}

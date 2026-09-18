@@ -13,6 +13,37 @@ const TX_TIMEOUT_MS = 10_000;
 const TX_MAX_WAIT_MS = 5_000;
 
 /**
+ * **O tamanho do pool e decisao desta arquitetura, e nao vive neste arquivo.**
+ *
+ * `TX_MAX_WAIT_MS` acima e quanto o Prisma espera por uma conexao livre antes de
+ * desistir. Quando ele estoura, o erro e `P2028 — "Unable to start a transaction
+ * in the given time"`, e a leitura instintiva e errada: parece consulta lenta, e
+ * e **fila de conexao**.
+ *
+ * Aconteceu em 18/09/2026, no log de uma suite e2e **que passou verde** — a
+ * ficha de um lead falhou ao carregar, e o teste so afirmava que nenhum modal
+ * abre. Pagina que explode nao abre modal.
+ *
+ * A causa esta no `comTenant` logo abaixo: por causa do RLS, **toda leitura e
+ * uma transacao**, porque o `set_config(..., is_local)` so vale dentro de uma.
+ * Num app comum o pool e gasto por escrita; **aqui e gasto por abrir tela.** Uma
+ * ficha de lead abre quatro transacoes em paralelo.
+ *
+ * O padrao do Prisma e `nucleos fisicos x 2 + 1` — cinco na maquina onde isto
+ * foi medido. Uma ficha cabe; duas renderizacoes concorrentes nao, e o Next faz
+ * prefetch de rota ligada.
+ *
+ * **Por isso o `connection_limit` e explicito na URL da aplicacao**, e nao um
+ * numero aqui: pool e por processo e por URL, entao ele precisa acompanhar cada
+ * lugar onde a URL e montada — `.env`, CI, e o `.env.production` do servidor.
+ * Ver `docs/intelligence/ATUALIZAR-AMBIENTE-ONLINE.md`, passo 2.
+ *
+ * **O que nao se deve fazer e subir o `TX_MAX_WAIT_MS`.** O erro sumiria do log
+ * e "pagina falha" viraria "pagina lenta" — a mesma doenca, com sintoma mais
+ * dificil de achar.
+ */
+
+/**
  * Passo 4: a API conecta com o papel que **esta** sujeito a politica.
  *
  * **Por que uma variavel nova, e nao trocar o `DATABASE_URL`.** O Prisma CLI le

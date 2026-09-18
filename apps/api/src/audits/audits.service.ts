@@ -8,7 +8,12 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AUDIT_VERSION, type SiteCheckResult } from '@propectai/types';
+import {
+  AUDIT_VERSION,
+  type AuditListItem,
+  type AuditQuotaView,
+  type SiteCheckResult,
+} from '@propectai/types';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 
@@ -117,7 +122,7 @@ export class AuditsService implements OnModuleDestroy {
     await this.connection.quit();
   }
 
-  async saldo(tenantId: string, planCode: string): Promise<{ disponivel: number; incluidas: number }> {
+  async saldo(tenantId: string, planCode: string): Promise<AuditQuotaView> {
     return {
       disponivel: await this.entitlements.availableAuditCredits(tenantId, planCode),
       incluidas: this.entitlements.limits(planCode).auditsPerMonth,
@@ -362,20 +367,7 @@ export class AuditsService implements OnModuleDestroy {
    * que ninguem vai rolar seria interface a mais. Se o teto encostar em uso
    * real, ele vira paginacao — e a evidencia vem antes.
    */
-  async listarPorLead(
-    tenantId: string,
-    leadId: string,
-  ): Promise<
-    Array<{
-      auditId: string;
-      status: string;
-      auditVersion: string;
-      providerName: string | null;
-      errorCode: string | null;
-      createdAt: string;
-      finishedAt: string | null;
-    }>
-  > {
+  async listarPorLead(tenantId: string, leadId: string): Promise<AuditListItem[]> {
     const auditorias = await this.prisma.comTenant(tenantId, (tx) =>
       tx.digitalPresenceAudit.findMany({
         where: { tenantId, leadId },

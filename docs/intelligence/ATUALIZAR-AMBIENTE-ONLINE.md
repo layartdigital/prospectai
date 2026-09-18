@@ -126,7 +126,7 @@ exista e a aplicação a ignore.
 
 ```
 DATABASE_URL_MIGRATOR=postgresql://propectai_migrator:SENHA@postgres:5432/propectai?schema=public
-DATABASE_URL_APP=postgresql://propectai_app:SENHA@postgres:5432/propectai?schema=public
+DATABASE_URL_APP=postgresql://propectai_app:SENHA@postgres:5432/propectai?schema=public&connection_limit=15
 DATABASE_URL_SISTEMA=postgresql://propectai_sistema:SENHA@postgres:5432/propectai?schema=public
 ```
 
@@ -136,6 +136,31 @@ passo 4 — então na prática escreve-se o arquivo entre o passo 4 e o 5, mas a
 
 O host é `postgres`, o nome do serviço na rede `internal` — não `localhost`,
 não `127.0.0.1`.
+
+#### O `connection_limit=15` na URL da aplicação, e só nela
+
+Acrescentado em 18/09/2026, depois de um `P2028` — *"Unable to start a
+transaction in the given time"* — aparecer no log de uma suíte e2e **que passou
+verde**. A ficha de um lead falhou ao carregar uma vez; o teste afirmava que
+nenhum modal abre, e página que explode não abre modal.
+
+**A causa é arquitetural, não acidental.** Por causa do RLS, `comTenant` faz de
+**toda leitura** uma transação — o `set_config(..., is_local)` só vale dentro de
+uma, e sem ela não há isolamento. Num app comum o pool é gasto por escrita;
+aqui é gasto por **abrir tela**. O padrão do Prisma — `núcleos físicos × 2 + 1`,
+que na máquina de desenvolvimento medida dá **5** — foi calculado para a outra
+premissa.
+
+Uma ficha de lead abre quatro transações em paralelo. Uma cabe em cinco; duas
+renderizações concorrentes, não — e o Next faz prefetch de rota ligada.
+
+Vai **só na URL da aplicação** de propósito. O `migrator` roda um comando por
+vez, o `sistema` é do worker, e o dono é para scripts: nenhum deles tem
+concorrência de tela.
+
+**Onde mais isto precisa existir:** o `.env` da máquina de desenvolvimento e o
+ambiente do CI, se a URL for montada lá. Pool é por processo, e a fragilidade
+acompanha a URL, não o servidor.
 
 ### 3. Aplicar as migrations
 

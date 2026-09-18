@@ -1,4 +1,6 @@
 import type {
+  AuditListItem,
+  AuditQuotaView,
   LeadDetail,
   OutreachMessageView,
   OutreachQuotaView,
@@ -20,6 +22,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { ScoreBadge, SignalBadge, WebsiteBadge, WhatsAppBadge } from '@/components/leads/badges';
+import { LeadAuditCard } from '@/components/leads/lead-audit-card';
 import { LeadContactForm } from '@/components/leads/lead-contact-form';
 import { LeadFollowUps } from '@/components/leads/lead-follow-ups';
 import { LeadNoteComposer } from '@/components/leads/lead-note-composer';
@@ -59,9 +62,16 @@ export default async function LeadDetailPage({
 
   // Consultar a cota não dispara bloqueio: o card aparece contextualizado
   // mesmo no FREE, e o gate só age depois de o usuário clicar em gerar.
-  const [outreachQuota, outreachHistory] = await Promise.all([
+  //
+  // As duas últimas entraram em 18/09/2026, e a segunda só existe desde o mesmo
+  // dia: até então a API não tinha rota que dissesse **quais** auditorias um
+  // lead tem, e por isso nenhuma tela chamava a auditoria — as outras rotas
+  // exigem um id que não havia de onde tirar.
+  const [outreachQuota, outreachHistory, auditQuota, auditorias] = await Promise.all([
     serverApi<OutreachQuotaView>('/ai/outreach/quota'),
     serverApi<OutreachMessageView[]>(`/ai/outreach/lead/${id}`),
+    serverApi<AuditQuotaView>('/audits/quota'),
+    serverApi<AuditListItem[]>(`/audits?leadId=${id}`),
   ]);
 
   return (
@@ -214,6 +224,16 @@ export default async function LeadDetailPage({
               />
             </div>
           </section>
+
+          {/* Antes da IA de abordagem de propósito: a ordem da coluna conta a
+              ordem do trabalho — descobrir o que há para dizer, e só então
+              dizer. O diagnóstico é o que dá assunto à abordagem. */}
+          <LeadAuditCard
+            leadId={lead.id}
+            website={lead.website}
+            saldo={auditQuota}
+            auditorias={auditorias}
+          />
 
           <LeadOutreachCard
             leadId={lead.id}
