@@ -22,6 +22,7 @@ export * from './pipeline-api';
 export * from './pricing-api';
 export * from './proposal-api';
 export * from './prospecting-api';
+export * from './relatorio-diagnostico';
 export * from './score';
 export * from './segment-api';
 export * from './site-audit';
