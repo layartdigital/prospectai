@@ -229,6 +229,20 @@ function alcance(c: ChecagemMedida, site: string): ItemDoRelatorio | null {
     };
   }
 
+  if (c.errorCode === 'PAGINA_NAO_ENCONTRADA') {
+    // 404 ou 410: o servidor respondeu, e a resposta foi "nao existe". Desde
+    // 21/09/2026 o provedor classifica isso como FAILED — ver `classificar()`
+    // no `native.provider.ts`, e o caso wixsite que motivou a mudanca.
+    return {
+      secao: 'ACHADO',
+      titulo: `O endereço ${site} responde, mas leva a uma página que não existe. Quem visita vê uma página de erro no lugar do site da empresa.`,
+      porQueImporta:
+        'Costuma acontecer quando o site foi desativado, nunca chegou a ser publicado ou mudou de endereço. O endereço continua de pé, e o cartão, o anúncio e o perfil no Google seguem mandando gente para uma página de erro.',
+      oQueFazer:
+        'Verificar com quem cuida do site se ele está publicado. Se o site mudou de endereço, atualizar o endereço divulgado — a começar pelo perfil no Google.',
+    };
+  }
+
   if (c.errorCode === 'REDIRECT_PARA_DESTINO_QUEBRADO') {
     return {
       secao: 'ACHADO',
@@ -410,6 +424,57 @@ function cadeia(c: ChecagemMedida): ItemDoRelatorio | null {
  * - `SIMULADA` — terminou, mas quem mediu foi o provedor de simulacao.
  */
 export type RecusaDoRelatorio = 'FALHOU' | 'CANCELADA' | 'EM_ANDAMENTO' | 'SIMULADA';
+
+/** Um item traduzido, com a checagem de origem preservada. */
+export interface LinhaDoRelatorio {
+  readonly check: SiteCheckName;
+  readonly item: ItemDoRelatorio;
+}
+
+/**
+ * Checagens cujo "esta correto" so significa alguma coisa se a pagina abriu.
+ *
+ * Certificado valido e redirecionamento para https sao propriedades do
+ * **endereco**, nao do site. Numa plataforma que responde por qualquer nome, o
+ * certificado e o da plataforma e o redirect tambem — os dois saem certos para
+ * um site que nao existe. O DNS fica de fora da lista: "o endereco esta ativo"
+ * e verdade nesses casos e ajuda o leitor a localizar o problema (o dominio
+ * esta pago; o que falta e a pagina).
+ */
+const SO_VALEM_COM_PAGINA: ReadonlySet<SiteCheckName> = new Set(['HTTPS', 'REDIRECT_CHAIN']);
+
+/**
+ * O relatorio inteiro, e nao checagem por checagem.
+ *
+ * `traduzirChecagem` olha uma checagem de cada vez, e e isso que o torna
+ * testavel no produto cartesiano. Mas ha uma regra que so existe no conjunto, e
+ * ela apareceu no primeiro relatorio emitido com medicao real: um subdominio
+ * `wixsite.com` saiu com **tres itens em "O que esta correto"** — endereco
+ * ativo, certificado valido, redirect para https — e a pagina respondia 404.
+ * Cada frase era verdadeira; juntas diziam que o site estava bem.
+ *
+ * A regra: **quando a pagina nao foi vista abrindo, certificado e redirect nao
+ * entram como "certo".** Saem, nao mudam de secao — sao medicoes corretas
+ * sobre a coisa errada, e move-las para outro lugar seria inventar um texto que
+ * ninguem escreveu. Silencio e melhor que frase errada, de novo.
+ *
+ * So remove itens `CERTO`. Achado e "nao verificado" nunca saem por esta regra:
+ * esconder um problema ou um limite da nossa medicao e o defeito oposto, e pior.
+ */
+export function montarRelatorio(
+  checks: readonly ChecagemMedida[],
+  site: string,
+): LinhaDoRelatorio[] {
+  // Estrito: sem a checagem de alcance, tambem nao sabemos se a pagina abre.
+  const paginaAbriu = checks.some((c) => c.check === 'HTTP_REACHABLE' && c.outcome === 'OK');
+
+  return checks
+    .map((c) => ({ check: c.check, item: traduzirChecagem(c, site) }))
+    .filter((l): l is LinhaDoRelatorio => l.item !== null)
+    .filter(
+      (l) => paginaAbriu || l.item.secao !== 'CERTO' || !SO_VALEM_COM_PAGINA.has(l.check),
+    );
+}
 
 /**
  * **A decisao de emitir ou nao o documento, num lugar so.**

@@ -1,11 +1,10 @@
 import type {
   AuditDetailView,
-  ItemDoRelatorio,
   LeadDetail,
+  LinhaDoRelatorio,
   RecusaDoRelatorio,
-  SiteCheckName,
 } from '@propectai/types';
-import { recusaDoRelatorio, traduzirChecagem } from '@propectai/types';
+import { montarRelatorio, recusaDoRelatorio } from '@propectai/types';
 import { AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -13,6 +12,7 @@ import { notFound } from 'next/navigation';
 
 import { BotaoImprimir } from '@/components/relatorio/botao-imprimir';
 import { ServerApiError, serverApi } from '@/lib/server-api';
+import { getSession } from '@/lib/session';
 
 export const metadata: Metadata = { title: 'Diagnóstico de presença digital' };
 
@@ -73,11 +73,6 @@ const TEXTO_DA_RECUSA: Record<RecusaDoRelatorio, { titulo: string; texto: string
   },
 };
 
-/** Um item traduzido, com a checagem de origem preservada. */
-interface LinhaDoRelatorio {
-  readonly check: SiteCheckName;
-  readonly item: ItemDoRelatorio;
-}
 
 export default async function RelatorioPage({
   params,
@@ -145,12 +140,16 @@ export default async function RelatorioPage({
     );
   }
 
-  // A checagem viaja junto com o item traduzido só para servir de `key` estável
-  // na lista. Índice serviria hoje, mas passa a mentir no dia em que uma seção
-  // for reordenada — e a lista de seções é o que mais tende a mudar aqui.
-  const itens = audit.checks
-    .map((c) => ({ check: c.check, item: traduzirChecagem(c, endereco) }))
-    .filter((p): p is LinhaDoRelatorio => p.item !== null);
+  // `montarRelatorio`, e não um `map` sobre `traduzirChecagem` aqui: há uma
+  // regra que só existe no conjunto — certificado e redirect não entram como
+  // "certo" quando a página não abriu — e ela precisa de teste unitário, que a
+  // web não tem. A checagem viaja junto com cada item para servir de `key`.
+  const itens = montarRelatorio(audit.checks, endereco);
+
+  // O workspace ativo é o dono da auditoria — o RLS não deixaria ler uma de
+  // outro. O layout já validou a sessão; aqui ela só fornece o nome.
+  const session = await getSession();
+  const assinatura = session?.tenant?.name ?? null;
 
   // A ordem é a que veio da API — `createdAt asc`, ou seja a ordem das sondas:
   // DNS, alcance, HTTPS, cadeia. Ela já é decrescente em gravidade por
@@ -198,7 +197,26 @@ export default async function RelatorioPage({
             descricao="Pontos observados no site que afetam quem tenta chegar até a empresa."
             icone={<AlertTriangle className="h-4 w-4 text-danger" aria-hidden="true" />}
             itens={achados}
-            vazio="Nenhum problema encontrado nas verificações desta lista."
+            vazio={
+              /**
+               * **A primeira frase do documento não pode dizer mais do que foi
+               * medido.**
+               *
+               * A versão anterior dizia sempre "Nenhum problema encontrado". O
+               * primeiro relatório emitido com medição real — um subdomínio
+               * `wixsite.com` — mostrou o defeito: a plataforma responde por
+               * qualquer nome, então DNS, certificado e redirecionamento saíram
+               * certos, e a única checagem que olhava a página em si não
+               * concluiu. O documento abria com "nenhum problema" e só dizia,
+               * três seções abaixo, que não sabia se o site abria.
+               *
+               * A frase era verdadeira e enganava. Quem lê um laudo para na
+               * primeira linha.
+               */
+              naoVerificados.length > 0
+                ? 'Nenhum problema encontrado no que foi possível verificar. Parte da verificação não pôde ser concluída — veja abaixo.'
+                : 'Nenhum problema encontrado nas verificações desta lista.'
+            }
           />
 
           <Secao
@@ -238,7 +256,8 @@ export default async function RelatorioPage({
           versão protegida.
           {audit.status === 'PARTIAL'
             ? ' Parte das verificações não pôde ser concluída; elas estão listadas acima.'
-            : null}
+            : null}{' '}
+          Versão do verificador: {audit.auditVersion}.
         </p>
         {audit.retentionUntil === null ? null : (
           <p className="mt-2">
@@ -247,9 +266,20 @@ export default async function RelatorioPage({
             permanece com quem o recebeu.
           </p>
         )}
-        {/* Sem assinatura nem marca. O nome do produto ainda é uma decisão em
-            aberto, e carimbá-lo num documento entregável agora seria ter de
-            recolher documentos depois. */}
+        {/**
+         * **A assinatura é o nome de quem entrega, e não o do produto.**
+         *
+         * Decisão 3 de 18/09 no `RELATORIO-DIAGNOSTICO-v1.md` §6: `Tenant.name`,
+         * em texto, sem logo e sem o nome da ferramenta. A primeira versão desta
+         * página saiu sem assinatura nenhuma — o comentário que estava aqui
+         * dizia que "o nome do produto ainda é uma decisão em aberto", o que é
+         * verdade e responde a outra pergunta: a decisão tirou o produto e
+         * **manteve** a agência. Sem assinatura o documento não é entregável:
+         * quem for usar cola o conteúdo no próprio timbre.
+         */}
+        {assinatura === null ? null : (
+          <p className="mt-4 text-xs font-semibold text-navy-900">{assinatura}</p>
+        )}
       </footer>
     </article>
   );

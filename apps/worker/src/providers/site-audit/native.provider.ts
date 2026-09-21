@@ -84,13 +84,37 @@ interface Sonda {
  * pontua. A distincao entre "nao tentamos" e "tentamos e nao deu para saber"
  * fica no `errorCode`, que e codigo estavel por desenho.
  */
-type ClasseResposta = 'SERVIU' | 'INCONCLUSIVA' | 'QUEBRADA';
+type ClasseResposta = 'SERVIU' | 'INCONCLUSIVA' | 'QUEBRADA' | 'NAO_ENCONTRADA';
 
+/**
+ * **404 e 410 sairam do grupo inconclusivo em 21/09/2026, com evidencia.**
+ *
+ * A primeira versao tratava todo 4xx como recusa a ser medido. O argumento
+ * vale para o 403, o 401 e o 429 — sao as respostas que WAF da a bot. Nao vale
+ * para o 404: ali o servidor nao recusou a pergunta, **respondeu** que a pagina
+ * nao existe. Isso e sinal, nao ausencia dele, e a regra 4 nao manda
+ * descarta-lo.
+ *
+ * O caso que decidiu: o primeiro relatorio emitido com medicao real, contra um
+ * subdominio `wixsite.com`. A plataforma responde por qualquer nome, entao DNS,
+ * certificado e redirect sairam certos; a porta 80 subiu para
+ * `https://.../inicio`, e ali a Wix respondeu **404** — "Esta pagina nao esta
+ * disponivel". O relatorio abriu com "nenhum problema encontrado" sobre um site
+ * que nao existe. O `status: 404` estava gravado no `result`, exatamente como o
+ * comentario do `alcance` abaixo previa: *guardar o numero e o que permite
+ * rever a regra com evidencia em vez de opiniao.*
+ *
+ * **O risco do outro lado, registrado para nao ser esquecido:** ha servidores
+ * que respondem 404 a bot para se esconder. E raro em site de negocio local e
+ * nao foi observado aqui; se aparecer, o numero continua gravado e a regra pode
+ * voltar atras com o mesmo tipo de prova que a trouxe ate aqui.
+ */
 function classificar(status: number): ClasseResposta {
   if (status >= 200 && status < 300) return 'SERVIU';
   if (status >= 500) return 'QUEBRADA';
-  // 4xx na pratica. 1xx e 3xx nao chegam aqui: o `fetcher` segue o redirect e
-  // devolve `REDIRECT_DEMAIS` como falha quando estoura.
+  if (status === 404 || status === 410) return 'NAO_ENCONTRADA';
+  // 401, 403, 429 e o resto dos 4xx. 1xx e 3xx nao chegam aqui: o `fetcher`
+  // segue o redirect e devolve `REDIRECT_DEMAIS` como falha quando estoura.
   return 'INCONCLUSIVA';
 }
 
@@ -297,7 +321,7 @@ export class NativeSiteAuditProvider implements SiteAuditProvider {
       outcome:
         classe === 'SERVIU'
           ? 'OK'
-          : classe === 'QUEBRADA'
+          : classe === 'QUEBRADA' || classe === 'NAO_ENCONTRADA'
             ? 'FAILED'
             : classe === 'INCONCLUSIVA'
               ? 'SKIPPED'
@@ -313,7 +337,9 @@ export class NativeSiteAuditProvider implements SiteAuditProvider {
           ? null
           : classe === 'QUEBRADA'
             ? 'ERRO_DO_SERVIDOR'
-            : classe === 'INCONCLUSIVA'
+            : classe === 'NAO_ENCONTRADA'
+              ? 'PAGINA_NAO_ENCONTRADA'
+              : classe === 'INCONCLUSIVA'
               ? 'RESPOSTA_NAO_CONCLUSIVA'
               : quebrouDepoisDoSalto
                 ? 'REDIRECT_PARA_DESTINO_QUEBRADO'

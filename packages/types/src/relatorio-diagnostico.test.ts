@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  montarRelatorio,
   recusaDoRelatorio,
   traduzirChecagem,
   type ChecagemMedida,
@@ -32,6 +33,7 @@ const CODIGOS = [
   'ERRO_DO_SERVIDOR',
   'RESPOSTA_NAO_CONCLUSIVA',
   'REDIRECT_PARA_DESTINO_QUEBRADO',
+  'PAGINA_NAO_ENCONTRADA',
   'SONDA_HTTP_NAO_CONCLUSIVA',
   'SEM_HTTPS',
   'TIMEOUT',
@@ -233,5 +235,83 @@ describe('quando uma auditoria pode virar documento', () => {
     for (const providerName of PROVEDORES) {
       expect(recusaDoRelatorio({ status: 'FAILED', providerName })).toBe('FALHOU');
     }
+  });
+});
+
+describe('o relatório inteiro — o caso wixsite', () => {
+  /**
+   * As quatro checagens exatamente como o provedor nativo as gravou em
+   * 21/09/2026, lidas do CSV da auditoria `cmubc5jc6000jwzjsj0g70tto`. É o
+   * primeiro relatório emitido com medição real, e o site não existia: a Wix
+   * respondia 404 em `https://odontocenter-demo.wixsite.com/inicio`.
+   */
+  const COMO_GRAVADO: ChecagemMedida[] = [
+    { check: 'DNS', outcome: 'OK', errorCode: null, result: { hostname: 'odontocenter-demo.wixsite.com' } },
+    {
+      check: 'HTTP_REACHABLE',
+      outcome: 'SKIPPED',
+      errorCode: 'RESPOSTA_NAO_CONCLUSIVA',
+      result: { status: 404, porta80: true },
+    },
+    { check: 'HTTPS', outcome: 'OK', errorCode: null, result: { certificadoValido: true } },
+    { check: 'REDIRECT_CHAIN', outcome: 'OK', errorCode: null, result: { saltos: 1, forcaHttps: true } },
+  ];
+
+  /** O mesmo site, medido depois da reclassificação do 404 no provedor. */
+  const RECLASSIFICADO: ChecagemMedida[] = COMO_GRAVADO.map((c) =>
+    c.check === 'HTTP_REACHABLE'
+      ? { ...c, outcome: 'FAILED' as const, errorCode: 'PAGINA_NAO_ENCONTRADA' }
+      : c,
+  );
+
+  const secao = (linhas: ReturnType<typeof montarRelatorio>, s: string): string[] =>
+    linhas.filter((l) => l.item.secao === s).map((l) => l.check);
+
+  it('como gravado: certificado e redirect não aparecem como "certo" para página que não abriu', () => {
+    const linhas = montarRelatorio(COMO_GRAVADO, 'odontocenter-demo.wixsite.com');
+
+    // A versão anterior punha DNS, HTTPS e REDIRECT_CHAIN aqui — três frases
+    // verdadeiras que juntas diziam que um site inexistente estava bem.
+    expect(secao(linhas, 'CERTO')).toEqual(['DNS']);
+    expect(secao(linhas, 'NAO_VERIFICADO')).toEqual(['HTTP_REACHABLE']);
+    expect(secao(linhas, 'ACHADO')).toEqual([]);
+  });
+
+  it('reclassificado: a página inexistente vira o achado, e o documento diz isso primeiro', () => {
+    const linhas = montarRelatorio(RECLASSIFICADO, 'odontocenter-demo.wixsite.com');
+
+    expect(secao(linhas, 'ACHADO')).toEqual(['HTTP_REACHABLE']);
+    expect(secao(linhas, 'CERTO')).toEqual(['DNS']);
+    expect(secao(linhas, 'NAO_VERIFICADO')).toEqual([]);
+
+    const achado = linhas.find((l) => l.check === 'HTTP_REACHABLE');
+    expect(achado?.item.titulo).toContain('odontocenter-demo.wixsite.com');
+    expect(achado?.item.titulo).toMatch(/página que não existe/);
+  });
+
+  it('site que abre mantém os quatro itens certos', () => {
+    const saudavel = COMO_GRAVADO.map((c) =>
+      c.check === 'HTTP_REACHABLE'
+        ? { ...c, outcome: 'OK' as const, errorCode: null, result: { status: 200, porta80: true } }
+        : c,
+    );
+    const linhas = montarRelatorio(saudavel, 'exemplo.com.br');
+
+    expect(secao(linhas, 'CERTO')).toEqual(['DNS', 'HTTP_REACHABLE', 'HTTPS', 'REDIRECT_CHAIN']);
+  });
+
+  it('a regra só remove "certo" — achado e "não verificado" nunca somem por ela', () => {
+    // Página que não abre E certificado vencido: o achado do certificado é
+    // problema real, e escondê-lo seria o defeito oposto, e pior.
+    const doisProblemas: ChecagemMedida[] = [
+      { check: 'DNS', outcome: 'OK', errorCode: null, result: null },
+      { check: 'HTTP_REACHABLE', outcome: 'SKIPPED', errorCode: 'RESPOSTA_NAO_CONCLUSIVA', result: { status: 403 } },
+      { check: 'HTTPS', outcome: 'FAILED', errorCode: 'TLS_CERTIFICADO_EXPIRADO', result: null },
+      { check: 'REDIRECT_CHAIN', outcome: 'SKIPPED', errorCode: 'SONDA_HTTP_NAO_CONCLUSIVA', result: { saltos: 0 } },
+    ];
+    const linhas = montarRelatorio(doisProblemas, 'exemplo.com.br');
+
+    expect(secao(linhas, 'ACHADO')).toEqual(['HTTPS']);
+    expect(secao(linhas, 'NAO_VERIFICADO')).toEqual(['HTTP_REACHABLE', 'REDIRECT_CHAIN']);
   });
 });

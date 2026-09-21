@@ -2,7 +2,7 @@
 
 **Data:** 18/09/2026 · **Tipo:** conteúdo, não código. É o texto que o cliente lê.
 **Leitor:** o dono do negócio auditado. Não é você, e não é o operador do sistema.
-**Estado:** revisado com as três decisões de 18/09 — ver §6. **Nada disto virou código ainda.**
+**Estado:** revisado com as três decisões de 18/09 — ver §6. Virou código em 19/09 (`packages/types/src/relatorio-diagnostico.ts`, que declara que **este documento manda** se os dois divergirem). Revisado em 21/09 depois do primeiro relatório com medição real — ver `PAGINA_NAO_ENCONTRADA` na §4.2 e a §5.1.
 
 ---
 
@@ -52,9 +52,11 @@ O schema registra, no campo `providerName`, que auditoria medida e auditoria inv
 | `HTTP_REACHABLE` | **sim** |
 | `HTTPS` | **sim** |
 | `REDIRECT_CHAIN` | **sim** |
-| `VIEWPORT_META` | **não** — nome reservado no enum, nenhum provedor produz |
-| `TTFB` | **não** — idem |
-| `TITLE_META` | **não** — idem |
+| `VIEWPORT_META` | **não, por decisão** — exigiria parsear HTML de terceiro dentro do módulo cujo propósito é conter terceiros |
+| `TTFB` | **não, por decisão** — o `fetcher` mede o primeiro salto, e num site que redireciona de http para https o número seria o do redirect, não o da página |
+| `TITLE_META` | **não, por decisão** — mesma razão do `VIEWPORT_META` |
+
+*Corrigido em 21/09.* A versão anterior desta tabela dizia "nome reservado no enum, nenhum provedor produz" — o que soava como omissão. O `site-audit.ts` (`SITE_CHECKS_V1`) registra que é decisão, e com o argumento que importa para um documento entregável: *medir errado é pior que não medir — o número errado vai para o relatório do cliente com a mesma cara do certo.*
 
 `native.provider.ts` devolve `[dns, alcance, tls, cadeia]`. O mock devolve o mesmo conjunto.
 
@@ -126,6 +128,17 @@ O schema registra, no campo `providerName`, que auditoria medida e auditoria inv
 
 ---
 
+**`FAILED` · `PAGINA_NAO_ENCONTRADA`** (resposta 404 ou 410) — *acrescentado em 21/09/2026*
+
+- **Medido:** o servidor respondeu, e a resposta foi que a página não existe.
+- **O cliente lê:** *"O endereço {site} responde, mas leva a uma página que não existe. Quem visita vê uma página de erro no lugar do site da empresa."*
+- **Por que importa:** costuma acontecer quando o site foi desativado, nunca chegou a ser publicado ou mudou de endereço. O endereço continua de pé, e o cartão, o anúncio e o perfil no Google seguem mandando gente para uma página de erro.
+- **O que fazer:** verificar com quem cuida do site se ele está publicado. Se o site mudou de endereço, atualizar o endereço divulgado — a começar pelo perfil no Google.
+
+**Por que esta linha existe.** Até 21/09 o 404 estava no grupo inconclusivo, junto do 403. O primeiro relatório emitido com medição real — `odontocenter-demo.wixsite.com` — mostrou o custo: a Wix responde por qualquer nome sob `wixsite.com`, então endereço, certificado e redirecionamento saíram certos, e a página final respondia **404**. O relatório abria com "nenhum problema encontrado" sobre um site que não existe. **O 403 continua inconclusivo**: é o que firewall responde a robô. O 404 não recusa a pergunta — responde a ela.
+
+---
+
 **`FAILED` · `TIMEOUT`**
 
 - **Medido:** nenhuma resposta dentro do prazo da verificação.
@@ -146,7 +159,7 @@ O schema registra, no campo `providerName`, que auditoria medida e auditoria inv
 
 **`SKIPPED` · `RESPOSTA_NAO_CONCLUSIVA`**
 
-- **Medido:** o servidor respondeu algo que não permite concluir — tipicamente um 4xx, que tanto pode ser proteção contra robôs quanto página realmente ausente.
+- **Medido:** o servidor respondeu algo que não permite concluir — tipicamente 401, 403 ou 429, as respostas que proteção contra robôs costuma dar. (404 e 410 saíram daqui em 21/09: ver `PAGINA_NAO_ENCONTRADA` acima.)
 - **O cliente lê:** *"Não foi possível concluir a verificação: o servidor respondeu de uma forma que não permite afirmar se a página abre para um visitante comum. Muitos sites bloqueiam verificações automáticas, e isso por si só não é defeito."*
 - **Por que importa:** vai **na lista do que não foi verificado.** Afirmar que o site está quebrado aqui seria inventar um achado — e é exatamente o erro que o código do provedor registra ter cometido e corrigido.
 - **O que fazer:** abrir o endereço no navegador e ver com os próprios olhos.
@@ -265,6 +278,14 @@ O schema registra, no campo `providerName`, que auditoria medida e auditoria inv
 Não é timidez comercial, é o que faz o documento funcionar. Um relatório que termina vendendo se revela peça de venda no último parágrafo, e retroativamente coloca em dúvida os quatro anteriores — o leitor releitura tudo perguntando o que foi exagerado para chegar ali. Terminando na medição, o documento continua sendo o que diz ser, e **a conversa acontece fora dele**, que é onde ela acontece de verdade: no telefonema, na mensagem, na visita. O relatório é o motivo da conversa, não o lugar dela.
 
 **O que não aparece em lugar nenhum:** score, pesos, motivos de pontuação, nome de concorrente, estimativa de faturamento, promessa de resultado, e qualquer número que não tenha saído de uma medição desta auditoria.
+
+### 5.1 Duas regras que só existem no conjunto — acrescentadas em 21/09/2026
+
+A tabela da §4 traduz uma checagem de cada vez. O primeiro relatório com medição real mostrou que isso não basta: cada frase do caso `wixsite.com` era verdadeira, e o documento inteiro dizia que um site inexistente estava bem.
+
+**1. Certificado e redirecionamento só entram em "O que está certo" se a página abriu.** São propriedades do *endereço*, não do site — numa plataforma que responde por qualquer nome, o certificado é o da plataforma e o redirecionamento também. Quando o alcance não é `OK`, os dois itens **saem** do relatório; não mudam de seção, porque são medições corretas sobre a coisa errada. O `DNS` fica: "o endereço está ativo" é verdade e ajuda a localizar o problema. A regra só remove itens certos — achado e "não verificado" nunca saem por ela. Implementada em `montarRelatorio`, com teste construído a partir do CSV da auditoria real.
+
+**2. A primeira frase não diz mais do que foi medido.** Sem achados e sem nada pendente, "O que encontramos" diz *"Nenhum problema encontrado nas verificações desta lista."* Sem achados mas com itens não verificados, diz *"Nenhum problema encontrado no que foi possível verificar. Parte da verificação não pôde ser concluída — veja abaixo."* Quem lê um laudo para na primeira linha.
 
 ---
 

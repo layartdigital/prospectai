@@ -223,7 +223,7 @@ describe('classe do status, que a v1 nao olhava', () => {
    * ar" seria falso negativo — nao medimos o site, medimos uma recusa a ser
    * medido.
    */
-  for (const status of [401, 403, 404, 429]) {
+  for (const status of [401, 403, 429]) {
     it(`${status} nao reprova nem aprova: fica SKIPPED`, async () => {
       responder = (_req, res) => {
         res.writeHead(status);
@@ -243,6 +243,53 @@ describe('classe do status, que a v1 nao olhava', () => {
       expect(alcance.result?.['status']).toBe(status);
     });
   }
+
+  /**
+   * **O 404 saiu do laco acima em 21/09/2026.** Ele estava la junto do 403, e o
+   * primeiro relatorio com medicao real mostrou o custo: um site inexistente
+   * numa plataforma que responde por qualquer nome saiu com "nenhum problema
+   * encontrado". WAF recusa a pergunta; 404 responde a pergunta.
+   */
+  for (const status of [404, 410]) {
+    it(`${status} reprova: o servidor respondeu que a pagina nao existe`, async () => {
+      responder = (_req, res) => {
+        res.writeHead(status);
+        res.end();
+      };
+      responderSeguro = (_req, res) => {
+        res.writeHead(status);
+        res.end();
+      };
+      const r = await auditor().auditar({ website: `sumiu-${status}.com.br` });
+
+      const alcance = achar(r.checks, 'HTTP_REACHABLE');
+      expect(alcance.outcome).toBe('FAILED');
+      expect(alcance.errorCode).toBe('PAGINA_NAO_ENCONTRADA');
+      expect(alcance.result?.['status']).toBe(status);
+      // Pagina inexistente e achado, nao falha nossa: a auditoria terminou.
+      expect(r.status).toBe('COMPLETED');
+    });
+  }
+
+  it('o formato exato do caso wixsite: sobe para https e o destino diz 404', async () => {
+    // Medido em 21/09/2026: porta 80 redireciona (1 salto, forcaHttps: true),
+    // o https valida, e a pagina de destino responde 404. As tres checagens de
+    // infraestrutura estao certas; a unica que olha a pagina reprova.
+    responder = (_req, res) => {
+      res.writeHead(301, { location: 'https://plataforma.com.br/inicio' });
+      res.end();
+    };
+    responderSeguro = (_req, res) => {
+      res.writeHead(404);
+      res.end();
+    };
+    const r = await auditor().auditar({ website: 'plataforma.com.br' });
+
+    expect(achar(r.checks, 'HTTP_REACHABLE').outcome).toBe('FAILED');
+    expect(achar(r.checks, 'HTTP_REACHABLE').errorCode).toBe('PAGINA_NAO_ENCONTRADA');
+    expect(achar(r.checks, 'HTTPS').outcome).toBe('OK');
+    expect(achar(r.checks, 'REDIRECT_CHAIN').result?.['forcaHttps']).toBe(true);
+  });
 
   it('sonda http inconclusiva nao afirma que o site aceita trafego em claro', async () => {
     // O caso exato que o smoke test mostrou: sem redirect observado e sem
