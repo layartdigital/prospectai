@@ -106,6 +106,35 @@ exatamente para não virar `DROP` + `ADD`.
 
 Cada passo tem um motivo de estar onde está. A ordem não é preferência.
 
+> **Três correções de 21/09/2026, medidas no servidor antes de executar.** A
+> versão de 17/09 desta seção teria falhado de três jeitos diferentes:
+>
+> 1. **Todo `docker compose` neste servidor leva `--env-file .env.production`.**
+>    O `env_file:` do compose entrega variáveis *aos containers*; as expressões
+>    `${...}` *dentro do* `compose.prod.yml` são preenchidas por outra fonte. Sem
+>    o parâmetro, `REDIS_PASSWORD` e `NEXT_PUBLIC_API_URL` saem em branco — a web
+>    seria construída chamando lugar nenhum. Medido: os containers atuais foram
+>    criados com `--env-file` (rótulo `com.docker.compose.project.environment_file`),
+>    e `docker compose ps` sem ele imprime os dois avisos.
+> 2. **A imagem é construída antes da migration.** `docker compose run` usa a
+>    imagem que já existe; a versão anterior migrava com a imagem de agosto, que
+>    não tem as migrations novas, e o comando terminaria "com sucesso" sem aplicar
+>    nada.
+> 3. **A configuração de produção não estava no repositório.** O
+>    `compose.prod.yml`, os três Dockerfiles de produção, o `nginx/default.conf` e o
+>    `.dockerignore` existiam só no servidor. Entraram no repositório em 21/09, e
+>    os Dockerfiles subiram de Node 20 para Node 24 — a versão que o `package.json`
+>    exige e em que todos os testes rodam. API e worker foram construídos e
+>    conferidos (`node --version` → `v24.21.0`) na máquina de desenvolvimento antes
+>    de qualquer coisa chegar aqui.
+>
+> Nos blocos abaixo, `$C` abrevia o prefixo obrigatório:
+>
+> ```bash
+> cd /opt/apps/prospectai
+> C="docker compose --env-file .env.production -f compose.prod.yml"
+> ```
+
 ### 0. Salvar o que não se recupera
 
 ```bash
@@ -117,16 +146,39 @@ docker exec prospectai-prod-postgres-1 pg_dump -U propectai propectai \
 — o comentário do compose de desenvolvimento diz isso com todas as letras. O
 dump do Postgres custa segundos e compra a possibilidade de errar.
 
+Feito em 21/09/2026: `/opt/backups/propectai-20260921-1336.sql.gz`, 42 KB,
+39 tabelas, `PIPESTATUS` `0 0`.
+
 ### 1. Trocar a árvore de código
 
-Com o repositório vazio, as duas saídas honestas são:
+Medido em 21/09: o `.git` do servidor já aponta para `origin`, e o `git fetch`
+funciona sem credencial. Comparando a pasta com o repositório, os únicos
+arquivos que existiam só aqui eram a configuração de produção (agora
+versionada), o `.env.production`, lixo de build e o clone do scraper — nenhum
+arquivo de código órfão.
 
-- **Clonar de verdade** noutro caminho e apontar o compose para lá; ou
-- `git init` + `remote add` + `fetch` + `checkout` no lugar, preservando
-  `.env.production` e `infra/nginx/default.conf`, que não vêm do repositório.
+Antes de trocar, uma cópia da árvore atual, para poder voltar:
 
-Qualquer uma resolve; a segunda mantém o caminho que o Compose já conhece.
-**O que não serve é copiar arquivos de novo** — seria repetir a causa deste item.
+```bash
+tar czf /opt/backups/prospectai-arvore-$(date +%Y%m%d-%H%M).tgz --exclude=node_modules --exclude=services/google-maps-scraper -C /opt/apps prospectai
+```
+
+Depois, o código no lugar, no caminho que o Compose já conhece:
+
+```bash
+git fetch origin main
+git checkout -f -B main origin/main
+git log -1 --format='%h %s'
+```
+
+O `-f` é necessário e é seguro aqui: o `compose.prod.yml` e os Dockerfiles
+existem como arquivos soltos e passam a vir do repositório. O `.env.production`
+não é tocado — está no `.gitignore` desde 21/09, e nunca é rastreado. Os
+containers em execução não percebem nada: continuam das imagens antigas até o
+passo 6.
+
+**O que não serve é copiar arquivos de novo** — foi a causa de o servidor não
+ter SHA nenhum que dissesse o que estava rodando.
 
 ### 2. Acrescentar as quatro variáveis ao `.env.production`
 
@@ -145,6 +197,13 @@ passo 4 — então na prática escreve-se o arquivo entre o passo 4 e o 5, mas a
 
 O host é `postgres`, o nome do serviço na rede `internal` — não `localhost`,
 não `127.0.0.1`.
+
+Medido em 21/09 (só os nomes, com `grep -o '^[A-Z_]*=' .env.production`):
+faltam exatamente as três URLs acima e o `SITE_AUDIT_PROVIDER`. O
+`PAYMENT_PROVIDER` também falta, e está certo faltar — o padrão é `mock`. O
+`APP_VERSION` aparece **duas vezes**; vale a última linha, e a primeira deve
+sair na mesma edição, antes que alguém altere a de cima e não entenda por que
+nada muda.
 
 #### O `connection_limit=15` na URL da aplicação, e só nela
 
@@ -208,21 +267,37 @@ o primeiro relatório com medição real encontrou três defeitos no documento
 (corrigidos em `a9dfc7b` e `00efaf4`). Ligar em ambiente online sem esse teste
 teria entregue esses três defeitos a quem abrisse o relatório.
 
-### 3. Aplicar as migrations
+### 3. Construir, parar, migrar
+
+**3a. Construir as três imagens.** Não toca em container nenhum — só cria imagem
+nova ao lado da antiga. É também o primeiro build da web em Node 24.
 
 ```bash
-cd /opt/apps/prospectai
-docker compose -f compose.prod.yml run --rm api pnpm db:deploy
+$C build api worker web
+```
+
+**3b. Parar só a API e o worker.** A partir da migration, o código de agosto
+passa a ler um banco que mudou por baixo dele — a de 16/09 troca o tipo de uma
+coluna. Melhor fora do ar que respondendo errado. Serviços nomeados; nada de
+`down`.
+
+```bash
+$C stop api worker
+```
+
+**3c. Migrar**, com a imagem nova:
+
+```bash
+$C run --rm api pnpm db:deploy
 ```
 
 `db:deploy` é `prisma migrate deploy`, não `migrate dev` — o segundo cria shadow
-database e faz perguntas, e pergunta sem terminal vira travamento.
+database e faz perguntas, e pergunta sem terminal vira travamento. Conecta pelo
+`DATABASE_URL`, o dono (`schema.prisma`, `datasource db`), e por isso consegue
+criar os papéis que as migrations de RLS introduzem.
 
-> **A verificar antes:** se a imagem `api.prod.Dockerfile` carrega o CLI do
-> Prisma. Imagem de produção enxuta costuma não carregar. Se não carregar, a
-> saída é um container de uso único a partir do `Dockerfile` de desenvolvimento,
-> na mesma rede. Conferir com:
-> `docker compose -f compose.prod.yml run --rm api pnpm prisma -v`
+O CLI do Prisma está na imagem: o Dockerfile instala as dependências de
+desenvolvimento antes do build, e o `prisma` é uma delas.
 
 Isto cria os três papéis, as 34 políticas e as tabelas novas.
 
@@ -248,7 +323,7 @@ hoje, comigo, com template do Docker.
 ### 5. Semear
 
 ```bash
-docker compose -f compose.prod.yml run --rm api pnpm db:seed
+$C run --rm api pnpm db:seed
 ```
 
 Aqui é obrigatório, e não opcional como em produção real: é o seed que grava
@@ -259,10 +334,10 @@ que é exatamente o que o Gate 1 precisa que deixe de acontecer.
 ### 6. Subir com as variáveis novas
 
 ```bash
-docker compose -f compose.prod.yml up -d --build api worker web
+$C up -d api worker web
 ```
 
-Serviços nomeados, um a um. **Sem `down`, sem `--remove-orphans`** — a máquina
+Sem `--build`: as imagens foram construídas no passo 3a. Serviços nomeados. **Sem `down`, sem `--remove-orphans`** — a máquina
 tem stacks de terceiros e o segundo argumento já removeu container alheio em
 mais de um projeto por aí.
 
@@ -295,7 +370,7 @@ docker logs prospectai-prod-worker-1 2>&1 | grep "Provider de auditoria"
 
 Tem de dizer `nativo (DNS e socket reais)`. Se disser `mock`, a variável não
 chegou ao container: conferir o `.env.production` e recriar **só o worker** —
-`docker compose -f compose.prod.yml up -d --force-recreate worker`. Nunca
+`$C up -d --force-recreate worker`. Nunca
 `down`, nunca comando sem o nome do serviço.
 
 ---

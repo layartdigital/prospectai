@@ -1,0 +1,136 @@
+name: prospectai-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - prospectai_postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--save",
+        "60",
+        "1",
+        "--requirepass",
+        "${REDIS_PASSWORD}",
+      ]
+    volumes:
+      - prospectai_redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  gmaps-scraper:
+    image: gosom/google-maps-scraper:latest
+    restart: unless-stopped
+    command: ["-data-folder", "/gmapsdata"]
+    environment:
+      DISABLE_TELEMETRY: "1"
+    volumes:
+      - /opt/data/prospectai/gmapsdata:/gmapsdata
+    networks:
+      - internal
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.prod.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gmaps-scraper:
+        condition: service_started
+    networks:
+      - internal
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/worker.prod.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gmaps-scraper:
+        condition: service_started
+    networks:
+      - internal
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.prod.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      API_INTERNAL_URL: http://api:3101
+    depends_on:
+      - api
+    networks:
+      - internal
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "3102:80"
+    volumes:
+      - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+      - api
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  prospectai_postgres_data:
+  prospectai_redis_data:

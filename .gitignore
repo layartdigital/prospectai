@@ -17,6 +17,10 @@ out/
 .env.local
 .env.*.local
 !.env.example
+# As senhas do ambiente online. Acrescentado em 21/09, quando o servidor passou a
+# ter um checkout de verdade deste repositorio: sem esta linha, um `git add -A`
+# rodado la colocaria as senhas de producao num commit.
+.env.production
 
 # Prisma - client gerado
 prisma/generated/

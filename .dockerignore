@@ -1,0 +1,31 @@
+.git
+node_modules
+**/node_modules
+.next
+**/.next
+.turbo
+**/.turbo
+dist
+**/dist
+coverage
+**/coverage
+.env
+.env.*
+!.env.example
+*.log
+data
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Acrescentados em 21/09/2026, quando este arquivo entrou no repositorio.
+#
+# `Claude outputs/` e a pasta de trabalho local: backups de codigo, PDFs de
+# relatorio e o CSV de uma auditoria real. O `COPY . .` dos Dockerfiles de
+# producao levaria tudo isso para dentro da imagem quando o build roda numa
+# maquina de desenvolvimento.
+Claude outputs
+
+# Clone de terceiros consumido como imagem (`gosom/google-maps-scraper`), nunca
+# compilado por nos — regra 3. Estava sendo copiado para a imagem da API, do
+# worker e da web a cada build no servidor.
+services/google-maps-scraper
