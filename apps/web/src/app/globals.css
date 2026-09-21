@@ -109,7 +109,11 @@
  *    borrao.
  */
 @media print {
+  /* A4 em retrato, fixado. O primeiro PDF emitido saiu em A4 deitado — um
+     laudo e documento de leitura, nao planilha. Com `size` declarado o Chrome
+     trava a orientacao no dialogo, e quem imprime nao precisa acertar isso. */
   @page {
+    size: A4 portrait;
     margin: 16mm;
   }
 

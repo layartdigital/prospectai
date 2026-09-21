@@ -9,12 +9,55 @@ import { AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 
 import { BotaoImprimir } from '@/components/relatorio/botao-imprimir';
 import { ServerApiError, serverApi } from '@/lib/server-api';
 import { getSession } from '@/lib/session';
 
-export const metadata: Metadata = { title: 'Diagnóstico de presença digital' };
+/**
+ * As duas leituras da API, memorizadas por requisição.
+ *
+ * `generateMetadata` e a página precisam dos mesmos dados, e `cache` do React
+ * faz a segunda chamada devolver o resultado da primeira dentro da mesma
+ * renderização — sem ele, cada relatório custaria quatro leituras em vez de
+ * duas, e o pool de conexões deste app já mostrou (`P2028`) que leitura extra
+ * não é de graça.
+ */
+const carregarAuditoria = cache((auditId: string) =>
+  serverApi<AuditDetailView>(`/audits/${auditId}`),
+);
+const carregarLead = cache((leadId: string) => serverApi<LeadDetail>(`/leads/${leadId}`));
+
+/**
+ * **O título é absoluto, e isso é a decisão 3 de 18/09 aplicada ao metadado.**
+ *
+ * O layout raiz tem `template: '%s · PropectAI'`, e a primeira versão desta
+ * página herdava o sufixo. O título da aba vira o título do PDF e o nome
+ * sugerido do arquivo — o primeiro PDF gerado saiu como
+ * `Diagnóstico de presença digital · PropectAI.pdf`, com o nome do produto
+ * dentro do documento que a decisão tirou de lá. Nenhuma olhada na tela acha
+ * isso; foi preciso ler os metadados do arquivo.
+ *
+ * O nome do negócio entra no lugar: quem emite vários relatórios precisa que
+ * os arquivos não saiam todos com o mesmo nome.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ auditId: string }>;
+}): Promise<Metadata> {
+  const padrao = 'Diagnóstico de presença digital';
+  try {
+    const { auditId } = await params;
+    const audit = await carregarAuditoria(auditId);
+    const lead = await carregarLead(audit.leadId);
+    return { title: { absolute: `${padrao} — ${lead.name}` } };
+  } catch {
+    // Quem trata 404 e recusa é a página. Aqui só não pode herdar o sufixo.
+    return { title: { absolute: padrao } };
+  }
+}
 
 /**
  * O relatório entregável.
@@ -83,7 +126,7 @@ export default async function RelatorioPage({
 
   let audit: AuditDetailView;
   try {
-    audit = await serverApi<AuditDetailView>(`/audits/${auditId}`);
+    audit = await carregarAuditoria(auditId);
   } catch (error) {
     if (error instanceof ServerApiError && error.statusCode === 404) notFound();
     throw error;
@@ -91,7 +134,7 @@ export default async function RelatorioPage({
 
   let lead: LeadDetail;
   try {
-    lead = await serverApi<LeadDetail>(`/leads/${audit.leadId}`);
+    lead = await carregarLead(audit.leadId);
   } catch (error) {
     // Auditoria órfã: o lead saiu do acervo depois da medição. Não há cabeçalho
     // honesto a montar sem ele — o documento diz de quem é o site logo na
@@ -161,7 +204,11 @@ export default async function RelatorioPage({
   const local = [lead.address.city, lead.address.stateUf].filter(Boolean).join(' · ');
 
   return (
-    <article className="mx-auto max-w-3xl px-5 py-8 print:py-0">
+    // Sem `print:py-0`: a primeira versão tirava o espaçamento na impressão
+    // contando com o `@page { margin }`, e o primeiro PDF saiu com o cabeçalho
+    // a 0,3 mm da borda — o diálogo do navegador pode imprimir com margem
+    // "Nenhuma", e aí só o espaçamento do próprio documento sobra.
+    <article className="mx-auto max-w-3xl px-5 py-8">
       <div className="pa-nao-imprime mb-6 flex flex-wrap items-center justify-between gap-3">
         <Link href={voltar} className="text-xs text-muted hover:text-navy-900">
           ← Voltar para a ficha
