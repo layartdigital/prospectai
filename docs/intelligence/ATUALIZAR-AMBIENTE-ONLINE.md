@@ -1,7 +1,7 @@
 # Atualizar o ambiente online — medição e ordem
 
 **Data da medição:** 17/09/2026
-**Alvo:** `app.prospectai.com.br`, em `108.174.144.216` (Ubuntu 24.04.4)
+**Alvo:** `108.174.144.216` (Ubuntu 24.04.4), acessado pelo IP — o nome `app.prospectai.com.br` não resolve (ver §1)
 **Natureza:** ambiente de teste online, não produção com cliente. Isso muda o
 risco aceitável, não o método.
 
@@ -20,8 +20,17 @@ específico, que não é primeiro deploy: já existe coisa no ar.
 | Variáveis | `/opt/apps/prospectai/.env.production` |
 | Containers | api, worker, web, postgres, redis, gmaps-scraper, gateway |
 | No ar desde | **05 e 11/08/2026** |
-| Domínio | `app.prospectai.com.br`, com certificado, nginx do host → `127.0.0.1:3102` |
+| Domínio | **não resolve** — ver a correção abaixo. nginx do host → `127.0.0.1:3102`, acesso pelo IP |
 | Dono do banco | `propectai` — **a grafia literal que as migrations exigem** |
+
+> **Correção de 21/09.** A versão de 17/09 desta tabela dizia *"`app.prospectai.com.br`,
+> com certificado"*, e a §4 concluía que o domínio não era bloqueio. As duas
+> afirmações vinham da **configuração** do nginx, sem resolver o nome. Em 18/09
+> o dono do projeto informou que `nslookup app.prospectai.com.br` não responde e
+> que o ambiente roda direto no IP; o `GATE-1-LACUNA.md` §7 registra o domínio
+> como o primeiro elo da corrente que falta. Ler a configuração e chamar de
+> medição foi o erro — o mesmo tipo de erro que este documento existe para
+> evitar.
 
 O compose é bem-feito e não precisa mudar: rede `internal`, Postgres e Redis
 **sem porta publicada**, só o gateway em `3102`, Redis com `requirepass`,
@@ -162,6 +171,43 @@ concorrência de tela.
 ambiente do CI, se a URL for montada lá. Pool é por processo, e a fragilidade
 acompanha a URL, não o servidor.
 
+#### `SITE_AUDIT_PROVIDER=native` — acrescentada em 21/09/2026
+
+```
+SITE_AUDIT_PROVIDER=native
+```
+
+**Sem ela, o relatório de diagnóstico não existe neste ambiente.** A fábrica do
+worker cai no provedor simulado quando a variável falta, toda auditoria sai
+marcada como simulada, e a página `/relatorio/:auditId` se recusa a emitir
+documento de medição simulada — de propósito. O link "Ver diagnóstico" nunca
+aparece.
+
+**O que ela liga:** o worker passa a abrir DNS e socket reais contra o site
+cadastrado no lead, a partir deste servidor. Três fatos pesaram na decisão, que
+é do dono do projeto e foi tomada em 21/09:
+
+- **Tudo passa pelo módulo de egress** (`apps/worker/src/egress`, 115 testes).
+  Destino que resolve para faixa interna — as redes Docker desta máquina, o
+  loopback, o endereço de metadados de nuvem — é recusado antes de conectar, e
+  não há segunda resolução de DNS entre validar e conectar. É o que impede um
+  lead com site malicioso de fazer o worker falar com o Bellvia ou o Supabase
+  pela rede interna.
+- **Site que aponta para o próprio IP público deste servidor** chega ao nginx do
+  host como qualquer visitante da internet chegaria. O egress não bloqueia isso,
+  e não precisa: a sonda guarda status e saltos, nunca o corpo, e não ganha
+  acesso que um navegador qualquer não tenha.
+- **É uma auditoria por clique**, no máximo duas requisições HTTP por site, com
+  teto de tempo. As duas lacunas registradas no
+  `FLOWSINT-EGRESS-REFERENCIA-INTERNA.md` — sem limite de taxa por domínio, sem
+  `robots.txt` — são de crawler em escala, e voltam a importar no dia em que a
+  auditoria virar lote. Hoje não viram.
+
+**Testado antes na máquina de desenvolvimento, em 21/09**, contra um site real:
+o primeiro relatório com medição real encontrou três defeitos no documento
+(corrigidos em `a9dfc7b` e `00efaf4`). Ligar em ambiente online sem esse teste
+teria entregue esses três defeitos a quem abrisse o relatório.
+
 ### 3. Aplicar as migrations
 
 ```bash
@@ -240,6 +286,18 @@ docker exec prospectai-prod-api-1 printenv DATABASE_URL_APP | head -c 30
 
 Se vier vazio, a aplicação está rodando como dono e todo o resto foi teatro.
 
+E o provedor de auditoria, que falha em silêncio pelo outro lado — nada quebra,
+só nenhum relatório aparece:
+
+```bash
+docker logs prospectai-prod-worker-1 2>&1 | grep "Provider de auditoria"
+```
+
+Tem de dizer `nativo (DNS e socket reais)`. Se disser `mock`, a variável não
+chegou ao container: conferir o `.env.production` e recriar **só o worker** —
+`docker compose -f compose.prod.yml up -d --force-recreate worker`. Nunca
+`down`, nunca comando sem o nome do serviço.
+
 ---
 
 ## 4. O que este documento não cobre
@@ -250,6 +308,8 @@ já tomada (assinatura) mas de configuração ainda não feita: conta na Stripe,
 quatro `stripePriceId`, e as variáveis `STRIPE_SECRET_KEY` e
 `STRIPE_WEBHOOK_SECRET` — que também não estão no `.env.production`.
 
-O endereço que a Stripe vai chamar, esse já existe:
-`https://app.prospectai.com.br` com certificado válido, proxy para o gateway.
-Era o item que eu havia classificado como bloqueio, e não era.
+O endereço que a Stripe vai chamar **ainda não existe**: o nome não resolve, e
+o webhook precisa de HTTPS com certificado válido num nome. A versão de 17/09
+deste parágrafo dizia o contrário — ver a correção na §1. O domínio continua
+sendo bloqueio, e a decisão sobre ele está com o dono do projeto, porque o nome
+do produto pode mudar.
