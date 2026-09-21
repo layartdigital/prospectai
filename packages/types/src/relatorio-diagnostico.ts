@@ -1,4 +1,9 @@
-import type { CheckOutcomeName, MedicaoValor, SiteCheckName } from './site-audit';
+import type {
+  AuditStatusName,
+  CheckOutcomeName,
+  MedicaoValor,
+  SiteCheckName,
+} from './site-audit';
 
 /**
  * A traducao do relatorio de diagnostico — de vocabulario de maquina para o que
@@ -394,4 +399,61 @@ function cadeia(c: ChecagemMedida): ItemDoRelatorio | null {
     porQueImporta: null,
     oQueFazer: null,
   };
+}
+
+/**
+ * Por que uma auditoria **nao** pode virar relatorio.
+ *
+ * - `FALHOU` — nos nao conseguimos medir. Defeito nosso, e o credito volta.
+ * - `CANCELADA` — nao vai terminar nunca.
+ * - `EM_ANDAMENTO` — vai terminar; o relatorio aparece quando terminar.
+ * - `SIMULADA` — terminou, mas quem mediu foi o provedor de simulacao.
+ */
+export type RecusaDoRelatorio = 'FALHOU' | 'CANCELADA' | 'EM_ANDAMENTO' | 'SIMULADA';
+
+/**
+ * **A decisao de emitir ou nao o documento, num lugar so.**
+ *
+ * Ela existia em dois: na pagina `/relatorio/:auditId`, que se recusa a
+ * renderizar, e no card da ficha, que decide se mostra o link. Duas copias da
+ * mesma condicao divergem no primeiro refactor — e a divergencia tem sintoma
+ * ruim nas duas direcoes: link que leva a recusa, ou documento sem caminho ate
+ * ele.
+ *
+ * Mora aqui pelo mesmo motivo da traducao: **aqui existe runner de teste**. A
+ * web so tem Playwright, e um e2e que pede auditoria consome o unico diagnostico
+ * do mes do FREE — passaria na primeira rodada e bateria no limite do plano na
+ * segunda.
+ *
+ * ---
+ *
+ * **`CANCELADA` e separada de `EM_ANDAMENTO` porque o texto de cada uma promete
+ * coisas diferentes.** A primeira versao da pagina tratava tudo que nao era
+ * concluido como "ainda nao terminou — o relatorio aparece aqui assim que a
+ * medicao concluir". Para uma auditoria cancelada isso e uma promessa que nunca
+ * se cumpre. Apareceu ao desenhar o teste que percorre todos os estados, antes
+ * de chegar a tela.
+ *
+ * Devolve `null` quando o relatorio **pode** ser emitido.
+ */
+export function recusaDoRelatorio(auditoria: {
+  readonly status: AuditStatusName;
+  readonly providerName: string | null;
+}): RecusaDoRelatorio | null {
+  switch (auditoria.status) {
+    case 'FAILED':
+      return 'FALHOU';
+    case 'CANCELLED':
+      return 'CANCELADA';
+    case 'REQUESTED':
+    case 'QUEUED':
+    case 'RUNNING':
+      return 'EM_ANDAMENTO';
+    case 'COMPLETED':
+    case 'PARTIAL':
+      // Igualdade estrita com o nome do provedor real, e nao "diferente de
+      // mock": um terceiro provedor que venha a existir entra recusado ate
+      // alguem decidir de proposito que a medicao dele vale documento.
+      return auditoria.providerName === 'native' ? null : 'SIMULADA';
+  }
 }

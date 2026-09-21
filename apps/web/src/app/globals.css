@@ -90,3 +90,43 @@
            bg-gradient-to-r from-transparent via-white/60 to-transparent;
   }
 }
+
+/**
+ * Impressao.
+ *
+ * Existe por causa de uma tela so: `/relatorio/:auditId`. O diagnostico e o
+ * unico documento do sistema que sai daqui para a mao de outra pessoa, e o
+ * caminho mais provavel ate ela e o PDF que o navegador gera com Ctrl+P.
+ *
+ * As tres regras, e nenhuma e estetica:
+ *
+ * 1. `.pa-nao-imprime` some. Botao "Imprimir" impresso e a marca da pagina web
+ *    salva como documento — denuncia que ninguem olhou o resultado.
+ * 2. `.pa-item` nao quebra no meio. Um achado partido entre duas paginas perde
+ *    a linha que diz o que fazer, que e justamente a que o leitor procura.
+ * 3. Fundo branco e sem sombra. O azul-acinzentado da aplicacao vira cinza
+ *    chapado na impressao em preto e branco, e a sombra dos cartoes vira
+ *    borrao.
+ */
+@media print {
+  @page {
+    margin: 16mm;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  .pa-nao-imprime {
+    display: none !important;
+  }
+
+  .pa-item {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .pa-card {
+    box-shadow: none;
+  }
+}

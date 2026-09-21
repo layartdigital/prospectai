@@ -10,9 +10,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   AUDIT_VERSION,
+  type AuditDetailView,
   type AuditListItem,
   type AuditQuotaView,
-  type SiteCheckResult,
 } from '@propectai/types';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
@@ -390,31 +390,16 @@ export class AuditsService implements OnModuleDestroy {
     }));
   }
 
-  async detalhe(
-    tenantId: string,
-    auditId: string,
-  ): Promise<{
-    auditId: string;
-    leadId: string;
-    status: string;
-    auditVersion: string;
-    /** Qual implementacao mediu. Nulo enquanto a auditoria nao rodou. */
-    providerName: string | null;
-    durationMs: number | null;
-    errorCode: string | null;
-    finishedAt: string | null;
-    /**
-     * Ate quando as medicoes ficam disponiveis. Nulo enquanto nao ha checagem.
-     *
-     * **E o MENOR `retentionUntil` das checagens, e nao o maior.** Elas sao
-     * gravadas na mesma execucao e hoje coincidem, mas o schema permite
-     * divergir — e nesse caso o maior seria uma promessa que o sistema nao
-     * cumpre: a primeira medicao some antes. Prometer a data em que ainda esta
-     * tudo la e a unica leitura honesta.
-     */
-    retentionUntil: string | null;
-    checks: Array<Omit<SiteCheckResult, 'observedAt'> & { observedAt: string | null }>;
-  }> {
+  /**
+   * **O tipo de retorno saiu daqui para o `@propectai/types` em 19/09/2026.**
+   *
+   * Ele era inline e podia ser: so o controller o devolvia. Quando a pagina
+   * `/relatorio/:auditId` passou a le-lo, a forma virou contrato entre dois
+   * pacotes, e contrato declarado duas vezes diverge em silencio. As razoes de
+   * cada campo — `providerName`, `retentionUntil`, o `observedAt` anulavel —
+   * foram junto, no `AuditDetailView`.
+   */
+  async detalhe(tenantId: string, auditId: string): Promise<AuditDetailView> {
     const a = await this.prisma.comTenant(tenantId, (tx) =>
       tx.digitalPresenceAudit.findUnique({
         where: { tenantId_id: { tenantId, id: auditId } },

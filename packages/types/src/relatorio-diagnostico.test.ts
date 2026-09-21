@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  recusaDoRelatorio,
   traduzirChecagem,
   type ChecagemMedida,
   type ItemDoRelatorio,
 } from './relatorio-diagnostico';
-import { CHECK_OUTCOMES, SITE_CHECKS } from './site-audit';
+import { AUDIT_STATUSES, CHECK_OUTCOMES, SITE_CHECKS } from './site-audit';
 
 /**
  * O guarda da regra 4 aplicada a um documento que vai para a mão do cliente.
@@ -187,6 +188,50 @@ describe('as três checagens que nenhum provedor emite', () => {
           `${check}/${outcome}`,
         ).toBeNull();
       }
+    }
+  });
+});
+
+describe('quando uma auditoria pode virar documento', () => {
+  // `null` = ainda não rodou; `mock` = o provedor de simulação que a fábrica
+  // escolhe quando nada é dito; o terceiro nome é um provedor que ainda não
+  // existe — e que por isso mesmo precisa entrar recusado.
+  const PROVEDORES = [null, 'mock', 'native', 'provedor-futuro'] as const;
+
+  it('só COMPLETED ou PARTIAL medidos pelo provedor real são emitidos', () => {
+    const emitidos: string[] = [];
+
+    for (const status of AUDIT_STATUSES) {
+      for (const providerName of PROVEDORES) {
+        if (recusaDoRelatorio({ status, providerName }) === null) {
+          emitidos.push(`${status}/${providerName}`);
+        }
+      }
+    }
+
+    // O produto cartesiano inteiro, afirmado como lista exata: qualquer
+    // combinação a mais é documento emitido que não deveria existir.
+    expect(emitidos.sort()).toEqual(['COMPLETED/native', 'PARTIAL/native']);
+  });
+
+  it('medição simulada concluída é recusada como SIMULADA', () => {
+    // O caso que o ambiente de desenvolvimento produz sempre: a fábrica cai no
+    // mock quando `SITE_AUDIT_PROVIDER` não é `native`.
+    expect(recusaDoRelatorio({ status: 'COMPLETED', providerName: 'mock' })).toBe('SIMULADA');
+    expect(recusaDoRelatorio({ status: 'PARTIAL', providerName: 'mock' })).toBe('SIMULADA');
+  });
+
+  it('auditoria cancelada não recebe a promessa de "ainda vai terminar"', () => {
+    // A primeira versão da página dizia a uma auditoria cancelada que o
+    // relatório apareceria quando a medição concluísse. Não conclui nunca.
+    for (const providerName of PROVEDORES) {
+      expect(recusaDoRelatorio({ status: 'CANCELLED', providerName })).toBe('CANCELADA');
+    }
+  });
+
+  it('falha nossa é FALHOU, qualquer que seja o provedor', () => {
+    for (const providerName of PROVEDORES) {
+      expect(recusaDoRelatorio({ status: 'FAILED', providerName })).toBe('FALHOU');
     }
   });
 });

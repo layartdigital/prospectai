@@ -1,6 +1,7 @@
 'use client';
 
 import type { AuditListItem, AuditQuotaView } from '@propectai/types';
+import { recusaDoRelatorio } from '@propectai/types';
 import { Gauge, Loader2, Lock, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -185,6 +186,21 @@ export function LeadAuditCard({ leadId, website, saldo, auditorias }: Props) {
               const simulada =
                 !correndo && a.providerName !== null && a.providerName !== 'native';
 
+              /**
+               * **O link só aparece quando o relatório vai renderizar.**
+               *
+               * Sem esta condição o operador clica e leva uma recusa, o que é
+               * pior que não ver o link — ele tenta de novo achando que foi
+               * falha de rede.
+               *
+               * A condição é a mesma função que a página `/relatorio/:auditId`
+               * consulta antes de emitir, e não uma cópia dela: a primeira
+               * versão repetia a regra aqui, com um comentário admitindo que as
+               * duas podiam divergir num refactor. Admitir o risco não o
+               * elimina; uma função só, sim.
+               */
+              const entregavel = recusaDoRelatorio(a) === null;
+
               return (
                 <li
                   key={a.auditId}
@@ -207,8 +223,16 @@ export function LeadAuditCard({ leadId, website, saldo, auditorias }: Props) {
                       </span>
                     ) : null}
                   </span>
-                  <span className="text-muted">
+                  <span className="flex items-center gap-3 text-muted">
                     {formatDateTime(a.finishedAt ?? a.createdAt)}
+                    {entregavel ? (
+                      <Link
+                        href={`/relatorio/${a.auditId}`}
+                        className="font-semibold text-brand-600 hover:text-brand-700"
+                      >
+                        Ver diagnóstico
+                      </Link>
+                    ) : null}
                   </span>
                 </li>
               );

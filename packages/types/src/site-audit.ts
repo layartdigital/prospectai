@@ -157,6 +157,52 @@ export interface AuditListItem {
 }
 
 /**
+ * Uma auditoria inteira, com as medicoes — `GET /audits/:id`.
+ *
+ * **Este contrato nasceu de um tipo inline no `AuditsService`.** Ele subiu para
+ * ca quando a pagina do relatorio passou a consumir a rota: enquanto so o
+ * controller devolvia o objeto, o tipo podia morar la; a partir do momento em
+ * que outra camada o le, duas declaracoes da mesma forma divergem em silencio —
+ * e o sintoma seria um campo renderizado como `undefined` num documento que vai
+ * para a mao de outra pessoa.
+ */
+export interface AuditDetailView {
+  readonly auditId: string;
+  readonly leadId: string;
+  readonly status: AuditStatusName;
+  readonly auditVersion: string;
+  /**
+   * **Qual implementacao mediu.** Nulo enquanto a auditoria nao rodou.
+   *
+   * O relatorio se recusa a renderizar quando isto nao e `'native'`: medicao
+   * simulada num documento entregavel seria exatamente a confusao que o
+   * `DigitalPresenceAudit.providerName` existe para impedir.
+   */
+  readonly providerName: string | null;
+  readonly durationMs: number | null;
+  /** So quando `status` e `FAILED` — ou seja, quando a falha e nossa. */
+  readonly errorCode: string | null;
+  readonly finishedAt: string | null;
+  /**
+   * Ate quando as medicoes ficam disponiveis. Nulo enquanto nao ha checagem.
+   *
+   * **E o MENOR `retentionUntil` das checagens, e nao o maior.** Elas sao
+   * gravadas na mesma execucao e hoje coincidem, mas o schema permite divergir —
+   * e nesse caso o maior seria uma promessa que o sistema nao cumpre: a primeira
+   * medicao some antes. Prometer a data em que ainda esta tudo la e a unica
+   * leitura honesta.
+   */
+  readonly retentionUntil: string | null;
+  /**
+   * `observedAt` e anulavel aqui e nao no `SiteCheckResult` porque a checagem
+   * gravada pode nao ter chegado a observar nada.
+   */
+  readonly checks: ReadonlyArray<
+    Omit<SiteCheckResult, 'observedAt'> & { readonly observedAt: string | null }
+  >;
+}
+
+/**
  * Saldo de auditorias do periodo — `GET /audits/quota`.
  *
  * Consultar nunca bloqueia (regra 5). O gate so age na tentativa.
