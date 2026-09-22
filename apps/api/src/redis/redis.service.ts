@@ -2,6 +2,8 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
+import { urlSemSenha } from '@propectai/types';
+
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
@@ -23,7 +25,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.client.on('connect', () => {
-      this.logger.log(`Conectado ao Redis em ${url}`);
+      // Nunca a URL crua: ela carrega a senha. Ver packages/types/src/segredo.ts.
+      this.logger.log(`Conectado ao Redis em ${urlSemSenha(url)}`);
     });
   }
 

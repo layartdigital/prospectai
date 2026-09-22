@@ -1,6 +1,8 @@
 import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 
+import { urlSemSenha } from '@propectai/types';
+
 import { QUEUE_NAMES, QUEUE_PREFIX, config } from './config';
 import { criarPrismaApp } from './db/prisma-app';
 import { criarPrismaSistema } from './db/prisma-sistema';
@@ -232,7 +234,7 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
 
 logger.info(
   {
-    redis: config.redisUrl,
+    redis: urlSemSenha(config.redisUrl),
     provider: provider.name,
     auditProvider: auditProvider.name,
     concurrency: config.maxConcurrentJobs,

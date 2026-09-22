@@ -15,8 +15,20 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# O pnpm fica DENTRO da imagem, num lugar que o usuario `node` enxerga.
+#
+# Ate 22/09/2026 o `corepack prepare` rodava como root e guardava o pnpm em
+# /root/.cache. O container roda como `node`, que nao ve essa pasta — entao todo
+# `pnpm` dentro do container (migration, seed, e o CMD da web) baixava o pnpm
+# da internet na hora e parava perguntando "Do you want to continue? [Y/n]".
+# Medido no primeiro deploy de setembro. Sem ninguem no terminal, a pergunta
+# vira um processo parado.
+ENV COREPACK_HOME=/opt/corepack \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
 RUN corepack enable \
-    && corepack prepare pnpm@10.30.1 --activate
+    && corepack prepare pnpm@10.30.1 --activate \
+    && chmod -R a+rX /opt/corepack
 
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}

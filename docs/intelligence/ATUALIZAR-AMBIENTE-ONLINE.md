@@ -1,6 +1,7 @@
 # Atualizar o ambiente online — medição e ordem
 
 **Data da medição:** 17/09/2026
+**Executado:** 21 e 22/09/2026, em `991f459` — registro e lições na §5
 **Alvo:** `108.174.144.216` (Ubuntu 24.04.4), acessado pelo IP — o nome `app.prospectai.com.br` não resolve (ver §1)
 **Natureza:** ambiente de teste online, não produção com cliente. Isso muda o
 risco aceitável, não o método.
@@ -301,24 +302,63 @@ desenvolvimento antes do build, e o `prisma` é uma delas.
 
 Isto cria os três papéis, as 34 políticas e as tabelas novas.
 
-### 4. Dar senha aos três papéis
+### 4. Dar senha aos três papéis — e escrevê-las no `.env.production`
+
+> **Trocado em 22/09/2026, na execução.** A versão anterior mandava digitar três
+> senhas no `\password` e depois copiá-las para o arquivo. Duas chances de a
+> senha ir certa para um lado e errada para o outro, e três senhas passando pela
+> área de transferência. O motivo declarado para o `\password` — não deixar a
+> senha no log do Postgres — é **medido** na linha B em vez de assumido.
+
+As senhas nascem numa variável do shell, vão para o banco e para o arquivo pelo
+mesmo comando, e não aparecem na tela nem no histórico (o histórico guarda
+`$P_APP`, não o valor). **Tudo na mesma sessão SSH.**
 
 ```bash
-docker exec -it prospectai-prod-postgres-1 psql -U propectai -d propectai
+cp -p .env.production /opt/backups/env.production-$(date +%Y%m%d).bak
+echo "SHOW log_statement;" | $C exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At'
 ```
 
-```
-\password propectai_migrator
-\password propectai_app
-\password propectai_sistema
+Tem de vir `none`. Qualquer outro valor: parar — o `ALTER ROLE` iria para o log.
+
+```bash
+P_MIG=$(openssl rand -hex 24); P_APP=$(openssl rand -hex 24); P_SIS=$(openssl rand -hex 24); echo ${#P_MIG} ${#P_APP} ${#P_SIS}
+printf "ALTER ROLE propectai_migrator PASSWORD '%s';\nALTER ROLE propectai_app PASSWORD '%s';\nALTER ROLE propectai_sistema PASSWORD '%s';\n" "$P_MIG" "$P_APP" "$P_SIS" | $C exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1'
 ```
 
-`\password` e não `ALTER ROLE ... PASSWORD`: o interativo não deixa a senha no
-histórico do shell nem no log do Postgres.
+Hex e não base64: cabe numa URL sem escape nenhum.
 
-**E não aninhar aspas atravessando PowerShell → ssh → docker → psql.** Foi a
-sétima ocorrência dessa armadilha neste programa, e a última delas aconteceu
-hoje, comigo, com template do Docker.
+Testar cada senha **pela rede** — `-h postgres`, e não `127.0.0.1`: o
+`pg_hba.conf` da imagem confia no loopback de dentro do container sem senha, e
+o teste passaria sem provar nada.
+
+```bash
+for r in migrator:$P_MIG app:$P_APP sistema:$P_SIS; do $C exec -T -e PGPASSWORD="${r#*:}" postgres psql -h postgres -U propectai_${r%%:*} -d propectai -Atc 'select current_user'; done
+```
+
+Escrever no arquivo — apagar antes, para o passo poder ser repetido:
+
+```bash
+sed -i '/^DATABASE_URL_\(APP\|MIGRATOR\|SISTEMA\)=/d; /^SITE_AUDIT_PROVIDER=/d; /^APP_VERSION=/d' .env.production
+printf '\nAPP_VERSION=0.1.1\nDATABASE_URL_MIGRATOR=postgresql://propectai_migrator:%s@postgres:5432/propectai?schema=public\nDATABASE_URL_APP=postgresql://propectai_app:%s@postgres:5432/propectai?schema=public&connection_limit=15\nDATABASE_URL_SISTEMA=postgresql://propectai_sistema:%s@postgres:5432/propectai?schema=public\nSITE_AUDIT_PROVIDER=native\n' "$P_MIG" "$P_APP" "$P_SIS" >> .env.production
+grep -E '^(APP_VERSION|DATABASE_URL_(APP|MIGRATOR|SISTEMA)|SITE_AUDIT_PROVIDER)=' .env.production | sed -E 's#:[0-9a-f]{48}@#:***@#'; ls -l .env.production
+unset P_MIG P_APP P_SIS
+```
+
+O arquivo continua `-rw-------` (o `sed -i` do GNU preserva a permissão —
+conferir mesmo assim no `ls`).
+
+**Não aninhar aspas atravessando PowerShell → ssh → docker → psql.** Os
+comandos acima rodam **dentro** do SSH; o SQL entra pelo `stdin` do `psql`,
+nunca por argumento.
+
+#### O que esperar do catálogo, para não se assustar
+
+`propectai_sistema` tem `rolbypassrls = t`. **É por desenho**, não defeito: a
+migration `20260903120000_rls_papel_sistema` o cria assim, e é o que sustenta
+os quatro caminhos que atravessam tenants (ver `PRIMEIRO-DEPLOY-CREDENCIAIS.md`).
+O papel que **não pode** ter BYPASSRLS é o `propectai_app` — e é isso que o
+invariante 6 do portão confere.
 
 ### 5. Semear
 
@@ -341,6 +381,23 @@ Sem `--build`: as imagens foram construídas no passo 3a. Serviços nomeados. **
 tem stacks de terceiros e o segundo argumento já removeu container alheio em
 mais de um projeto por aí.
 
+**O gateway também.** Em 22/09 a tela de login abria e nenhum login chegava à
+API: o nginx do `gateway`, no ar havia 5 semanas, tinha resolvido `api` para o
+IP antigo na partida e nunca mais perguntou. O `infra/nginx/default.conf` agora
+re-resolve a cada 10 s (`resolver 127.0.0.11`), então isso não se repete — mas
+**a configuração nova só vale depois que o gateway reler o arquivo**. No
+primeiro deploy com ela, validar e reiniciar só ele:
+
+```bash
+docker run --rm -v "$PWD/infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" nginx:1.27-alpine nginx -t
+$C restart gateway
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3102/api/v1/health
+```
+
+O `nginx -t` roda num container descartável, antes de tocar no gateway de
+verdade: configuração inválida ali derrubaria a porta 3102. O `curl` tem de
+dizer `200`.
+
 ### 7. Verificar, e é aqui que se descobre se deu certo
 
 ```bash
@@ -356,8 +413,13 @@ E a verificação que o portão **não** faz, porque é sobre a aplicação e n�
 o catálogo — a única que prova o §2.1:
 
 ```bash
-docker exec prospectai-prod-api-1 printenv DATABASE_URL_APP | head -c 30
+$C exec -T api printenv DATABASE_URL_APP | sed -E 's#:[0-9a-f]{48}@#:***@#'
 ```
+
+> **Corrigido em 22/09/2026.** A versão anterior era `| head -c 30`. O trecho
+> `postgresql://propectai_app:` tem 27 caracteres — os 30 primeiros incluíam
+> **três caracteres da senha**. A linha acima troca a senha por `***` e mostra o
+> resto, inclusive o `&connection_limit=15`, que o corte escondia.
 
 Se vier vazio, a aplicação está rodando como dono e todo o resto foi teatro.
 
@@ -388,3 +450,41 @@ o webhook precisa de HTTPS com certificado válido num nome. A versão de 17/09
 deste parágrafo dizia o contrário — ver a correção na §1. O domínio continua
 sendo bloqueio, e a decisão sobre ele está com o dono do projeto, porque o nome
 do produto pode mudar.
+
+---
+
+## 5. Registro da execução — 21 e 22/09/2026
+
+Todos os passos rodados um a um pelo dono do projeto, com a saída conferida
+antes do seguinte. Só serviços `prospectai-prod-*`, sempre pelo nome. Bellvia,
+Supabase, Authentik, n8n e o restante da máquina não foram tocados.
+
+| Passo | Resultado medido |
+|---|---|
+| 0 | dump `propectai-20260921-1336.sql.gz`, 39 tabelas |
+| 1 | árvore em `/opt/backups/prospectai-arvore-20260921-1726.tgz`; checkout em `991f459`; `.env.production` intacto e ignorado |
+| 3a | três imagens em Node 24; a web construída pela primeira vez no servidor |
+| — | imagens de agosto anotadas em `/opt/backups/imagens-agosto-20260921.txt` (caminho de volta) |
+| 3c | 27 migrations aplicadas de 32 |
+| 4 | `log_statement = none`; três senhas gravadas e testadas pela rede |
+| 5 | seed conferido antes de rodar: toda escrita é `upsert` ou protegida por "só cria se não existir" |
+| 6 | 7 serviços `running` |
+| 7 | portão RLS 6/6, `saida=0`; API como `propectai_app` com `connection_limit=15`; worker `nativo` |
+| — | primeiro diagnóstico com medição real emitido pelo ambiente online |
+
+### O que a execução encontrou
+
+1. **A API gravava a senha do Redis no log** (`Conectado ao Redis em
+   redis://:<senha>@...`), e o worker fazia o mesmo no log de início. Corrigido
+   com `urlSemSenha` (`packages/types/src/segredo.ts`). **A senha atual precisa
+   ser trocada depois do deploy dessa correção** — antes, a nova vazaria na
+   próxima subida.
+2. **O gateway não re-resolvia `api` e `web`.** Ver o passo 6.
+3. **O pnpm não estava dentro da imagem para o usuário `node`.** Todo `pnpm`
+   no container baixava da internet e perguntava `[Y/n]`. Corrigido nos três
+   Dockerfiles (`COREPACK_HOME=/opt/corepack`).
+4. **A conta de demonstração tem a senha do `.env.example`** — que está no
+   repositório. Qualquer um que o leia entra no tenant demo pelo IP. Trocar pela
+   própria interface.
+5. **O `head -c 30` do passo 7 expunha três caracteres da senha.** Corrigido.
+
