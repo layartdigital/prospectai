@@ -2,7 +2,7 @@
 
 **Data:** 18/09/2026 · **Tipo:** conteúdo, não código. É o texto que o cliente lê.
 **Leitor:** o dono do negócio auditado. Não é você, e não é o operador do sistema.
-**Estado:** revisado com as três decisões de 18/09 — ver §6. Virou código em 19/09 (`packages/types/src/relatorio-diagnostico.ts`, que declara que **este documento manda** se os dois divergirem). Revisado em 21/09 depois do primeiro relatório com medição real — ver `PAGINA_NAO_ENCONTRADA` na §4.2 e a §5.1.
+**Estado:** revisado com as três decisões de 18/09 — ver §6. Virou código em 19/09 (`packages/types/src/relatorio-diagnostico.ts`, que declara que **este documento manda** se os dois divergirem). Revisado em 21/09 depois do primeiro relatório com medição real — ver `PAGINA_NAO_ENCONTRADA` na §4.2 e a §5.1. Ordem de leitura corrigida em 23/09 — §5.2.
 
 ---
 
@@ -266,7 +266,7 @@ O schema registra, no campo `providerName`, que auditoria medida e auditoria inv
 ## 5. A estrutura da página
 
 1. **Cabeçalho** — nome do negócio auditado, endereço auditado, data da medição.
-2. **O que encontramos** — só o que é `FAILED` com causa atribuível ao site. Ordem: `DNS` → `HTTPS` → alcance → cadeia. Cada achado nos quatro campos da §4, sem o rótulo técnico à vista.
+2. **O que encontramos** — só o que é `FAILED` com causa atribuível ao site. Ordem: `DNS` → alcance → `HTTPS` → cadeia (ver §5.2). Cada achado nos quatro campos da §4, sem o rótulo técnico à vista.
 3. **O que está certo** — os `OK`. Curto, e não é enfeite: um relatório só de problemas parece peça de venda.
 4. **O que não foi possível verificar** — os `SKIPPED` e as recusas nossas, com a razão. Mesmo peso visual das outras seções.
 5. **Como medimos** — data, versão do verificador (`auditVersion`), e a frase que sustenta o resto: *cada item acima foi verificado automaticamente contra o endereço informado, na data indicada.*
@@ -286,6 +286,28 @@ A tabela da §4 traduz uma checagem de cada vez. O primeiro relatório com medi�
 **1. Certificado e redirecionamento só entram em "O que está certo" se a página abriu.** São propriedades do *endereço*, não do site — numa plataforma que responde por qualquer nome, o certificado é o da plataforma e o redirecionamento também. Quando o alcance não é `OK`, os dois itens **saem** do relatório; não mudam de seção, porque são medições corretas sobre a coisa errada. O `DNS` fica: "o endereço está ativo" é verdade e ajuda a localizar o problema. A regra só remove itens certos — achado e "não verificado" nunca saem por ela. Implementada em `montarRelatorio`, com teste construído a partir do CSV da auditoria real.
 
 **2. A primeira frase não diz mais do que foi medido.** Sem achados e sem nada pendente, "O que encontramos" diz *"Nenhum problema encontrado nas verificações desta lista."* Sem achados mas com itens não verificados, diz *"Nenhum problema encontrado no que foi possível verificar. Parte da verificação não pôde ser concluída — veja abaixo."* Quem lê um laudo para na primeira linha.
+
+### 5.2 A ordem de leitura — corrigida em 23/09/2026
+
+**Ordem em todas as seções: `DNS` → alcance (`HTTP_REACHABLE`) → `HTTPS` →
+cadeia (`REDIRECT_CHAIN`).** É a ordem de `SITE_CHECKS`, e conta uma história:
+o endereço existe, a página abre, a conexão é segura, quem digita sem `https`
+chega lá. Do que impede alguém de chegar até o detalhe de como chega.
+
+**Duas correções, e a segunda é a que importava.**
+
+A primeira é de texto: a §5 dizia `DNS` → `HTTPS` → alcance → cadeia, e a
+página sempre mostrou o alcance antes do `HTTPS`. Página que não abre é o
+problema maior; certificado de um site que ninguém alcança é detalhe. O
+documento estava errado, não a página.
+
+A segunda é de código. **A ordem não era decisão de ninguém:** a API pede as
+checagens com `orderBy: { createdAt: 'asc' }`, ou seja, na ordem em que o worker
+gravou cada medição — a hora em que cada sonda terminou. Duas linhas gravadas no
+mesmo milissegundo desempatam como o banco quiser, e o relatório de dois
+clientes podia sair em ordens diferentes sem que nada avisasse. Agora
+`montarRelatorio` ordena pela lista, e quatro testes seguram isso, inclusive um
+que embaralha a entrada e exige a mesma saída.
 
 ---
 

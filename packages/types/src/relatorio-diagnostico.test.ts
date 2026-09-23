@@ -315,3 +315,56 @@ describe('o relatório inteiro — o caso wixsite', () => {
     expect(secao(linhas, 'NAO_VERIFICADO')).toEqual(['HTTP_REACHABLE', 'REDIRECT_CHAIN']);
   });
 });
+
+/**
+ * A ordem de leitura — acrescentada em 23/09/2026.
+ *
+ * Antes disto, a ordem do documento era a ordem em que a API devolvia as
+ * linhas (`createdAt asc`): a hora em que cada sonda terminou. Nada quebrava
+ * quando ela mudava, e é por isso que precisa de teste — um documento que
+ * troca de ordem entre dois clientes não avisa ninguém.
+ */
+describe('a ordem de leitura do documento', () => {
+  const ordem = (linhas: ReturnType<typeof montarRelatorio>): string[] =>
+    linhas.map((l) => l.check);
+
+  const SAUDAVEL: ChecagemMedida[] = [
+    { check: 'DNS', outcome: 'OK', errorCode: null, result: null },
+    { check: 'HTTP_REACHABLE', outcome: 'OK', errorCode: null, result: { status: 200 } },
+    { check: 'HTTPS', outcome: 'OK', errorCode: null, result: { certificadoValido: true } },
+    { check: 'REDIRECT_CHAIN', outcome: 'OK', errorCode: null, result: { saltos: 1, forcaHttps: true } },
+  ];
+
+  it('endereço, página, segurança, redirecionamento — nesta ordem', () => {
+    expect(ordem(montarRelatorio(SAUDAVEL, SITE))).toEqual([
+      'DNS',
+      'HTTP_REACHABLE',
+      'HTTPS',
+      'REDIRECT_CHAIN',
+    ]);
+  });
+
+  it('a ordem não depende da ordem em que as medições chegam', () => {
+    const embaralhado = [SAUDAVEL[3], SAUDAVEL[1], SAUDAVEL[0], SAUDAVEL[2]] as ChecagemMedida[];
+
+    expect(ordem(montarRelatorio(embaralhado, SITE))).toEqual(ordem(montarRelatorio(SAUDAVEL, SITE)));
+  });
+
+  it('a página que não abre vem antes do certificado, mesmo medida por último', () => {
+    const doente: ChecagemMedida[] = [
+      { check: 'HTTPS', outcome: 'FAILED', errorCode: 'TLS_CERTIFICADO_EXPIRADO', result: null },
+      { check: 'DNS', outcome: 'OK', errorCode: null, result: null },
+      { check: 'HTTP_REACHABLE', outcome: 'FAILED', errorCode: 'PAGINA_NAO_ENCONTRADA', result: { status: 404 } },
+    ];
+    const achados = montarRelatorio(doente, SITE).filter((l) => l.item.secao === 'ACHADO');
+
+    expect(achados.map((l) => l.check)).toEqual(['HTTP_REACHABLE', 'HTTPS']);
+  });
+
+  it('nenhuma linha se perde ou se repete ao ordenar', () => {
+    const linhas = montarRelatorio(SAUDAVEL, SITE);
+
+    expect(linhas).toHaveLength(4);
+    expect(new Set(ordem(linhas)).size).toBe(4);
+  });
+});

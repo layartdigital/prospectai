@@ -1,3 +1,4 @@
+import { SITE_CHECKS } from './site-audit';
 import type {
   AuditStatusName,
   CheckOutcomeName,
@@ -461,6 +462,31 @@ const SO_VALEM_COM_PAGINA: ReadonlySet<SiteCheckName> = new Set(['HTTPS', 'REDIR
  * So remove itens `CERTO`. Achado e "nao verificado" nunca saem por esta regra:
  * esconder um problema ou um limite da nossa medicao e o defeito oposto, e pior.
  */
+/**
+ * A ordem em que o leitor encontra as checagens, decidida aqui e nao pelo banco.
+ *
+ * Ate 23/09/2026 a ordem do documento era a ordem em que as linhas voltavam da
+ * API, que as pede por `createdAt asc` — a ordem em que o worker gravou. Isso
+ * nunca foi decisao: e a hora em que cada sonda terminou, e duas linhas gravadas
+ * no mesmo milissegundo desempatam como o Postgres quiser. O documento vai para
+ * a mao do cliente; a ordem dele nao pode depender de qual sonda respondeu
+ * primeiro.
+ *
+ * A ordem e a de `SITE_CHECKS`, e ela conta uma historia: **o endereco existe**
+ * (DNS), **a pagina abre** (HTTP_REACHABLE), **a conexao e segura** (HTTPS),
+ * **quem digita sem https chega la** (REDIRECT_CHAIN). Do que impede alguem de
+ * chegar para o detalhe de como chega. A §5 do `RELATORIO-DIAGNOSTICO-v1.md`
+ * dizia `DNS -> HTTPS -> alcance -> cadeia`, e foi corrigida: pagina que nao
+ * abre importa mais que certificado.
+ *
+ * Checagem fora da lista (uma que exista no banco e ainda nao aqui) vai para o
+ * fim, em vez de sumir ou quebrar.
+ */
+function posicaoNaLeitura(check: SiteCheckName): number {
+  const i = SITE_CHECKS.indexOf(check);
+  return i < 0 ? SITE_CHECKS.length : i;
+}
+
 export function montarRelatorio(
   checks: readonly ChecagemMedida[],
   site: string,
@@ -473,7 +499,8 @@ export function montarRelatorio(
     .filter((l): l is LinhaDoRelatorio => l.item !== null)
     .filter(
       (l) => paginaAbriu || l.item.secao !== 'CERTO' || !SO_VALEM_COM_PAGINA.has(l.check),
-    );
+    )
+    .sort((a, b) => posicaoNaLeitura(a.check) - posicaoNaLeitura(b.check));
 }
 
 /**
