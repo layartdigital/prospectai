@@ -1,6 +1,6 @@
 name: CI
 
-# Primeiro pipeline do projeto ??? 04/09/2026.
+# Primeiro pipeline do projeto — 04/09/2026.
 #
 # =============================================================================
 # Por que ele nao existia, e por que isso importava mais do que parecia
@@ -11,7 +11,7 @@ name: CI
 # alguem digitava o comando. Um push que quebrasse qualquer uma delas passava.
 #
 # O item aparecia nas notas do programa RLS como "`typecheck:all` antes de `test`
-# no CI, ainda sem dono" ??? o que descrevia um pipeline existente precisando de um
+# no CI, ainda sem dono" — o que descrevia um pipeline existente precisando de um
 # ajuste de ordem. Nao era isso: nao havia pipeline. A frase foi repetida oito
 # vezes sem ninguem abrir o diretorio.
 #
@@ -26,7 +26,7 @@ name: CI
 # perceber.** Oito vezes ao longo do programa RLS um erro de tipo foi
 # diagnosticado primeiro como falha de teste, porque a suite rodou antes do
 # compilador. O caso mais caro: um `PrismaClient` cru passado como `prisma as
-# never` ??? o `never` calava o compilador exatamente na fronteira que teria
+# never` — o `never` calava o compilador exatamente na fronteira que teria
 # acusado o problema, e 56 testes cairam com "comTenant is not a function".
 #
 # O custo e uma segunda instalacao de dependencias, amortizada pelo cache do
@@ -45,14 +45,14 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # `NODE_VERSION` e o Node **do projeto**, e nao o runtime das acoes ??? sao
+  # `NODE_VERSION` e o Node **do projeto**, e nao o runtime das acoes — sao
   # coisas diferentes. O `package.json` declara `engines.node`; divergir aqui
   # produziria um CI que verifica um ambiente que ninguem usa.
   #
   # A distincao acima importou em 09/09/2026, quando quase misturamos duas
   # coisas: **o prazo de 23/09 e do runtime das acoes** (o `runs: using:` de
   # `checkout`, `setup-node` e afins), e nao deste valor. Este aqui nao tinha
-  # data nenhuma ??? tinha coisa pior, que era estar **sem correcao de seguranca
+  # data nenhuma — tinha coisa pior, que era estar **sem correcao de seguranca
   # desde 30/04/2026**, quando o Node 20 morreu. Prazo que ninguem cobra e o
   # que fica para depois indefinidamente.
   #
@@ -70,13 +70,13 @@ env:
   # versao `Current` e risco sem retorno quando o 24 cobre dezenove meses.
   #
   # **`'24'` e nao `'24.x.y'`, de proposito.** O valor antigo era `'20.11'`, um
-  # minor fixo ??? e fixar minor congela justamente a correcao de seguranca que
+  # minor fixo — e fixar minor congela justamente a correcao de seguranca que
   # este commit existe para voltar a receber. O `setup-node` resolve `'24'` como
   # o 24 mais recente a cada execucao.
   #
-  # ??? O que isto **pode** quebrar e modulo nativo: o `@node-rs/argon2` traz
+  # ⚠ O que isto **pode** quebrar e modulo nativo: o `@node-rs/argon2` traz
   # binario compilado. Ele usa N-API, que e estavel entre majors, entao a
-  # expectativa e que nao doa ??? mas expectativa nao e medicao, e quem mede e a
+  # expectativa e que nao doa — mas expectativa nao e medicao, e quem mede e a
   # execucao do CI logo abaixo.
   #
   # A variavel do pnpm saiu em 04/09: o `package.json` ja declara
@@ -92,11 +92,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # v6, e sem `with: version` ??? ver o bloco `env`.
+      # v6, e sem `with: version` — ver o bloco `env`.
       #
-      # ??? Esta acao tem sucessor: a v6.0.10 aponta os usuarios para `pnpm/setup`.
+      # ⚠ Esta acao tem sucessor: a v6.0.10 aponta os usuarios para `pnpm/setup`.
       # Continua mantida (a v6.1.0 e de 01/09 e ja suporta pnpm 12), entao a
-      # troca nao e urgente ??? e trocar de acao no mesmo commit que sobe tres
+      # troca nao e urgente — e trocar de acao no mesmo commit que sobe tres
       # versoes misturaria duas coisas.
       - uses: pnpm/action-setup@v6
 
@@ -108,7 +108,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # `prisma generate` antes do typecheck: o client tipado e gerado, nao
-      # versionado. Sem ele, o typecheck falha em todo lugar que toca o banco ???
+      # versionado. Sem ele, o typecheck falha em todo lugar que toca o banco —
       # e a mensagem nao diz que o motivo e a geracao faltando.
       - run: pnpm db:generate
 
@@ -131,15 +131,15 @@ jobs:
           # `20260826230000_rls_papeis` faz
           # `ALTER DEFAULT PRIVILEGES FOR ROLE propectai`, com o nome literal.
           # Com outro dono, os privilegios padrao nao se aplicam e toda tabela
-          # criada por migration futura nasce invisivel para o `propectai_app` ???
+          # criada por migration futura nasce invisivel para o `propectai_app` —
           # sintoma "permission denied" numa rota que funcionava ontem.
           POSTGRES_USER: propectai
           POSTGRES_PASSWORD: propectai_ci_only
           POSTGRES_DB: propectai
         ports:
           # 5434 para manter uma forma so de URL entre CI e a maquina de quem
-          # desenvolve. Em CI nao ha o Bellvia a evitar ??? que e o motivo do
-          # deslocamento no `.env.example` ???, mas duas formas de URL custam mais
+          # desenvolve. Em CI nao ha o Bellvia a evitar — que e o motivo do
+          # deslocamento no `.env.example` —, mas duas formas de URL custam mais
           # do que a linha economizada.
           - 5434:5432
         options: >-
@@ -193,7 +193,7 @@ jobs:
       # Acrescentadas em 25/09/2026, depois de o proprio CI pegar o efeito
       # colateral de `7d8db3b`: o seed passou a exigir `SEED_OWNER_PASSWORD` e
       # `SEED_SDR_PASSWORD`, o job nao as definia, e `Semear o catalogo` falhou
-      # ? parando a suite e o portao de RLS antes de comecarem.
+      # - parando a suite e o portao de RLS antes de comecarem.
       #
       # Precisam ser **diferentes entre si** e ter 12 caracteres ou mais: sao as
       # duas regras que `pessoasDoSeed` impoe, e deixa-las aqui faz o CI
@@ -210,11 +210,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # v6, e sem `with: version` ??? ver o bloco `env`.
+      # v6, e sem `with: version` — ver o bloco `env`.
       #
-      # ??? Esta acao tem sucessor: a v6.0.10 aponta os usuarios para `pnpm/setup`.
+      # ⚠ Esta acao tem sucessor: a v6.0.10 aponta os usuarios para `pnpm/setup`.
       # Continua mantida (a v6.1.0 e de 01/09 e ja suporta pnpm 12), entao a
-      # troca nao e urgente ??? e trocar de acao no mesmo commit que sobe tres
+      # troca nao e urgente — e trocar de acao no mesmo commit que sobe tres
       # versoes misturaria duas coisas.
       - uses: pnpm/action-setup@v6
 
@@ -225,7 +225,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # `@propectai/types` e compilado, e `dist/` nao e versionado ??? num
+      # `@propectai/types` e compilado, e `dist/` nao e versionado — num
       # ambiente limpo ele nao existe.
       #
       # **Encontrado pela execucao #1**, que morreu aqui com
@@ -256,7 +256,7 @@ jobs:
 
       # ---------------------------------------------------------------------
       - name: Dar senha aos tres papeis
-        # **As migrations criam os papeis SEM senha, e isso e proposital** ??? o
+        # **As migrations criam os papeis SEM senha, e isso e proposital** — o
         # repositorio nao ganha um segredo. O comentario final da
         # `20260826230000_rls_papeis` justifica dizendo que "o Postgres local do
         # projeto autentica por confianca".
@@ -268,7 +268,7 @@ jobs:
         # `scram-sha-256`. **Isso inclui o dono.**
         #
         # Aqui os testes conectam de fora do container, entao sem este passo os
-        # tres papeis nao logam ??? e o sintoma seria "Authentication failed",
+        # tres papeis nao logam — e o sintoma seria "Authentication failed",
         # tres arquivos longe da causa.
         #
         # Este e tambem o item 3 do checklist de primeiro deploy, exercitado
@@ -299,7 +299,7 @@ jobs:
       - name: Portao de RLS
         # **A parte que faz a verificacao da fase B valer alguma coisa.**
         #
-        # O `verificacoes-fase-b.sql` imprime tabelas para uma pessoa ler ??? util
+        # O `verificacoes-fase-b.sql` imprime tabelas para uma pessoa ler — util
         # em diagnostico, inutil como gatilho: `psql` sai com 0 tendo impresso
         # qualquer coisa. O `gate-rls.sql` faz as mesmas perguntas e **lanca
         # excecao** quando a resposta e errada.
@@ -317,7 +317,7 @@ jobs:
 
       # ---------------------------------------------------------------------
       - name: Relatorio de RLS
-        # Roda **sempre**, inclusive quando o portao acima falhou ??? e e nesse
+        # Roda **sempre**, inclusive quando o portao acima falhou — e e nesse
         # caso que ele importa: o portao diz que quebrou, este diz o que esta
         # no lugar. Nao falha o build sozinho.
         if: always()
