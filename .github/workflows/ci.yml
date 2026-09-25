@@ -188,6 +188,19 @@ jobs:
       COOKIE_DOMAIN: localhost
       COOKIE_SECURE: 'false'
 
+      # As senhas do seed, uma por papel. **Descartaveis, como as de cima.**
+      #
+      # Acrescentadas em 25/09/2026, depois de o proprio CI pegar o efeito
+      # colateral de `7d8db3b`: o seed passou a exigir `SEED_OWNER_PASSWORD` e
+      # `SEED_SDR_PASSWORD`, o job nao as definia, e `Semear o catalogo` falhou
+      # — parando a suite e o portao de RLS antes de comecarem.
+      #
+      # Precisam ser **diferentes entre si** e ter 12 caracteres ou mais: sao as
+      # duas regras que `pessoasDoSeed` impoe, e deixa-las aqui faz o CI
+      # exercitar a regra em vez de contorna-la.
+      SEED_OWNER_PASSWORD: ci-owner-descartavel-nao-e-segredo
+      SEED_SDR_PASSWORD: ci-sdr-descartavel-e-diferente-do-outro
+
       # `mock` nos dois. O padrao seguro e o que nao sai para a internet, e um CI
       # que dependesse do Google Maps falharia por motivo alheio ao commit.
       LEAD_SOURCE_PROVIDER: mock
