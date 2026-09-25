@@ -54,8 +54,10 @@ dois casos a linha nova nasce sem `revokedAt` e sem `replacedBy` — só a linha
 
 Portanto: **12 emissões de refresh token** na janela, das quais **3 carregam o
 agente Android (Pixel 9)**, em 15 segundos (22:18:24, :30, :39), entre emissões
-com agente Windows/Chrome. As três últimas linhas formam uma cadeia de rotação
-verificável (revogação + substituto), iniciada em 22:41:55.
+com agente Windows/Chrome. As três últimas linhas são **compatíveis com uma cadeia de
+rotação** (revogação e substituto presentes, em sequência), iniciada em
+22:41:55 — compatível, e não verificada: o cruzamento `replacedBy` → `tokenHash`
+não foi executado.
 
 **Medição ainda possível, não executada:** as cadeias podem ser reconstruídas
 juntando `replacedBy` de uma linha com `tokenHash` de outra, o que separaria
@@ -64,8 +66,13 @@ classificação do evento nem o estado atual (todas expiradas), e por isso não 
 tratado como bloqueio.
 
 **Estado atual dessas linhas:** todas expiraram em 18/08 ou 19/08. Nenhuma delas
-concede acesso hoje. A única linha válida no sistema inteiro é de 22/09 11:59 e
-expira em 29/09 11:59.
+concede acesso hoje.
+
+**Uma única linha válida no sistema inteiro**, de 22/09 11:59, expirando em
+29/09 11:59. Isto vem de contagem **global**, sem filtro de usuário —
+`SELECT count(*) FILTER (WHERE "revokedAt" IS NULL AND "expiresAt" > now())
+FROM refresh_tokens` devolveu `1` sobre 118 linhas (23 revogadas, 94 expiradas).
+A atribuição dessa linha ao OWNER vem da mesma consulta agrupada por e-mail.
 
 ### 1.3 A trilha de auditoria
 
