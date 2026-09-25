@@ -371,6 +371,21 @@ Aqui é obrigatório, e não opcional como em produção real: é o seed que gra
 este passo, o ambiente online continua entregando três diagnósticos de graça —
 que é exatamente o que o Gate 1 precisa que deixe de acontecer.
 
+> **Pré-condição acrescentada em 25/09/2026, e ela quebra este passo hoje.**
+> Desde `7d8db3b` o seed exige `SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD`,
+> **diferentes entre si** e com no mínimo 12 caracteres. Medido: o
+> `.env.production` deste servidor não tem nenhuma das duas — então, hoje, este
+> passo falha. A falha é alta e explícita, que é o comportamento desejado; o que
+> ela substituiu era pior: um único hash gravado nas duas contas, e o `update`
+> do upsert regravando a senha a cada execução, desfazendo qualquer rotação
+> anterior.
+>
+> Escrever as duas variáveis **sem expor valor** está no
+> `RUNBOOK-S1-ROTACAO-CREDENCIAIS.md` §1.1. E vale saber antes de confundir as
+> coisas: elas só valem na **criação** do usuário. Num banco onde as contas já
+> existem, rodar o seed **não troca a senha de ninguém** — para isso existe
+> `pnpm db:senha`.
+
 ### 6. Subir com as variáveis novas
 
 ```bash
@@ -483,8 +498,20 @@ Supabase, Authentik, n8n e o restante da máquina não foram tocados.
 3. **O pnpm não estava dentro da imagem para o usuário `node`.** Todo `pnpm`
    no container baixava da internet e perguntava `[Y/n]`. Corrigido nos três
    Dockerfiles (`COREPACK_HOME=/opt/corepack`).
-4. **A conta de demonstração tem a senha do `.env.example`** — que está no
-   repositório. Qualquer um que o leia entra no tenant demo pelo IP. Trocar pela
-   própria interface.
+4. **A conta de demonstração tem a senha do `.env.example`** — que está num
+   repositório **público**. Qualquer um que o leia entra no tenant demo pelo IP.
+
+   > **Duas correções de 25/09/2026.** A frase original terminava com *"trocar
+   > pela própria interface"*, e ela estava errada: **o produto não tem troca de
+   > senha** — nem tela, nem endpoint, nem "esqueci minha senha" (medido no
+   > `GATE S0`). A rotação exige acesso ao servidor, e o caminho é
+   > `pnpm db:senha`, com o procedimento inteiro no
+   > `RUNBOOK-S1-ROTACAO-CREDENCIAIS.md`.
+   >
+   > E mediu-se que o `.env.example` **continuava** com a senha depois de
+   > `7d8db3b`: aquele commit alterou o `README.md` e não alterou o exemplo.
+   > Corrigido no commit deste runbook. Esvaziar as duas linhas **não
+   > despublica** a senha que já foi ao ar — o histórico do repositório é
+   > imutável. Quem encerra aquela credencial é a rotação, não a edição.
 5. **O `head -c 30` do passo 7 expunha três caracteres da senha.** Corrigido.
 

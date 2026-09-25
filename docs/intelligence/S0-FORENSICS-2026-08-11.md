@@ -130,6 +130,17 @@ removendo a publicação pública do 3102. **Não executar agora:** hoje o acess
 ambiente é exatamente esse, o domínio não resolve, e fechar a porta antes de o
 caminho por HTTPS existir derruba o único acesso. Depende do gate de domínio.
 
+> **Decisão do dono do projeto, 25/09/2026.** Este achado passa a ser rastreado
+> como **`GATE_NET`**, gate próprio, atrelado ao gate de domínio — e **deixa de
+> bloquear o `GATE_S0`**. A fronteira exata entre os dois está na §4.
+>
+> A razão é de escopo, não de gravidade: o `GATE_S0` apura e remedia **um
+> incidente de credencial**, e a exposição da 3102 é anterior a ele, independente
+> dele, e só se resolve por uma decisão de domínio e nome do produto que ainda
+> não foi tomada. Amarrar um ao outro deixaria o incidente de credencial aberto
+> por um motivo que não é o dele. **`GATE_NET = OPEN`, severidade HIGH — e a
+> severidade não é rebaixada por ter mudado de gate.**
+
 ### 1.5 Identidade da rede (provada, não inferida)
 
 Rede `prospectai-prod_internal`, driver `bridge`, escopo local:
@@ -196,7 +207,28 @@ de origem pode ser o do bridge e não o do visitante.
 | 5 | Cadastro público (`/auth/register`) em ambiente exposto por IP | qualquer um cria conta e workspace |
 | 6 | `S0-NET-01`: 3102 público em paralelo ao nginx do host | aplicação exposta fora da camada de políticas |
 
-## 4. O que este documento não cobre
+## 4. O que este documento não cobre, e onde ficam as fronteiras
 
-Não cobre a remediação. `GATE_S0` permanece `OPEN`:
-`S0_DISCOVERY = PASS`, `S0_REMEDIATION = PENDING`.
+Não cobre a remediação. O procedimento está em
+`RUNBOOK-S1-ROTACAO-CREDENCIAIS.md`, escrito em 25/09/2026 e ainda **não
+executado**.
+
+**Estado dos gates:**
+
+| Gate | Estado | Cobre | Fecha quando |
+|---|---|---|---|
+| `GATE_S0` | **`OPEN`** — `S0_DISCOVERY = PASS`, `S0_REMEDIATION = PENDING` | o incidente de credencial: §1.1, §1.2, §1.3 | as evidências **E1–E9** da §9 do runbook estiverem coletadas |
+| `GATE_NET` | **`OPEN`**, HIGH | `S0-NET-01` (§1.4): a 3102 publicada em `0.0.0.0` | houver caminho por HTTPS num nome que resolva, e a publicação pública sair |
+
+**As lacunas de observabilidade da §3 não pertencem a nenhum dos dois.** A 1, a 2
+e a 3 são dívida de produto — a próxima apuração terá exatamente os mesmos
+limites que esta teve enquanto elas existirem. A 4 foi fechada em `12095da`
+(`isActive`/`deletedAt` passaram a valer na emissão, na rotação e na sessão). A 5
+— cadastro público num ambiente alcançável por IP — segue com o `GATE_NET`,
+porque é a mesma superfície.
+
+**O que fechar o `GATE_S0` significa, e o que não significa.** Significa: a
+credencial publicada foi girada e há prova disso. **Não** significa que o
+ambiente esteja fechado, que se saiba o que foi lido em 11/08, nem que a origem
+da fuga tenha sido apagada — o `.env.example` corrigido não remove a senha do
+histórico público do repositório, que é imutável.
