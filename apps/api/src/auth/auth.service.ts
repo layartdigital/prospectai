@@ -166,17 +166,51 @@ export class AuthService {
     // dos dois falhou entrega uma lista de e-mails cadastrados.
     const invalid = new UnauthorizedException('E-mail ou senha incorretos');
 
-    if (!user || !user.isActive || user.deletedAt) throw invalid;
+    // O retorno e usado, e nao so a validacao: e ele que estreita o tipo de
+    // `user` de "talvez nulo" para "existe e esta habilitado". Ignora-lo
+    // deixaria o compilador cego justamente na fronteira que a funcao existe
+    // para guardar — foi o que aconteceu na primeira versao deste commit.
+    const habilitado = this.garantirHabilitado(user, invalid);
 
-    const ok = await argonVerify(user.passwordHash, password);
+    const ok = await argonVerify(habilitado.passwordHash, password);
     if (!ok) throw invalid;
 
     await this.prisma.user.update({
-      where: { id: user.id },
+      where: { id: habilitado.id },
       data: { lastLoginAt: new Date() },
     });
 
-    return user.id;
+    return habilitado.id;
+  }
+
+  // ---------------------------------------------------------------------------
+  // A regra de quem pode ter credencial, num lugar so
+  // ---------------------------------------------------------------------------
+
+  /**
+   * **Conta desabilitada nao emite e nao renova credencial.**
+   *
+   * Ate 25/09/2026 esta regra existia em **um** lugar: o `validateCredentials`.
+   * Login recusava conta inativa; renovacao nao. Medido no GATE S0: quem
+   * tivesse um refresh token valido continuava rodando para sempre, porque cada
+   * rotacao emitia outro com sete dias novos. Desativar usuario nao expulsava
+   * ninguem — era decoracao.
+   *
+   * O chamador escolhe a excecao de proposito. No login ela precisa ser
+   * **identica** a de senha errada, senao a tela vira consulta de contas
+   * existentes; na renovacao pode dizer que a sessao acabou, porque quem esta
+   * ali ja provou quem e.
+   *
+   * `revokeRefreshToken` **nao** passa por aqui, e isso e decisao, nao
+   * esquecimento: sessao de conta desativada precisa continuar revogavel. Negar
+   * a revogacao seria proteger o token contra quem quer derruba-lo.
+   */
+  private garantirHabilitado<T extends { isActive: boolean; deletedAt: Date | null }>(
+    usuario: T | null,
+    recusa: UnauthorizedException,
+  ): T {
+    if (!usuario || !usuario.isActive || usuario.deletedAt) throw recusa;
+    return usuario;
   }
 
   // ---------------------------------------------------------------------------
@@ -187,7 +221,10 @@ export class AuthService {
     userId: string,
     meta: { userAgent?: string; ipAddress?: string } = {},
   ): Promise<IssuedTokens> {
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const user = this.garantirHabilitado(
+      await this.prisma.user.findUnique({ where: { id: userId } }),
+      new UnauthorizedException('Esta conta nao pode iniciar sessao'),
+    );
 
     const payload: JwtPayload = { sub: user.id, email: user.email };
 
@@ -200,8 +237,16 @@ export class AuthService {
     });
 
     // O refresh token é opaco, não JWT: precisa ser revogável no banco.
+    //
+    // `JWT_REFRESH_TTL` passou a ser lido em 25/09/2026. Ate entao os 7 dias
+    // estavam escritos aqui e a variavel existia no `.env.example` e no CI sem
+    // nenhum leitor — mexer nela nao mudava nada, o que e pior do que nao
+    // existir. O padrao continua 7 dias, agora explicito.
     const refreshToken = randomBytes(48).toString('base64url');
-    const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const refreshExpiresAt = new Date(
+      Date.now() +
+        parseTtlSeconds(this.config.get<string>('JWT_REFRESH_TTL'), 7 * 24 * 60 * 60) * 1000,
+    );
 
     await this.prisma.refreshToken.create({
       data: {
@@ -216,31 +261,56 @@ export class AuthService {
     return { userId: user.id, accessToken, refreshToken, refreshExpiresAt };
   }
 
-  /** Rotação: o token antigo é revogado e aponta para o substituto. */
+  /**
+   * Rotação: **quem revoga o token antigo ganha o direito de emitir o novo.**
+   *
+   * A ordem inverteu em 25/09/2026, e o motivo e concorrencia. A versao
+   * anterior lia o token, conferia `revokedAt` em memoria, emitia o substituto
+   * e so entao revogava o antigo. Duas requisicoes simultaneas com o mesmo
+   * token — o navegador com duas abas, ou um retry — liam as duas a mesma linha
+   * como valida e **ambas emitiam descendente**. Um refresh token virava dois,
+   * e o desenho de deteccao de reuso (`replacedBy`) nao via nada de errado.
+   *
+   * Agora a revogacao e a **reivindicacao**: um `updateMany` condicional que so
+   * afeta a linha se ela ainda estiver valida. O banco serializa a escrita, e
+   * `count` responde quem chegou primeiro — 1 para o vencedor, 0 para o
+   * perdedor, sem leitura previa em que confiar.
+   *
+   * O preco esta declarado: se a emissao falhar depois da reivindicacao, a
+   * sessao se perde e a pessoa entra de novo. Preferimos perder uma sessao a
+   * duplicar credencial.
+   */
   async rotateRefreshToken(
     rawToken: string,
     meta: { userAgent?: string; ipAddress?: string } = {},
   ): Promise<IssuedTokens> {
     const tokenHash = this.hashToken(rawToken);
-    const stored = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
+    const expirada = new UnauthorizedException('Sessão expirada. Entre novamente.');
 
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
-      throw new UnauthorizedException('Sessão expirada. Entre novamente.');
-    }
+    const reivindicacao = await this.prisma.refreshToken.updateMany({
+      where: { tokenHash, revokedAt: null, expiresAt: { gt: new Date() } },
+      data: { revokedAt: new Date() },
+    });
+
+    if (reivindicacao.count === 0) throw expirada;
+
+    const stored = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
+    if (!stored) throw expirada;
 
     const issued = await this.issueTokens(stored.userId, meta);
 
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
-      data: {
-        revokedAt: new Date(),
-        replacedBy: this.hashToken(issued.refreshToken),
-      },
+      data: { replacedBy: this.hashToken(issued.refreshToken) },
     });
 
     return issued;
   }
 
+  /**
+   * **Nao passa por `garantirHabilitado`, de proposito.** Ver a nota daquela
+   * funcao: conta desativada continua podendo ter a sessao derrubada.
+   */
   async revokeRefreshToken(rawToken: string | undefined): Promise<void> {
     if (!rawToken) return;
     await this.prisma.refreshToken.updateMany({
@@ -292,6 +362,8 @@ export class AuthService {
           },
         }),
     );
+
+    this.garantirHabilitado(user, new UnauthorizedException('Esta conta nao esta ativa'));
 
     const tenants: AuthTenant[] = user.memberships.map((membership) => ({
       id: membership.tenantId,

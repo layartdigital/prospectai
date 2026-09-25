@@ -182,7 +182,6 @@ jobs:
       # e e destruido ao fim. Guardar isto como secret daria a impressao de que
       # ha algo a proteger aqui, e diluiria a atencao dos segredos que existem.
       JWT_ACCESS_SECRET: ci-access-nao-e-segredo-nao-sai-do-job
-      JWT_REFRESH_SECRET: ci-refresh-nao-e-segredo-e-diferente-do-outro
       JWT_ACCESS_TTL: 15m
       JWT_REFRESH_TTL: 7d
       COOKIE_DOMAIN: localhost

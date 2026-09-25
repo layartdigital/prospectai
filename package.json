@@ -29,6 +29,7 @@
     "db:reset-quota": "tsx prisma/reset-quota.ts",
     "db:plan": "tsx prisma/set-plan.ts",
     "db:admin": "tsx prisma/set-platform-admin.ts",
+    "db:senha": "tsx prisma/set-senha.ts",
     "db:segments": "tsx prisma/import-segments.ts",
     "dev:unlock": "tsx prisma/set-plan.ts agency --reset",
     "dev:lock": "tsx prisma/set-plan.ts free --reset",

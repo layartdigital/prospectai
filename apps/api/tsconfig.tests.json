@@ -2,7 +2,17 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "rootDir": ".",
+    // Raiz no monorepo, e nao em `apps/api`.
+    //
+    // Trocado em 25/09/2026: `test/rotacao-senha.spec.ts` importa a operacao de
+    // rotacao de senha de `prisma/lib/`, que vive fora desta app. Com
+    // `rootDir: "."` o `tsc` recusa o arquivo (TS6059) mesmo sem emitir nada.
+    //
+    // Isto vale **so para a verificacao de tipos dos testes**, que e `noEmit`:
+    // o `tsconfig.json` da app continua com `rootDir: "./src"`, e nenhum codigo
+    // de producao de `apps/api` importa de `prisma/` — o import existe apenas
+    // no teste, para injetar falha real na ultima escrita da transacao.
+    "rootDir": "../..",
     "noEmit": true,
     "incremental": false
   },

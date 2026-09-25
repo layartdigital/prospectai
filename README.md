@@ -51,7 +51,7 @@ Se precisar fixar de novo, use um caminho no mesmo volume da raiz.
 Copy-Item .env.example .env
 ```
 
-Para uso local os valores padrão bastam. Antes de qualquer uso fora do seu computador, troque `JWT_ACCESS_SECRET` e `JWT_REFRESH_SECRET`:
+Para uso local os valores padrão bastam, **menos as duas senhas do seed** (`SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD`), que nascem vazias e o seed exige. Antes de qualquer uso fora do seu computador, troque também o `JWT_ACCESS_SECRET`:
 
 ```powershell
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
