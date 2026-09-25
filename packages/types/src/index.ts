@@ -25,6 +25,7 @@ export * from './prospecting-api';
 export * from './relatorio-diagnostico';
 export * from './score';
 export * from './segment-api';
+export * from './seed-usuarios';
 export * from './segredo';
 export * from './site-audit';
 export * from './scoring-engine';

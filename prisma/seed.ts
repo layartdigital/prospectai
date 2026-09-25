@@ -17,7 +17,13 @@ import path from 'node:path';
 
 import { type PipelineStage, type Prisma } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
-import { PLAN_LIMITS, computeScore, type ScoreInput } from '@propectai/types';
+import {
+  PLAN_LIMITS,
+  computeScore,
+  pessoasDoSeed,
+  upsertDeUsuario,
+  type ScoreInput,
+} from '@propectai/types';
 import dotenv from 'dotenv';
 
 import { criarPrismaScript } from './cliente';
@@ -196,43 +202,36 @@ async function seedTenant(planIds: Map<string, string>) {
   return tenant;
 }
 
+/**
+ * Os dois usuarios de demonstracao.
+ *
+ * **Senha so na criacao.** Quem ja existe tem `name` atualizado e mais nada —
+ * a regra e o `update` de `upsertDeUsuario`, e ela existe porque este seed
+ * roda para corrigir limite de plano: redefinir senha nessa hora desfaz, em
+ * silencio, qualquer rotacao feita por fora. Medido no ambiente online em
+ * 25/09/2026, com OWNER e SDR carregando o mesmo hash.
+ *
+ * Quem decide a senha de cada papel e `pessoasDoSeed`, em
+ * `packages/types/src/seed-usuarios.ts`, onde ha runner de teste. Aqui ficou so
+ * o que precisa do Prisma.
+ */
 async function seedUsers(tenantId: string) {
-  const password = process.env.SEED_OWNER_PASSWORD ?? 'Demo@123456';
-  const passwordHash = await argonHash(password);
-
-  const people = [
-    {
-      email: (process.env.SEED_OWNER_EMAIL ?? 'owner@demo.propectai.local').toLowerCase(),
-      name: 'Uilson Távora',
-      role: 'OWNER' as const,
-      isDefault: true,
-    },
-    {
-      email: (process.env.SEED_SDR_EMAIL ?? 'sdr@demo.propectai.local').toLowerCase(),
-      name: 'Marina Costa',
-      role: 'SDR' as const,
-      isDefault: false,
-    },
-  ];
-
+  const pessoas = pessoasDoSeed(process.env);
   const created = [];
 
-  for (const person of people) {
-    const user = await prisma.user.upsert({
-      where: { email: person.email },
-      create: { email: person.email, name: person.name, passwordHash },
-      update: { name: person.name, passwordHash },
-    });
+  for (const pessoa of pessoas) {
+    const passwordHash = await argonHash(pessoa.senha);
+    const user = await prisma.user.upsert(upsertDeUsuario(pessoa, passwordHash));
 
     await prisma.membership.upsert({
       where: { userId_tenantId: { userId: user.id, tenantId } },
       create: {
         userId: user.id,
         tenantId,
-        role: person.role,
-        isDefault: person.isDefault,
+        role: pessoa.papel,
+        isDefault: pessoa.isDefault,
       },
-      update: { role: person.role, isDefault: person.isDefault },
+      update: { role: pessoa.papel, isDefault: pessoa.isDefault },
     });
 
     created.push(user);
@@ -654,9 +653,12 @@ async function main(): Promise<void> {
     );
   }
 
-  console.log('\n  Credenciais de demonstração');
-  console.log(`    ${users[0]?.email}  ·  ${process.env.SEED_OWNER_PASSWORD ?? 'Demo@123456'}`);
-  console.log(`    ${users[1]?.email}  ·  ${process.env.SEED_SDR_PASSWORD ?? 'Demo@123456'}`);
+  // **Sem senha na tela.** A versao anterior imprimia as duas credenciais no
+  // terminal, e dai para um log, um print ou uma conversa e um passo. As senhas
+  // ficam so no `.env`, com quem rodou o seed.
+  console.log('\n  Contas de demonstração');
+  console.log(`    ${users[0]?.email}  ·  senha em SEED_OWNER_PASSWORD`);
+  console.log(`    ${users[1]?.email}  ·  senha em SEED_SDR_PASSWORD`);
   console.log('');
 }
 
