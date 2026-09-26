@@ -35,13 +35,21 @@ const SENHA_ANTIGA = 'SenhaAntiga123';
 const SENHA_NOVA = 'SenhaNovaDeTeste456';
 const EMAIL = `rotacao-${suffix}@teste.propectai.local`;
 const EMAIL_VIZINHO = `vizinho-${suffix}@teste.propectai.local`;
+/**
+ * Conta propria para o teste de precisao da contagem. Nao reaproveita `EMAIL`
+ * porque aquele ja foi rotacionado tres vezes pelos blocos anteriores, e a
+ * afirmacao aqui e sobre um numero exato — `1`, e nao "maior que zero".
+ */
+const EMAIL_PRECISAO = `precisao-${suffix}@teste.propectai.local`;
 
 let app: INestApplication;
 let baseUrl = '';
 let userId = '';
 let vizinhoId = '';
+let precisaoId = '';
 let tenantId = '';
 let tenantVizinho = '';
+let tenantPrecisao = '';
 
 interface SaidaDaCli {
   readonly code: number | null;
@@ -123,13 +131,14 @@ beforeAll(async () => {
 
   ({ tenantId, userId } = await registrar(EMAIL, `Rotacao ${suffix}`));
   ({ tenantId: tenantVizinho, userId: vizinhoId } = await registrar(EMAIL_VIZINHO, `Vizinho ${suffix}`));
+  ({ tenantId: tenantPrecisao, userId: precisaoId } = await registrar(EMAIL_PRECISAO, `Precisao ${suffix}`));
 }, BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
   await app?.close();
-  await prisma.auditLog.deleteMany({ where: { entityId: { in: [userId, vizinhoId] } } });
-  await prisma.tenant.deleteMany({ where: { id: { in: [tenantId, tenantVizinho] } } });
-  await prisma.user.deleteMany({ where: { email: { in: [EMAIL, EMAIL_VIZINHO] } } });
+  await prisma.auditLog.deleteMany({ where: { entityId: { in: [userId, vizinhoId, precisaoId] } } });
+  await prisma.tenant.deleteMany({ where: { id: { in: [tenantId, tenantVizinho, tenantPrecisao] } } });
+  await prisma.user.deleteMany({ where: { email: { in: [EMAIL, EMAIL_VIZINHO, EMAIL_PRECISAO] } } });
 
   const sobras = await conferirLimpeza(prisma, suffix);
   await prisma.$disconnect();
@@ -151,7 +160,7 @@ describe('a rotacao, quando tudo da certo', () => {
     expect(validos).toBeGreaterThan(0);
   });
 
-  it('gira a senha e devolve quantas sessoes caíram', async () => {
+  it('gira a senha e devolve quantos refresh tokens validos caíram', async () => {
     const resultado = await rotacionarSenha(prisma, {
       email: EMAIL,
       senhaNova: SENHA_NOVA,
@@ -160,7 +169,7 @@ describe('a rotacao, quando tudo da certo', () => {
     });
 
     expect(resultado.userId).toBe(userId);
-    expect(resultado.sessoesRevogadas).toBeGreaterThan(0);
+    expect(resultado.tokensValidosRevogados).toBeGreaterThan(0);
   });
 
   it('a senha antiga deixa de entrar, e a nova entra', async () => {
@@ -185,6 +194,108 @@ describe('a rotacao, quando tudo da certo', () => {
       where: { userId: vizinhoId, revokedAt: null },
     });
     expect(abertosDoVizinho).toBeGreaterThan(0);
+  });
+});
+
+describe('so o que ainda vale e revogado', () => {
+  /**
+   * O defeito que este bloco trava: o filtro era so `revokedAt: null`, entao a
+   * contagem incluia linhas **ja expiradas** — numero maior, significado menor —
+   * e ainda carimbava `revokedAt` nelas, apagando a diferenca entre "expirou" e
+   * "foi revogada", que e exatamente a distincao de que uma apuracao precisa.
+   */
+  const UMA_HORA = 60 * 60 * 1000;
+
+  it('o expirado continua so expirado, o vizinho fica intacto, e a contagem e exatamente 1', async () => {
+    /**
+     * As linhas sao plantadas, e nao obtidas por login, **de proposito**:
+     * `register` e `login` emitem quantidades que sao detalhe de implementacao,
+     * e a afirmacao aqui e um numero exato. Zerar antes e a mesma tecnica do
+     * `zerarSessoes()` do `auth-sessao.spec.ts`, pela mesma razao: a contagem
+     * so pode falar do que este teste criou.
+     */
+    await prisma.refreshToken.deleteMany({ where: { userId: precisaoId } });
+
+    const validoDeA = await prisma.refreshToken.create({
+      data: {
+        userId: precisaoId,
+        tokenHash: `valido-a-${suffix}`,
+        expiresAt: new Date(Date.now() + UMA_HORA),
+      },
+    });
+    // Expirado e NAO revogado: o estado que o banco de producao tinha em 94
+    // linhas quando o GATE S0 o mediu.
+    const expiradoDeA = await prisma.refreshToken.create({
+      data: {
+        userId: precisaoId,
+        tokenHash: `expirado-a-${suffix}`,
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    const validoDeB = await prisma.refreshToken.create({
+      data: {
+        userId: vizinhoId,
+        tokenHash: `valido-b-${suffix}`,
+        expiresAt: new Date(Date.now() + UMA_HORA),
+      },
+    });
+
+    // A premissa, afirmada e nao suposta: se estes dois numeros empatassem, o
+    // teste passaria sem exercitar a diferenca que ele existe para provar.
+    const validosDeAAntes = await prisma.refreshToken.count({
+      where: { userId: precisaoId, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+    const semRevogacaoDeAAntes = await prisma.refreshToken.count({
+      where: { userId: precisaoId, revokedAt: null },
+    });
+    expect(validosDeAAntes).toBe(1);
+    expect(semRevogacaoDeAAntes).toBe(2);
+
+    const validosDeBAntes = await prisma.refreshToken.count({
+      where: { userId: vizinhoId, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+    expect(validosDeBAntes).toBeGreaterThan(0);
+
+    const resultado = await rotacionarSenha(prisma, {
+      email: EMAIL_PRECISAO,
+      senhaNova: 'SenhaDePrecisao12345',
+      motivo: 'teste de precisao da contagem',
+      origem: 'teste',
+    });
+
+    expect(resultado.tokensValidosRevogados).toBe(1);
+
+    const [aValido, aExpirado, bValido] = await Promise.all([
+      prisma.refreshToken.findUniqueOrThrow({ where: { id: validoDeA.id } }),
+      prisma.refreshToken.findUniqueOrThrow({ where: { id: expiradoDeA.id } }),
+      prisma.refreshToken.findUniqueOrThrow({ where: { id: validoDeB.id } }),
+    ]);
+
+    expect(aValido.revokedAt).not.toBeNull();   // o valido de A caiu
+    expect(aExpirado.revokedAt).toBeNull();     // o expirado de A nao foi tocado
+    expect(bValido.revokedAt).toBeNull();       // B inteiro ficou de fora
+
+    // O mesmo `agora` na condicao e no valor: nada e marcado como revogado
+    // depois de ja ter expirado.
+    expect(aValido.revokedAt!.getTime()).toBeLessThanOrEqual(aValido.expiresAt.getTime());
+
+    const validosDeADepois = await prisma.refreshToken.count({
+      where: { userId: precisaoId, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+    expect(validosDeADepois).toBe(0);
+
+    const validosDeBDepois = await prisma.refreshToken.count({
+      where: { userId: vizinhoId, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+    expect(validosDeBDepois).toBe(validosDeBAntes);
+
+    // E a trilha registra o mesmo numero, com o mesmo nome.
+    const trilha = await prisma.auditLog.findFirstOrThrow({
+      where: { action: ACAO_ROTACAO, entityId: precisaoId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(trilha.after).toMatchObject({ tokensValidosRevogados: 1 });
   });
 });
 

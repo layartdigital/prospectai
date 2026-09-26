@@ -18,6 +18,26 @@
  * **As tres escritas sao uma so.** Senha nova sem revogacao deixaria sessao
  * antiga viva; revogacao sem trilha deixaria o evento invisivel; trilha sem
  * senha nova seria mentira registrada. Falha em qualquer uma desfaz as outras.
+ *
+ * ---
+ *
+ * **Correcao de precisao, 25/09/2026.** A revogacao filtrava so por
+ * `revokedAt: null`, e portanto alcancava tambem linhas **ja expiradas**. Duas
+ * consequencias, as duas de medicao:
+ *
+ * 1. o numero devolvido contava credenciais que ja nao valiam nada, e a saida da
+ *    CLI o chamava de "sessoes" — repetindo exatamente a confusao entre
+ *    *registro de refresh* e *sessao* que o GATE S0 obrigou a corrigir no
+ *    `S0-FORENSICS`;
+ * 2. linha expirada passava a ter `revokedAt` preenchido, e deixava de ser
+ *    distinguivel de uma que foi revogada de verdade — apagando evidencia
+ *    forense em nome de um numero maior.
+ *
+ * Agora o filtro e `revokedAt = null AND expiresAt > agora`, e o campo se chama
+ * `tokensValidosRevogados`. **O mesmo `agora`** vai na condicao e no valor
+ * gravado: com dois `new Date()` existiria uma janela, minuscula porem real, em
+ * que um token selecionado como valido receberia um `revokedAt` anterior a
+ * propria expiracao considerada.
  */
 
 import type { PrismaClient } from '@prisma/client';
@@ -36,7 +56,12 @@ export interface EntradaDaRotacao {
 export interface ResultadoDaRotacao {
   readonly userId: string;
   readonly email: string;
-  readonly sessoesRevogadas: number;
+  /**
+   * Refresh tokens que **ainda valiam** no instante da rotacao e foram
+   * revogados. Nao e contagem de sessoes: um mesmo navegador produz varias
+   * linhas ao longo de uma cadeia de rotacao, e linhas expiradas nao entram.
+   */
+  readonly tokensValidosRevogados: number;
 }
 
 /**
@@ -70,6 +95,13 @@ export async function rotacionarSenha(
   // Fora da transacao, de proposito. Ver o cabecalho.
   const passwordHash = await argonHash(senha);
 
+  /**
+   * Um unico instante, usado na condicao e no valor gravado. Ver o cabecalho:
+   * dois `new Date()` abririam janela entre "considerei valido" e "marquei como
+   * revogado neste momento".
+   */
+  const agora = new Date();
+
   return prisma.$transaction(async (tx) => {
     await tx.user.update({
       where: { id: usuario.id },
@@ -77,8 +109,8 @@ export async function rotacionarSenha(
     });
 
     const revogadas = await tx.refreshToken.updateMany({
-      where: { userId: usuario.id, revokedAt: null },
-      data: { revokedAt: new Date() },
+      where: { userId: usuario.id, revokedAt: null, expiresAt: { gt: agora } },
+      data: { revokedAt: agora },
     });
 
     await ganchos.antesDaTrilha?.();
@@ -99,7 +131,7 @@ export async function rotacionarSenha(
      *
      * **Nada de senha e nada de hash em `before`/`after`.** Nem fragmento, nem
      * comprimento, nem prefixo. A trilha registra que houve rotacao, quando,
-     * por que e quantas sessoes cairam.
+     * por que, e quantos refresh tokens ainda validos foram revogados.
      */
     await tx.auditLog.create({
       data: {
@@ -112,11 +144,11 @@ export async function rotacionarSenha(
         after: {
           motivo: entrada.motivo.trim(),
           origem: entrada.origem,
-          sessoesRevogadas: revogadas.count,
+          tokensValidosRevogados: revogadas.count,
         },
       },
     });
 
-    return { userId: usuario.id, email, sessoesRevogadas: revogadas.count };
+    return { userId: usuario.id, email, tokensValidosRevogados: revogadas.count };
   });
 }

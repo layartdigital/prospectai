@@ -130,9 +130,11 @@ removendo a publicação pública do 3102. **Não executar agora:** hoje o acess
 ambiente é exatamente esse, o domínio não resolve, e fechar a porta antes de o
 caminho por HTTPS existir derruba o único acesso. Depende do gate de domínio.
 
-> **Decisão do dono do projeto, 25/09/2026.** Este achado passa a ser rastreado
-> como **`GATE_NET`**, gate próprio, atrelado ao gate de domínio — e **deixa de
-> bloquear o `GATE_S0`**. A fronteira exata entre os dois está na §4.
+> **Decisão D3**, registrada na §11 do `RUNBOOK-S1-ROTACAO-CREDENCIAIS.md`
+> (escolhida pelo dono do projeto em 25/09/2026, entre duas opções; a recusada
+> foi manter o `GATE_S0` aberto até a 3102 sair de `0.0.0.0`). Este achado passa
+> a ser rastreado como **`GATE_NET`**, gate próprio, atrelado ao gate de domínio
+> — e **deixa de bloquear o `GATE_S0`**. A fronteira exata está na §4.
 >
 > A razão é de escopo, não de gravidade: o `GATE_S0` apura e remedia **um
 > incidente de credencial**, e a exposição da 3102 é anterior a ele, independente

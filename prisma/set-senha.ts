@@ -97,7 +97,10 @@ async function main(): Promise<void> {
   });
 
   console.log(`\n  Senha trocada: ${resultado.email}`);
-  console.log(`  Sessoes revogadas: ${resultado.sessoesRevogadas}`);
+  // "Refresh tokens validos revogados", e nao "Sessoes revogadas": linha de
+  // refresh nao e sessao — uma cadeia de rotacao produz varias para o mesmo
+  // navegador — e expirada nao e revogada. Ver `prisma/lib/rotacionar-senha.ts`.
+  console.log(`  Refresh tokens validos revogados: ${resultado.tokensValidosRevogados}`);
   console.log('  Trilha: SECURITY.PASSWORD_ROTATED (evento global, tenantId nulo)\n');
 }
 

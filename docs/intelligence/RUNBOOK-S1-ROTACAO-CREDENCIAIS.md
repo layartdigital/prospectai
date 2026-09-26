@@ -1,6 +1,9 @@
 # Runbook S1_C3 — rotação de credenciais e fechamento do incidente S0
 
-**Estado:** revisado e aprovado pelo dono do projeto em 25/09/2026.
+**Estado:** revisado em 25/09/2026. As três decisões da §11 foram escolhidas pelo
+dono do projeto entre opções apresentadas; a §11 registra o mecanismo, a data e
+o que foi recusado, para que nenhuma delas dependa de eu ter "entendido" uma
+preferência.
 **Nada aqui foi executado** — nenhuma senha girada, nenhum container recriado,
 nenhum arquivo do servidor alterado.
 **Escrito em:** 25/09/2026
@@ -127,10 +130,10 @@ o gate não fecha sem a evidência **E8** — a senha publicada deixar de funcio
 Tratar a edição do arquivo como se fosse o conserto seria o mesmo erro de
 trocar o e-mail do OWNER e chamar aquilo de rotação de credencial.
 
-**Correção aprovada pelo dono do projeto em 25/09/2026 e aplicada neste commit:**
-as duas variáveis passam a nascer vazias, com o registro do que aconteceu e a
-instrução de geração ao lado. É a razão de o C3 não ser um commit apenas
-documental — ele corrige a pré-condição que ele próprio documenta.
+**Correção aplicada no commit `db3c77e`** — as duas variáveis passam a nascer
+vazias, com o registro do que aconteceu e a instrução de geração ao lado. É a
+razão de o C3 não ter sido um commit apenas documental: ele corrigiu a
+pré-condição que ele próprio documenta. Decisão **D1** da §11.
 
 ---
 
@@ -215,11 +218,19 @@ Saída esperada, exatamente três linhas úteis:
 
 ```
   Senha trocada: owner@demo.propectai.local
-  Sessoes revogadas: N
+  Refresh tokens validos revogados: N
   Trilha: SECURITY.PASSWORD_ROTATED (evento global, tenantId nulo)
 ```
 
-Anotar `N`. Ele é conferido contra o banco na §9 (E4).
+Anotar `N`. Ele é conferido contra o banco na §9 (E4), e a medição do banco tem
+de ser feita **antes** e **depois** — só o par prova alguma coisa.
+
+> **O rótulo não é detalhe.** `N` conta **refresh tokens que ainda valiam** no
+> instante da rotação, e não sessões: uma cadeia de rotação produz várias linhas
+> para o mesmo navegador. Linha expirada não entra na conta e não recebe
+> `revokedAt` — se recebesse, deixaria de ser distinguível de uma revogada de
+> verdade, e a próxima apuração perderia essa diferença. É a mesma confusão entre
+> *registro de refresh* e *sessão* que o `S0-FORENSICS` teve de corrigir.
 
 ---
 
@@ -261,7 +272,7 @@ distintos, e nenhum deles faz o trabalho dos outros dois.
 
 | Ação | O que morre na hora | O que sobrevive |
 |---|---|---|
-| `db:senha <usuário>` | a senha antiga; **todos** os refresh tokens daquele usuário (`revokedAt` preenchido) | os **access tokens já emitidos** daquele usuário, por até 15 minutos |
+| `db:senha <usuário>` | a senha antiga; **todos os refresh tokens ainda válidos** daquele usuário (`revokedAt` preenchido) | os **access tokens já emitidos** daquele usuário, por até 15 minutos; e as linhas já expiradas, que continuam apenas expiradas |
 | Troca do `JWT_ACCESS_SECRET` + recriar `api` | **todos** os access tokens de **todos** os usuários, imediatamente | os refresh tokens não revogados — quem tiver um recebe access token novo |
 | As duas, nesta ordem | tudo do usuário rotacionado | nada dele |
 
@@ -442,8 +453,8 @@ fechar gate é decisão, e decisão não anda junto com procedimento.
 `sdr@demo.propectai.local` tem hoje **o mesmo `passwordHash` do OWNER**
 (impressão `md5` idêntica, medido no S0 §1.1) e essa senha está publicada.
 
-**Decisão do dono do projeto: rotacionar agora**, com senha própria, mantendo a
-conta ativa para demonstrar o papel SDR.
+**Decisão D2 da §11: rotacionar agora**, com senha própria, mantendo a conta
+ativa para demonstrar o papel SDR.
 
 ```bash
 $C run --rm api pnpm db:senha sdr@demo.propectai.local "rotacao S0 - hash compartilhado com o OWNER"
@@ -472,7 +483,7 @@ disso" — e nada além. Continuam abertos, e é preciso que fiquem visíveis:
   paralelo ao nginx do host, num servidor que hospeda negócios de terceiros, e o
   `/auth/register` público nessa mesma superfície (lacunas `S0-NET-01` e 5).
 
-  > **Decisão de 25/09/2026:** o `S0-NET-01` deixa de bloquear o `GATE_S0` e
+  > **Decisão D3 da §11:** o `S0-NET-01` deixa de bloquear o `GATE_S0` e
   > passa a ser gate próprio, atrelado ao gate de domínio. A razão é de escopo,
   > não de gravidade — a exposição é anterior ao incidente, independente dele, e
   > só se resolve por uma decisão de domínio ainda não tomada. **A severidade
@@ -532,7 +543,7 @@ que é o mesmo indicador já usado na apuração do S0.
 | **E1** | O que está no ar é o que o CI aprovou | `git log -1 --format='%H'` no servidor | igual ao SHA verde no GitHub Actions |
 | **E2** | Pré-condições de ambiente | `grep -o '^[A-Z_]*=' .env.production \| sort` | `SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD` presentes; `JWT_REFRESH_SECRET` ausente |
 | **E3** | A rotação deixou trilha | consulta 1, abaixo | uma linha por conta rotacionada, `tenantId` nulo, `after` com motivo/origem/sessões, **sem** hash |
-| **E4** | As sessões caíram | consulta 2, **logo após a §3.3 e antes de novo login** | `validos = 0` para a conta rotacionada; a queda bate com o `N` impresso pela CLI |
+| **E4** | Os refresh tokens válidos caíram, e exatamente eles | consulta 2 **imediatamente antes** da rotação e **imediatamente depois**, com a saída da CLI no meio | `validos_antes = X`; `CLI revogou = X`; `validos_depois = 0` — os três números, para a conta rotacionada |
 | **E5** | As contas deixaram de compartilhar credencial | consulta 3 | as duas impressões **diferentes** |
 | **E6** | O segredo global girou | `docker inspect -f '{{.State.StartedAt}}' prospectai-prod-api-1` + DevTools do navegador com a sessão antiga | `StartedAt` posterior ao backup do `.env.production`; requisição com o cookie antigo devolve **401** |
 | **E7** | A senha do Redis saiu dos logs | os dois `grep -c` da §6.4 | `≥1` e **`0`** |
@@ -554,6 +565,22 @@ GROUP BY u.email ORDER BY validos DESC, u.email;
 -- consulta 3
 SELECT email, left(md5("passwordHash"), 12) AS impressao FROM users
 WHERE email IN ('owner@demo.propectai.local', 'sdr@demo.propectai.local');
+```
+
+**A E4 só existe como trio.** Medir depois e ver zero não prova nada: zero é
+também o que se vê quando não havia nada para revogar. A medição de antes é o
+que dá significado à de depois, e a saída da CLI é o que liga as duas. Se
+`validos_antes` e o número da CLI divergirem, **pare** — alguém abriu sessão
+entre a leitura e a rotação, e a janela precisa ser explicada antes de o gate
+fechar. Por isso as duas consultas e a rotação vão na mesma sessão SSH, em
+sequência, sem nada no meio.
+
+Colar as três medições assim, no fecho deste documento:
+
+```
+validos_antes  = X
+CLI revogou    = X
+validos_depois = 0
 ```
 
 **E9 é a mais fraca da lista, de propósito.** Ela não prova que a senha deixou de
@@ -583,3 +610,34 @@ prova é a medição depois dela.**
    se perder, a recuperação é rodar `db:senha` de novo — não há "esqueci minha
    senha" no produto, e é a lacuna que este runbook existe para contornar, não
    para resolver.
+
+---
+
+## 11. Registro de decisões
+
+Regra de governança, adotada em 25/09/2026: **"decisão do dono" não se atribui
+por inferência.** Um item só sai de `PROPOSTA` quando há registro de quem
+decidiu, quando, e entre quais alternativas. Sem esse registro, o estado correto
+é `PENDING_OWNER_DECISION`, mesmo que a recomendação pareça óbvia — inclusive, e
+principalmente, quando parece óbvia.
+
+| id | Decisão | Mecanismo e data | Alternativas recusadas |
+|---|---|---|---|
+| **D1** | A correção do `.env.example` entra no Commit 3 | escolhida pelo dono do projeto em 25/09/2026, entre três opções apresentadas | commit isolado antes do C3; adiar para depois da remediação |
+| **D2** | A conta SDR é **rotacionada**, com senha própria, e permanece ativa | idem, entre três opções | desativar (`isActive = false`); deixar como está |
+| **D3** | `S0-NET-01` vira `GATE_NET`, gate próprio atrelado ao gate de domínio, e deixa de bloquear o `GATE_S0` | idem, entre duas opções | manter o `GATE_S0` aberto até a 3102 sair de `0.0.0.0` |
+
+As três foram escolhidas entre opções que eu apresentei, e em cada uma a opção
+escolhida era a que eu recomendava. **Isso é motivo para o registro existir, não
+para dispensá-lo:** recomendação aceita continua sendo decisão de quem aceitou,
+e quem ler este documento em 2027 precisa poder ver a diferença entre "o dono
+decidiu" e "o Claude concluiu".
+
+**Se o dono do projeto não reconhecer algum destes registros, o item volta a
+`PENDING_OWNER_DECISION`** e o passo correspondente da §7.1 fica bloqueado até
+nova palavra. Nada neste runbook foi executado, então nenhum deles produziu
+efeito ainda.
+
+**Continua `PENDING_OWNER_DECISION`**, e não tem registro nenhum porque ninguém
+decidiu: o `trust proxy` (§1.6 do `S0-FORENSICS`), o destino da porta 3102 e o
+nome/domínio do produto.
