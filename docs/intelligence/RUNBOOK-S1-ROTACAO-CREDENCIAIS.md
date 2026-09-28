@@ -10,16 +10,18 @@ sobre o TTY:
 
 ```
 LOCAL_AUTOMATED_TEST = PASS                            §8.3
-REMOTE_CI            = PASS                            afb7e44…, run #52
+REMOTE_CI            = PASS                            19802df…, run #54
 TTY_COMPOSITION      = NOT_OBSERVED                    §8.4
 TTY_MANUAL           = WAIVED_RISK_ACCEPTED_BY_OWNER   §8.4
 GATE_S0              = OPEN
 GATE_NET             = OPEN (HIGH)
 ```
 
-O último run que exercitou **código** foi o #50 (`f3b383f`, §8.5). Os runs #51 e
-#52 cobrem commits documentais: passaram, e é isso que provam — que o repositório
-segue verde, não que algo novo foi verificado.
+O último run que exercitou **código de produto** foi o #50 (`f3b383f`, §8.5). Os
+runs #51, #52 e #54 cobrem commits documentais e um de orquestração de teste:
+passaram, e é isso que provam — que o repositório segue verde, não que algo novo
+do produto foi verificado. O #53 (`41233dd`) **falhou**, e a correção está em
+`19802df`; a §10 registra as duas dívidas que sobraram dali.
 
 O passo 1 da §7.1 deixa de bloquear: não porque foi verificado, mas porque o
 risco foi **aceito e registrado**. As duas coisas não são a mesma, e a §8.4
@@ -474,44 +476,92 @@ qualquer edição feita direto no servidor some sem aviso.
 > do host, afetaria outras stacks. A saída é não depender dele.
 
 Por isso o backup vai para um **diretório exclusivo desta execução**, criado já
-privado e com `umask 077` valendo dentro do subshell:
+privado, com `umask 077` e `set -euo pipefail` valendo dentro do subshell, e com
+cada artefato verificado antes de o passo se declarar concluído:
 
 ```bash
 cd /opt/apps/prospectai
 C="docker compose --env-file .env.production -f compose.prod.yml"
-B="/opt/backups/prospectai-s0-$(date +%Y%m%d-%H%M)"
-install -d -m 700 "$B"
-( umask 077
+B=$(mktemp -d /opt/backups/prospectai-s0-XXXXXXXX)
+chmod 700 "$B"
+( set -euo pipefail
+  : "${B:?diretorio de backup nao criado}" "${C:?compose nao definido}"
+  umask 077
   docker exec prospectai-prod-postgres-1 pg_dump -U propectai propectai \
-    | gzip > "$B/propectai.sql.gz"
+    | gzip -c > "$B/propectai.sql.gz"
+  gzip -t "$B/propectai.sql.gz"
   tar czf "$B/prospectai-arvore.tgz" \
     --exclude=node_modules --exclude=services/google-maps-scraper -C /opt/apps prospectai
+  tar -tzf "$B/prospectai-arvore.tgz" >/dev/null
   $C images > "$B/imagens.txt"
+  test -s "$B/imagens.txt"
 )
-stat -c '%a %U:%G %s %n' "$B" "$B"/*
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  echo "BACKUP_OK $B"
+  stat -c '%a %U:%G %s %n' "$B" "$B"/*
+else
+  echo "BACKUP_FALHOU $B rc=$rc - PARE"
+fi
 ```
 
+**`mktemp -d`, e não carimbo de minuto.** `prospectai-s0-$(date +%Y%m%d-%H%M)`
+colide consigo mesmo se o passo for repetido dentro do mesmo minuto — e repetir
+é o caso normal quando a primeira tentativa falha. A segunda execução escreveria
+por cima do dump da primeira, que pode ser o único íntegro. O `mktemp` cria um
+nome que ainda não existe, e cria **atomicamente**: não há janela entre testar e
+criar.
+
+O `chmod 700` é explícito por política, não por necessidade — o `mktemp -d` já
+nasce `700`. Deixar a linha escrita significa que uma mudança futura de default
+não passa despercebida.
+
 O `C` é definido **aqui**, e não só na §1.1: na ordem da §7.1 esta seção roda
-primeiro, e com `C` indefinido o `$C images` viraria um `images: command not
-found` **dentro do subshell**, sem interromper o resto — o backup terminaria sem
-o `imagens.txt` e o operador só notaria contando arquivos.
+primeiro, e com `C` indefinido o `$C images` falharia dentro do subshell.
 
-`install -d -m 700` define o modo **explicitamente**, sem depender do `umask` —
-um `mkdir` simples, sob `0002`, nasceria `775`. O `umask 077` vale dentro dos
-parênteses porque é ali que as redireções acontecem; fora do subshell o ambiente
-volta ao que era, sem efeito colateral em nada mais da sessão.
+**`set -u` não basta, e a linha `${B:?}` existe por causa disso.** `set -u`
+dispara em variável **não definida**; uma variável definida e **vazia** passa
+sem ruído. Se `/opt/backups` sumisse ou ficasse sem permissão, o `mktemp`
+falharia, `B` ficaria vazio, e `"$B/propectai.sql.gz"` viraria
+**`/propectai.sql.gz`** — dump da base inteira na raiz de um servidor
+compartilhado, possivelmente com `BACKUP_OK` impresso ao final. Medido: com
+`B=""` e `set -euo pipefail`, o caminho resolvido é `/propectai.sql.gz` e nada
+reclama. Com a linha de guarda, o subshell morre antes do `umask` e sai
+`BACKUP_FALHOU`.
 
-A última linha é a verificação, e ela é obrigatória. Três coisas de uma vez:
+**O que cada guarda pega, e por que o conjunto não é redundante:**
 
-- **`700`** no diretório e **`600`** em cada arquivo;
-- **três arquivos**, nomeados — `propectai.sql.gz`, `prospectai-arvore.tgz`,
-  `imagens.txt`;
-- **tamanho plausível** em cada um. O `%s` está no formato porque não há `set -e`
-  aqui: se o `pg_dump` falhar, o `gzip` ainda cria o arquivo, e um `.sql.gz` de
-  poucas dezenas de bytes é um backup vazio com cara de backup.
+| guarda | pega |
+|---|---|
+| `set -o pipefail` | `pg_dump` falhando **dentro do cano**. Sem ela o status é o do `gzip`, que comprime erro com a mesma satisfação que comprime dados |
+| `set -e` | qualquer passo seguinte que falhe, sem o operador precisar ler cada linha |
+| `set -u` | variável **não definida** — e só isso; vazia ela deixa passar |
+| `${B:?}` `${C:?}` | variável **vazia**, que é o resultado de um `mktemp` que falhou. Sem elas o destino vira `/` |
+| `gzip -t` | dump truncado ou corrompido. Medido: corrupção no meio devolve `1`, arquivo truncado devolve `1`, lixo no fim devolve `2`. Os três não-zero |
+| `tar -tzf` | árvore ilegível. Ler o índice inteiro é o que distingue arquivo gravado de arquivo gravável |
+| `test -s` | `imagens.txt` vazio — o caso exato do `$C` quebrado |
 
-Qualquer divergência — parar, não seguir para a §6.2, e não deixar o dump onde
-está.
+**Por que `rc=$?` e não `if ( … ); then`.** Medido: `set -e` é **desligado**
+dentro de um subshell usado como condição de `if`. A forma
+`if ( set -e; false; echo alcancado ); then` imprime `alcancado` e entra no
+ramo verdadeiro. Escrito assim, todo o endurecimento acima seria decorativo — a
+aparência da guarda sem a guarda. O subshell roda solto, o `$?` é capturado na
+linha seguinte, e só então se decide.
+
+**O `stat` continua, e mudou de papel.** Ele é evidência de permissões e
+tamanho, não a guarda: quem garante integridade é o `gzip -t`, o `tar -tzf`, o
+`test -s` e o status de saída. Tamanho é sinal **auxiliar** — um `.sql.gz` de
+poucas dezenas de bytes chama atenção, mas tamanho grande não prova nada sobre o
+conteúdo, e por isso nunca foi suficiente. Esperado: `700` no diretório, `600`
+em cada arquivo, e os três nomeados — `propectai.sql.gz`, `prospectai-arvore.tgz`,
+`imagens.txt`.
+
+**Em caso de `BACKUP_FALHOU`:** parar. Não seguir para a §6.2, não apagar o
+diretório — ele fica, privado e nomeado, para inspeção — e **não reaproveitá-lo**
+na tentativa seguinte, que ganha o seu próprio `mktemp`. Um `tar` que devolve
+diferente de zero por "file changed as we read it" também para o procedimento, e
+isso é deliberado: backup de árvore que mudou durante a leitura não é base de
+rollback confiável.
 
 O `imagens.txt` é o caminho de volta: sem os IDs das imagens atuais anotados, o
 rollback vira reconstrução às cegas. O `$B` desta execução é o mesmo usado pela
@@ -914,6 +964,16 @@ prova é a medição depois dela.**
    mesmo** depois desta execução: o próximo que gravar ali sem cuidado repete a
    exposição. Não vira gate — mudar o modo de um diretório compartilhado por
    outras stacks é decisão de infraestrutura, e não foi tomada.
+7. **O invariante da API varre o banco sem escopo.** `business-invariants.spec.ts`
+   exige que nenhum lead ativo esteja sem score, em consulta **global**. Isso é o
+   que lhe dá valor, e também o que o torna sensível a qualquer outra suíte
+   escrevendo ao mesmo tempo. O `--concurrency=1` do `package.json` (`19802df`)
+   impede a corrida **neste** pipeline; quem chamar `turbo run test` direto a
+   reabre, e a falha vai parecer intermitente. Dívida, sem gate.
+8. **A suíte da API não encerra sozinha.** Ela imprime *"Jest did not exit one
+   second after the test run has completed"* — handle aberto, anterior a
+   `19802df`, sem efeito no resultado hoje. Dívida, sem gate: um dia isso vira
+   job travado em vez de aviso.
 
 **Débito de infraestrutura, registrado e não tratado agora.** As anotações do run
 #50 avisam que o rótulo `ubuntu-latest` migra para **Ubuntu 26 em 19/10/2026**: o
