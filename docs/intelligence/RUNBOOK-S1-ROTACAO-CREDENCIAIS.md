@@ -42,10 +42,11 @@ Três dependências duras. Quebrar qualquer uma delas faz um passo falhar ou,
 pior, ter sucesso sem efeito:
 
 1. **A CLI de rotação não existe na imagem que está no ar.** O container atual
-   foi construído em 22/09, a partir de `991f459`. O `prisma/set-senha.ts`
-   nasceu em `12095da`. Rodar `pnpm db:senha` antes do deploy devolve
-   "script não encontrado" — e é o melhor caso; o pior seria alguém concluir que
-   a rotação não é possível.
+   foi construído em 22/09, a partir de **`2c901f2`** (medido no servidor em
+   28/09; a primeira versão desta linha dizia `991f459` e ignorava o redeploy do
+   dia seguinte). O `prisma/set-senha.ts` nasceu em `12095da`. Rodar
+   `pnpm db:senha` antes do deploy devolve "script não encontrado" — e é o melhor
+   caso; o pior seria alguém concluir que a rotação não é possível.
 2. **A correção do seed precisa estar no ar antes de qualquer rotação.** Até
    `7d8db3b`, o `update` do upsert regravava `passwordHash`. Rotacionar a senha e
    depois rodar `pnpm db:seed` — por qualquer motivo, inclusive corrigir limite
@@ -61,15 +62,50 @@ pior, ter sucesso sem efeito:
 
 ### 1.1 As duas senhas do seed
 
-**Medido:** o `.env.production` do servidor **não tem** `SEED_OWNER_PASSWORD`
-nem `SEED_SDR_PASSWORD`. Desde `7d8db3b` o seed exige as duas, distintas e com
-no mínimo 12 caracteres (`packages/types/src/seed-usuarios.ts`). Portanto, hoje,
-**`pnpm db:seed` naquele servidor falha** — o passo 5 do
-`ATUALIZAR-AMBIENTE-ONLINE.md` está quebrado e ninguém notou porque ninguém o
-repetiu desde 22/09.
+**Medido no servidor em 28/09/2026:** as duas variáveis **existem**, e é isso que
+as torna piores do que se faltassem.
 
-A falha é alta e explícita, que é o comportamento desejado. Ainda assim é uma
-pré-condição, e entra antes do deploy.
+```
+owner_len=11  sdr_len=11  iguais=sim
+```
+
+Onze caracteres, idênticas entre si — a mesma assinatura do `Demo@123456` que
+estava no `.env.example` público. Isso ainda era **compatibilidade**, e não
+igualdade. Por isso foi medido: comparação direta contra os valores publicados no
+`.env.example` do próprio commit em que o servidor está (`2c901f2`), sem que
+nenhum dos quatro valores vá à tela.
+
+```bash
+cd /opt/apps/prospectai && O=$(grep -m1 '^SEED_OWNER_PASSWORD=' .env.production | cut -d= -f2- | tr -d '\r'); S=$(grep -m1 '^SEED_SDR_PASSWORD=' .env.production | cut -d= -f2- | tr -d '\r'); PO=$(git show 2c901f2:.env.example | grep -m1 '^SEED_OWNER_PASSWORD=' | cut -d= -f2- | tr -d '\r'); PS=$(git show 2c901f2:.env.example | grep -m1 '^SEED_SDR_PASSWORD=' | cut -d= -f2- | tr -d '\r'); echo "publicado_owner_nao_vazio=$([ -n "$PO" ] && echo sim || echo nao) publicado_sdr_nao_vazio=$([ -n "$PS" ] && echo sim || echo nao)"; echo "owner_match_publicado=$([ "$O" = "$PO" ] && echo sim || echo nao) sdr_match_publicado=$([ "$S" = "$PS" ] && echo sim || echo nao)"; unset O S PO PS
+```
+
+Medido em 28/09/2026:
+
+```
+publicado_owner_nao_vazio=sim  publicado_sdr_nao_vazio=sim
+owner_match_publicado=sim      sdr_match_publicado=sim
+```
+
+A primeira linha não é decoração. Sem ela o resultado seria ambíguo **na direção
+perigosa**: se o `.env.example` daquele commit já estivesse com as variáveis
+vazias, a comparação devolveria `nao`, e `nao` seria lido como *"não é a
+credencial publicada"* — exatamente a conclusão errada. Com as duas linhas, o que
+existe é **igualdade medida**, e não mais semelhança de assinatura.
+
+Nenhum valor e nenhum hash foram impressos, e nenhuma string secreta entrou na
+linha de comando — portanto nada disso ficou no histórico do shell do servidor.
+
+> **Correção de 28/09.** A primeira versão desta seção dizia que as duas
+> variáveis **não existiam**, com base em medição de 25/09. Estavam lá. A
+> conclusão — *"`pnpm db:seed` naquele servidor falha"* — continua certa, e pelo
+> motivo **errado**: não por ausência, mas porque `11 < 12` e porque são iguais,
+> as duas guardas de `packages/types/src/seed-usuarios.ts`.
+
+Isso muda o procedimento de **acrescentar** para **substituir**, e acrescenta um
+fato ao registro do S0 — registrado no `S0-FORENSICS §1.1`: existe uma **terceira
+cópia** da credencial publicada, agora no `.env.production`, e ela é uma cópia
+**medida**, não inferida. Ela não concede acesso sozinha — o seed só a usa no
+`create`, e as contas já existem —, mas está lá.
 
 ```bash
 cd /opt/apps/prospectai
@@ -84,8 +120,39 @@ grep -c '^SEED_OWNER_PASSWORD=' .env.production; grep -c '^SEED_SDR_PASSWORD=' .
 ```
 
 Os dois `grep -c` têm de dizer `1`. **Contagem, não conteúdo** — o valor nunca
-vai à tela. Apagar antes de acrescentar é o que torna o passo repetível, e é a
-lição do `APP_VERSION` que apareceu duas vezes no mesmo arquivo.
+vai à tela. O `sed` que apaga antes de acrescentar já era o que tornava o passo
+repetível (lição do `APP_VERSION` duplicado); agora ele é também o que faz a
+**substituição** funcionar, sem que o procedimento precise mudar.
+
+Depois, confirmar que a substituição pegou, com a mesma medição que expôs o
+problema — comprimento e igualdade, nenhum valor:
+
+```bash
+O=$(grep -m1 '^SEED_OWNER_PASSWORD=' .env.production | cut -d= -f2-); S=$(grep -m1 '^SEED_SDR_PASSWORD=' .env.production | cut -d= -f2-); echo "owner_len=${#O} sdr_len=${#S} iguais=$([ "$O" = "$S" ] && echo sim || echo nao)"; unset O S
+```
+
+Esperado: `owner_len=48 sdr_len=48 iguais=nao`. Antes da correção, em 28/09, isto
+devolvia `owner_len=11 sdr_len=11 iguais=sim`.
+
+Comprimento e desigualdade entre si **não bastam**: duas senhas de 48 caracteres
+diferentes uma da outra ainda poderiam, em teoria, ter sido copiadas de qualquer
+lugar. O que fecha o passo é **repetir o comando de comparação do começo desta
+seção**, sem alterar uma letra, agora esperando o resultado **oposto**:
+
+```
+owner_match_publicado=nao  sdr_match_publicado=nao
+```
+
+O comando continua funcionando **depois** do deploy, quando o servidor já não
+estiver em `2c901f2`: o `git checkout -f -B main origin/main` da §6.2 não
+reescreve história — força-push é proibido —, então `2c901f2` segue alcançável
+como ancestral e `git show 2c901f2:.env.example` continua devolvendo a versão
+que vazou. É por isso que a referência é o commit, e não a string: comparar
+contra a senha literal exigiria escrevê-la na linha de comando.
+
+As quatro medições juntas — presença, `48/48`, `iguais=nao` e `match=nao/nao` —
+são o que a `E2` exige. Nenhuma delas sozinha é suficiente, e é por isso que a
+`E2` deixou de aceitar presença.
 
 ### 1.2 Estas duas variáveis **não** são a senha do OWNER
 
@@ -356,8 +423,13 @@ cd /opt/apps/prospectai
 git log -1 --format='%h %s'
 ```
 
-Tem de dizer `991f459`. Se disser outra coisa, o restante desta seção parte de
-uma premissa falsa — parar e remedir.
+Tem de dizer **`2c901f2`** — medido em 28/09/2026. Se disser outra coisa, o
+restante desta seção parte de uma premissa falsa: parar e remedir.
+
+> **Correção de 28/09.** Esta linha exigia `991f459`, que é onde o servidor ficou
+> em 21/09. No dia seguinte o `2c901f2` foi deployado, e eu escrevi a seção sem
+> contar esse redeploy. O pré-voo de 28/09 pegou a divergência **antes** de a
+> §6.2 usar a base errada, que é exatamente para isso que ele existe.
 
 ```bash
 docker exec prospectai-prod-postgres-1 pg_dump -U propectai propectai \
@@ -376,7 +448,7 @@ rollback vira reconstrução às cegas.
 git fetch origin main
 git checkout -f -B main origin/main
 git log -1 --format='%H %s'
-git diff --name-only 991f459..HEAD -- prisma/migrations | wc -l
+git diff --name-only 2c901f2..HEAD -- prisma/migrations | wc -l
 ```
 
 O SHA tem de ser o mesmo que o CI aprovou. A última linha decide o passo
@@ -406,7 +478,7 @@ tocado. Se um dia mudar, vale o passo 6 do `ATUALIZAR-AMBIENTE-ONLINE.md`:
 **De código, sim:**
 
 ```bash
-git checkout -f -B main 991f459
+git checkout -f -B main 2c901f2
 $C build api worker web
 $C up -d --force-recreate api worker web
 ```
@@ -684,7 +756,7 @@ que é o mesmo indicador já usado na apuração do S0.
 | id | Evidência | Como | Esperado |
 |---|---|---|---|
 | **E1** | O que está no ar é o que o CI aprovou | `git log -1 --format='%H'` no servidor | igual ao SHA verde no GitHub Actions |
-| **E2** | Pré-condições de ambiente | `grep -o '^[A-Z_]*=' .env.production \| sort` | `SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD` presentes; `JWT_REFRESH_SECRET` ausente |
+| **E2** | Pré-condições de ambiente | `grep -o '^[A-Z_]*=' .env.production \| sort` **e** as **duas** medições da §1.1: comprimento/igualdade **e** comparação contra `2c901f2` | `JWT_REFRESH_SECRET` **ausente**; `owner_len=48 sdr_len=48 iguais=nao`; `owner_match_publicado=nao sdr_match_publicado=nao`. Presença não serve; comprimento sem a comparação também não |
 | **E3** | A rotação deixou trilha | consulta 1, abaixo | uma linha por conta rotacionada, `tenantId` nulo, `after` com `motivo`, `origem` e `tokensValidosRevogados`, **sem** hash |
 | **E4** | Os refresh tokens válidos caíram, e exatamente eles | consulta 2 **imediatamente antes** da rotação e **imediatamente depois**, com a saída da CLI no meio | `validos_antes = X`; `CLI revogou = X`; `validos_depois = 0` — os três números, para a conta rotacionada |
 | **E5** | As contas deixaram de compartilhar credencial | consulta 3 | as duas impressões **diferentes** |

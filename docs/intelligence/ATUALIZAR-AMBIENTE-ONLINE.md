@@ -373,12 +373,20 @@ que é exatamente o que o Gate 1 precisa que deixe de acontecer.
 
 > **Pré-condição acrescentada em 25/09/2026, e ela quebra este passo hoje.**
 > Desde `7d8db3b` o seed exige `SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD`,
-> **diferentes entre si** e com no mínimo 12 caracteres. Medido: o
-> `.env.production` deste servidor não tem nenhuma das duas — então, hoje, este
-> passo falha. A falha é alta e explícita, que é o comportamento desejado; o que
-> ela substituiu era pior: um único hash gravado nas duas contas, e o `update`
-> do upsert regravando a senha a cada execução, desfazendo qualquer rotação
-> anterior.
+> **diferentes entre si** e com no mínimo 12 caracteres.
+>
+> Medido no servidor em **28/09/2026**: as duas existem, com `owner_len=11`,
+> `sdr_len=11` e `iguais=sim`, e uma segunda medição no mesmo dia comparou os
+> dois valores com os publicados no `.env.example` do commit `2c901f2` e devolveu
+> `owner_match_publicado=sim sdr_match_publicado=sim`. **Não é compatibilidade:
+> é a credencial publicada, medida.** Reprovado, além disso, nas duas guardas do
+> seed — e portanto, hoje, este passo falha. A falha é alta e explícita, que é o
+> comportamento desejado; o que ela substituiu era pior: um único hash gravado
+> nas duas contas, e o `update` do upsert regravando a senha a cada execução,
+> desfazendo qualquer rotação anterior.
+>
+> **Uma medição de 25/09 dizia que as variáveis não existiam. Estava errada** —
+> elas estavam lá, com o valor errado, que é pior do que faltarem.
 >
 > Escrever as duas variáveis **sem expor valor** está no
 > `RUNBOOK-S1-ROTACAO-CREDENCIAIS.md` §1.1. E vale saber antes de confundir as

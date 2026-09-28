@@ -22,6 +22,47 @@ demonstração funcionais no ambiente online. OWNER e SDR compartilham o mesmo
 `passwordHash` (impressão `md5` idêntica nas duas linhas): o seed grava um hash
 único para os dois. A senha do repositório abre as duas contas.
 
+#### Acréscimo de 28/09/2026 — uma terceira cópia, no `.env.production`
+
+Medição de pré-voo no servidor `108.174.144.216`, em `/opt/apps/prospectai`, com
+o repositório local no commit `2c901f2` — o mesmo de que as imagens em produção
+foram construídas. As variáveis `SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD`
+**existem** no `.env.production` e foram comparadas, valor a valor, com as duas
+linhas homônimas do `.env.example` daquele commit:
+
+```
+publicado_owner_nao_vazio=sim  publicado_sdr_nao_vazio=sim
+owner_match_publicado=sim      sdr_match_publicado=sim
+```
+
+Antes disso, a mesma medição já havia devolvido `owner_len=11 sdr_len=11
+iguais=sim`. O procedimento está registrado no
+`RUNBOOK-S1-ROTACAO-CREDENCIAIS.md §1.1`.
+
+**Nenhuma senha e nenhum hash foram exibidos**, em nenhuma das duas medições:
+saem do comando apenas comprimentos e booleanos, e nenhuma string secreta entrou
+na linha de comando — portanto nada foi para o histórico do shell do servidor.
+
+O que este fato é, com precisão:
+
+- **É uma terceira cópia da credencial já publicada.** As duas primeiras são o
+  `.env.example` do repositório público e o `passwordHash` no banco. Esta está em
+  arquivo no servidor.
+- **O seed usa essas variáveis apenas no `create` do upsert.** As duas contas já
+  existem no banco; rodar `pnpm db:seed` hoje não grava essas senhas em ninguém.
+- **O arquivo não é o mecanismo de autenticação.** Quem autentica é o
+  `passwordHash` da tabela `users`. Apagar essas duas linhas do `.env.production`
+  não fecharia o acesso, e trocá-las também não — isso é trabalho do `pnpm
+  db:senha` (`RUNBOOK §3`), que continua sendo um passo **separado**.
+- **Mas o valor armazenado coincide com uma credencial funcional**, e funcional
+  está comprovado por este próprio documento: é a mesma senha da §1.1 acima, que
+  abre as duas contas.
+- **A classificação do evento não muda.** Continua
+  `UNRECOGNIZED_AUTHENTICATION ACTIVITY / SUSPECTED_CREDENTIAL_COMPROMISE`. Uma
+  cópia a mais de uma credencial que já era pública amplia a superfície de
+  exposição; não acrescenta nenhuma evidência sobre quem autenticou em 11/08, que
+  é o que a classificação descreve.
+
 ### 1.2 As autenticações de 11–12/08
 
 12 linhas em `refresh_tokens` para `owner@demo.propectai.local` na janela:
