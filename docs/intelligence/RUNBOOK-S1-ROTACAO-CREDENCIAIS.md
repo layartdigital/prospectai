@@ -5,15 +5,21 @@ dono do projeto entre opções apresentadas; a §11 registra o mecanismo, a data
 o que foi recusado, para que nenhuma delas dependa de eu ter "entendido" uma
 preferência.
 
-**Bloqueios em 28/09/2026** — o passo 1 da §7.1 ainda não passou:
+**Estado em 28/09/2026**, depois do `fix(cli)` e da decisão do dono do projeto
+sobre o TTY:
 
 ```
-LOCAL_AUTOMATED_TEST = PASS      §8.3
-REMOTE_CI            = PENDING   nada commitado
-TTY_MANUAL           = PENDING   §8.4 — três elos medidos, a composição não
+LOCAL_AUTOMATED_TEST = PASS                            §8.3
+REMOTE_CI            = PASS                            f3b383f…, run #50, §8.5
+TTY_COMPOSITION      = NOT_OBSERVED                    §8.4
+TTY_MANUAL           = WAIVED_RISK_ACCEPTED_BY_OWNER   §8.4
 GATE_S0              = OPEN
 GATE_NET             = OPEN (HIGH)
 ```
+
+O passo 1 da §7.1 deixa de bloquear: não porque foi verificado, mas porque o
+risco foi **aceito e registrado**. As duas coisas não são a mesma, e a §8.4
+explica a diferença e o que ela custa.
 **Nada aqui foi executado** — nenhuma senha girada, nenhum container recriado,
 nenhum arquivo do servidor alterado.
 **Escrito em:** 25/09/2026
@@ -441,7 +447,7 @@ de `redis://` no log significaria apenas que o serviço ainda não conectou.
 
 | # | Passo | Seção |
 |---|---|---|
-| 1 | Verificação manual de não-eco em TTY, em conta descartável | §8 |
+| 1 | ~~Verificação manual de não-eco em TTY~~ — **dispensado** por `D4`, com mitigação operacional obrigatória | §8.4 |
 | 2 | Pré-voo, backup do banco, da árvore e dos IDs de imagem | §6.1 |
 | 3 | Checkout do HEAD, decisão sobre migrations | §6.2 |
 | 4 | `SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD` no `.env.production` | §1.1 |
@@ -516,13 +522,15 @@ disso" — e nada além. Continuam abertos, e é preciso que fiquem visíveis:
 **Estado no fecho desta seção:**
 
 ```
-LOCAL_AUTOMATED_TEST = PASS      27 casos em apps/api/test, verdes na máquina
-REMOTE_CI            = PENDING   o código não foi commitado nem enviado
-TTY_MANUAL           = PENDING   §8.4; passo 6 parcial
+LOCAL_AUTOMATED_TEST = PASS                            27 casos, na máquina
+REMOTE_CI            = PASS                            §8.5
+TTY_COMPOSITION      = NOT_OBSERVED                    §8.4
+TTY_MANUAL           = WAIVED_RISK_ACCEPTED_BY_OWNER   §8.4
 ```
 
-`LOCAL_AUTOMATED_TEST` **não é CI.** Enquanto não houver commit, push e Actions
-verde no SHA correspondente, o que existe é teste que passou numa máquina.
+`LOCAL_AUTOMATED_TEST` **não é CI**, e a distinção vale a linha: enquanto não
+houver commit, push e Actions verde no SHA correspondente, o que existe é teste
+que passou numa máquina. O run remoto veio em `f3b383f` e está na §8.5.
 
 ### 8.1 O que a execução encontrou
 
@@ -556,13 +564,12 @@ Conta descartável `sdr@demo.propectai.local`, banco local, senhas descartáveis
 | 5 | duas entradas iguais | três linhas, nenhuma com a senha | **OK** |
 | 6 | rolar a tela | nenhum fragmento, nenhuma linha sobrescrita | **PARCIAL** — nada no visível; varredura completa não reportada |
 | 7 | `Get-History` | comandos sem senha, nenhuma entrada espúria | **OK** — 14 entradas, todas legítimas |
-| 8 | `Ctrl+C` no prompt, depois digitar | mensagem, saída ≠ 0, e **o eco de volta** | **NÃO EXECUTADO** — 7 tentativas, 7 caminhos felizes |
+| 8 | `Ctrl+C` no prompt, depois digitar | mensagem, saída ≠ 0, e **o eco de volta** | **NÃO EXECUTADO** — ver §8.4 |
 
-**O passo 8 não foi executado em nenhuma das sete tentativas.** Todas terminaram
-com as duas digitações concluídas e rotação bem-sucedida, o que exige duas linhas
-completas de entrada — ou seja, o `Ctrl+C` não chegou ao processo em nenhuma
-delas. Não há observação da CLI interrompida. `TTY_MANUAL` continua `PENDING`
-porque **não foi medido**, e não porque algo falhou.
+**O passo 8 não foi executado em nenhuma das oito tentativas até 28/09/2026.**
+Todas terminaram com as duas digitações concluídas e rotação bem-sucedida, o que
+exige duas linhas completas de entrada — ou seja, o `Ctrl+C` não chegou ao
+processo em nenhuma delas. Não há observação da CLI interrompida.
 
 ### 8.3 O que mudou no código, e o que isso tira do manual
 
@@ -576,9 +583,9 @@ backspace **por ponto de código** (apagar um emoji não pode deixar meia unidad
 UTF-16 no texto), sequência cortada entre dois pedaços de `data`, linha vazia
 legítima, acento e emoji.
 
-A razão é de método, não de estética: **depois de cinco tentativas sem conseguir
-medir o `Ctrl+C`, ficou claro que um passo dependente de um gesto humano
-irrepetível não verifica nada.** O que pode virar asserção, virou.
+A razão é de método, não de estética: **quando um passo depende de um gesto
+humano irrepetível, ele não verifica nada.** O que pode virar asserção, virou. A
+contagem das tentativas fica na §8.4, que é onde ela serve de evidência.
 
 Sobrou **um** item manual, e ele não cabe em runner nenhum:
 
@@ -615,11 +622,57 @@ Se o eco **não** voltar, o gate falha e a correção vem antes de qualquer
 produção. `stty sane` — ou fechar a janela, no PowerShell — recupera o terminal
 no momento, e não conta como conserto.
 
-**O que este `PENDING` bloqueia, e o que não bloqueia.** Ele bloqueia o passo 1
-da §7.1, e portanto todo o resto do procedimento de produção. Ele **não** é, por
-si, argumento contra commitar o código: o commit não toca no servidor, e o
-bloqueio continua registrado aqui, no cabeçalho e na §7.1. A decisão sobre essa
-separação é do dono do projeto.
+### Decisão do dono do projeto, 28/09/2026
+
+```
+TTY_COMPOSITION = NOT_OBSERVED
+TTY_MANUAL      = WAIVED_RISK_ACCEPTED_BY_OWNER
+```
+
+Depois de **oito tentativas até 28/09/2026**, nenhuma delas exercitando o
+`Ctrl+C` dentro da CLI, o dono do projeto decidiu **não repetir o teste manual** e
+aceitar o risco. O passo 1 da §7.1 deixa de bloquear.
+
+**`WAIVED` não é `PASS`, e este documento não vai escrever `PASS`.** O elo
+continua não observado; o que mudou foi a disposição de conviver com ele.
+
+**Raio de dano, que é o que sustenta a decisão.** Se `interromper() →
+desligarTerminal()` falhar em restaurar o eco, a consequência é **um terminal em
+modo cru** — irritante, recuperável. A rotação não é afetada: o caminho de
+interrupção **recusa antes de qualquer escrita**, porque `interromper()` rejeita
+a Promise, `main()` cai no `catch` e `rotacionarSenha` nunca chega a ser chamada.
+Não há estado parcial no banco, senha meio trocada ou sessão meio revogada.
+
+**Mitigação operacional, obrigatória na rotação de produção:**
+
+- rodar `pnpm db:senha` numa **sessão SSH dedicada**, sem nada mais em andamento
+  nela;
+- se for preciso abortar, ou se o terminal se comportar de forma inesperada,
+  **encerrar a sessão** em vez de depender do `Ctrl+C`;
+- não emendar outro comando nessa sessão sem confirmar que o eco voltou.
+
+### 8.5 `REMOTE_CI` — run remoto do código desta seção
+
+```
+SHA        f3b383f51b77484d3acf62a8f03cf51831631b7e
+Run        GitHub Actions #50, ci.yml, on: push, branch main
+Duração    2m51s
+Status     Success
+```
+
+Verificados diretamente pelo dono do projeto como `success`:
+
+| Job / step | |
+|---|---|
+| `Tipos` / `pnpm typecheck:all` | ✅ |
+| `Semear o catalogo` | ✅ |
+| `Suite completa` | ✅ |
+| `Portao de RLS` | ✅ |
+| `Relatorio de RLS` | ✅ |
+
+```
+REMOTE_CI = PASS
+```
 
 ---
 
@@ -632,7 +685,7 @@ que é o mesmo indicador já usado na apuração do S0.
 |---|---|---|---|
 | **E1** | O que está no ar é o que o CI aprovou | `git log -1 --format='%H'` no servidor | igual ao SHA verde no GitHub Actions |
 | **E2** | Pré-condições de ambiente | `grep -o '^[A-Z_]*=' .env.production \| sort` | `SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD` presentes; `JWT_REFRESH_SECRET` ausente |
-| **E3** | A rotação deixou trilha | consulta 1, abaixo | uma linha por conta rotacionada, `tenantId` nulo, `after` com motivo/origem/sessões, **sem** hash |
+| **E3** | A rotação deixou trilha | consulta 1, abaixo | uma linha por conta rotacionada, `tenantId` nulo, `after` com `motivo`, `origem` e `tokensValidosRevogados`, **sem** hash |
 | **E4** | Os refresh tokens válidos caíram, e exatamente eles | consulta 2 **imediatamente antes** da rotação e **imediatamente depois**, com a saída da CLI no meio | `validos_antes = X`; `CLI revogou = X`; `validos_depois = 0` — os três números, para a conta rotacionada |
 | **E5** | As contas deixaram de compartilhar credencial | consulta 3 | as duas impressões **diferentes** |
 | **E6** | O segredo global girou | `docker inspect -f '{{.State.StartedAt}}' prospectai-prod-api-1` + DevTools do navegador com a sessão antiga | `StartedAt` posterior ao backup do `.env.production`; requisição com o cookie antigo devolve **401** |
@@ -700,6 +753,14 @@ prova é a medição depois dela.**
    se perder, a recuperação é rodar `db:senha` de novo — não há "esqueci minha
    senha" no produto, e é a lacuna que este runbook existe para contornar, não
    para resolver.
+5. **A composição da interrupção não foi observada** (§8.4). Risco aceito pelo
+   dono do projeto, com a mitigação operacional descrita lá.
+
+**Débito de infraestrutura, registrado e não tratado agora.** As anotações do run
+#50 avisam que o rótulo `ubuntu-latest` migra para **Ubuntu 26 em 19/10/2026**: o
+runner muda de imagem sem que nada no repositório mude. Não vira gate — abrir
+outra frente com o `GATE_S0` ainda em fechamento custaria mais do que rende —,
+mas a data entra na lista de coisas que mudam sozinhas.
 
 ---
 
@@ -716,18 +777,24 @@ principalmente, quando parece óbvia.
 | **D1** | A correção do `.env.example` entra no Commit 3 | escolhida pelo dono do projeto em 25/09/2026, entre três opções apresentadas | commit isolado antes do C3; adiar para depois da remediação |
 | **D2** | A conta SDR é **rotacionada**, com senha própria, e permanece ativa | idem, entre três opções | desativar (`isActive = false`); deixar como está |
 | **D3** | `S0-NET-01` vira `GATE_NET`, gate próprio atrelado ao gate de domínio, e deixa de bloquear o `GATE_S0` | idem, entre duas opções | manter o `GATE_S0` aberto até a 3102 sair de `0.0.0.0` |
+| **D4** | Não repetir o teste manual de `Ctrl+C`; `TTY_MANUAL` vira `WAIVED_RISK_ACCEPTED_BY_OWNER` | decisão do dono do projeto em 28/09/2026, por escrito, depois de 8 tentativas e da apresentação do raio de dano (§8.4) | manter o bloqueio duro até a CLI ser interrompida de verdade |
 
-As três foram escolhidas entre opções que eu apresentei, e em cada uma a opção
+`D1` a `D3` foram escolhidas entre opções que eu apresentei, e em cada uma a opção
 escolhida era a que eu recomendava. **Isso é motivo para o registro existir, não
 para dispensá-lo:** recomendação aceita continua sendo decisão de quem aceitou,
 e quem ler este documento em 2027 precisa poder ver a diferença entre "o dono
 decidiu" e "o Claude concluiu".
 
-**Se o dono do projeto não reconhecer algum destes registros, o item volta a
-`PENDING_OWNER_DECISION`** e o passo correspondente da §7.1 fica bloqueado até
-nova palavra. Nada neste runbook foi executado, então nenhum deles produziu
-efeito ainda.
+> **Confirmação explícita do dono do projeto, 28/09/2026.** `D1`, `D2` e `D3`
+> foram reconhecidas e confirmadas por escrito. Nenhuma delas está mais em
+> `PENDING_OWNER_DECISION`.
+
+Se alguma tivesse sido negada, o item voltaria a `PENDING_OWNER_DECISION` e o
+passo correspondente da §7.1 ficaria bloqueado até nova palavra.
 
 **Continua `PENDING_OWNER_DECISION`**, e não tem registro nenhum porque ninguém
 decidiu: o `trust proxy` (§1.6 do `S0-FORENSICS`), o destino da porta 3102 e o
-nome/domínio do produto.
+nome/domínio do produto. **Nenhuma das três foi inferida a partir do `D4` nem de
+qualquer outra decisão desta rodada** — aceitar um risco de terminal não diz nada
+sobre em quantos saltos de proxy confiar, sobre fechar a porta 3102, ou sobre o
+nome do produto.
