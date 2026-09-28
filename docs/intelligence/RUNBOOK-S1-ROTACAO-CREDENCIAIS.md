@@ -10,12 +10,16 @@ sobre o TTY:
 
 ```
 LOCAL_AUTOMATED_TEST = PASS                            §8.3
-REMOTE_CI            = PASS                            f3b383f…, run #50, §8.5
+REMOTE_CI            = PASS                            afb7e44…, run #52
 TTY_COMPOSITION      = NOT_OBSERVED                    §8.4
 TTY_MANUAL           = WAIVED_RISK_ACCEPTED_BY_OWNER   §8.4
 GATE_S0              = OPEN
 GATE_NET             = OPEN (HIGH)
 ```
+
+O último run que exercitou **código** foi o #50 (`f3b383f`, §8.5). Os runs #51 e
+#52 cobrem commits documentais: passaram, e é isso que provam — que o repositório
+segue verde, não que algo novo foi verificado.
 
 O passo 1 da §7.1 deixa de bloquear: não porque foi verificado, mas porque o
 risco foi **aceito e registrado**. As duas coisas não são a mesma, e a §8.4
@@ -104,14 +108,20 @@ linha de comando — portanto nada disso ficou no histórico do shell do servido
 Isso muda o procedimento de **acrescentar** para **substituir**, e acrescenta um
 fato ao registro do S0 — registrado no `S0-FORENSICS §1.1`: existe uma **terceira
 cópia** da credencial publicada, agora no `.env.production`, e ela é uma cópia
-**medida**, não inferida. Ela não concede acesso sozinha — o seed só a usa no
-`create`, e as contas já existem —, mas está lá.
+**medida**, não inferida: `SEED_*` não é consultado na autenticação; porém os
+valores encontrados coincidiam com uma credencial funcional.
+
+> **Por que esta frase foi trocada.** A versão anterior dizia *"ela não concede
+> acesso sozinha"*, o que sugere que faltava um ingrediente para o acesso
+> funcionar. Não falta nada: o valor **é** a credencial que abre as duas contas.
+> O que é verdade é mais estreito — o arquivo não participa da autenticação.
 
 ```bash
 cd /opt/apps/prospectai
 C="docker compose --env-file .env.production -f compose.prod.yml"
+B=${B:?defina B como na §6.1 antes de copiar o .env.production}
 
-cp -p .env.production /opt/backups/env.production-$(date +%Y%m%d-%H%M).bak
+cp -p .env.production "$B/env.production-antes-seed.bak"
 S_OWNER=$(openssl rand -hex 24); S_SDR=$(openssl rand -hex 24)
 sed -i '/^SEED_OWNER_PASSWORD=/d; /^SEED_SDR_PASSWORD=/d' .env.production
 printf 'SEED_OWNER_PASSWORD=%s\nSEED_SDR_PASSWORD=%s\n' "$S_OWNER" "$S_SDR" >> .env.production
@@ -431,16 +441,82 @@ restante desta seção parte de uma premissa falsa: parar e remedir.
 > contar esse redeploy. O pré-voo de 28/09 pegou a divergência **antes** de a
 > §6.2 usar a base errada, que é exatamente para isso que ele existe.
 
+Antes de escrever o primeiro byte, três medições de postura — read-only, feitas
+em 28/09/2026 e reproduzíveis:
+
 ```bash
-docker exec prospectai-prod-postgres-1 pg_dump -U propectai propectai \
-  | gzip > /opt/backups/propectai-$(date +%Y%m%d-%H%M).sql.gz
-tar czf /opt/backups/prospectai-arvore-$(date +%Y%m%d-%H%M).tgz \
-  --exclude=node_modules --exclude=services/google-maps-scraper -C /opt/apps prospectai
-$C images | tee /opt/backups/imagens-$(date +%Y%m%d-%H%M).txt
+umask; stat -c '%a %U:%G %n' /opt/backups .env.production
+git status --short --untracked-files=all; git diff --stat; git diff --cached --stat
 ```
 
-O terceiro é o caminho de volta: sem os IDs das imagens atuais anotados, o
-rollback vira reconstrução às cegas.
+Medido:
+
+```
+0002
+775 root:root /opt/backups
+600 root:root .env.production
+```
+
+e as três consultas ao git **vazias** — árvore limpa, nada staged, nada tracked
+modificado. Só com as três vazias o `git checkout -f` da §6.2 é seguro: com `-f`,
+qualquer edição feita direto no servidor some sem aviso.
+
+> **O que essas duas primeiras linhas obrigam.** `umask 0002` cria arquivo novo
+> com modo `664` — legível por **qualquer** usuário local. `/opt/backups` é `775`,
+> ou seja, atravessável e listável por todos. Um `pg_dump` gravado ali nasceria
+> world-readable, e este servidor hospeda 17 vhosts de terceiros. O dump contém
+> e-mails, `passwordHash` e a base de leads inteira.
+>
+> O `.env.production` **está correto**: `600 root:root`. Ele só continua correto
+> na cópia porque `cp -p` preserva o modo — sem o `-p`, a cópia nasceria `664`.
+>
+> Nada disso é alterado: mudar o modo de `/opt/backups`, diretório compartilhado
+> do host, afetaria outras stacks. A saída é não depender dele.
+
+Por isso o backup vai para um **diretório exclusivo desta execução**, criado já
+privado e com `umask 077` valendo dentro do subshell:
+
+```bash
+cd /opt/apps/prospectai
+C="docker compose --env-file .env.production -f compose.prod.yml"
+B="/opt/backups/prospectai-s0-$(date +%Y%m%d-%H%M)"
+install -d -m 700 "$B"
+( umask 077
+  docker exec prospectai-prod-postgres-1 pg_dump -U propectai propectai \
+    | gzip > "$B/propectai.sql.gz"
+  tar czf "$B/prospectai-arvore.tgz" \
+    --exclude=node_modules --exclude=services/google-maps-scraper -C /opt/apps prospectai
+  $C images > "$B/imagens.txt"
+)
+stat -c '%a %U:%G %s %n' "$B" "$B"/*
+```
+
+O `C` é definido **aqui**, e não só na §1.1: na ordem da §7.1 esta seção roda
+primeiro, e com `C` indefinido o `$C images` viraria um `images: command not
+found` **dentro do subshell**, sem interromper o resto — o backup terminaria sem
+o `imagens.txt` e o operador só notaria contando arquivos.
+
+`install -d -m 700` define o modo **explicitamente**, sem depender do `umask` —
+um `mkdir` simples, sob `0002`, nasceria `775`. O `umask 077` vale dentro dos
+parênteses porque é ali que as redireções acontecem; fora do subshell o ambiente
+volta ao que era, sem efeito colateral em nada mais da sessão.
+
+A última linha é a verificação, e ela é obrigatória. Três coisas de uma vez:
+
+- **`700`** no diretório e **`600`** em cada arquivo;
+- **três arquivos**, nomeados — `propectai.sql.gz`, `prospectai-arvore.tgz`,
+  `imagens.txt`;
+- **tamanho plausível** em cada um. O `%s` está no formato porque não há `set -e`
+  aqui: se o `pg_dump` falhar, o `gzip` ainda cria o arquivo, e um `.sql.gz` de
+  poucas dezenas de bytes é um backup vazio com cara de backup.
+
+Qualquer divergência — parar, não seguir para a §6.2, e não deixar o dump onde
+está.
+
+O `imagens.txt` é o caminho de volta: sem os IDs das imagens atuais anotados, o
+rollback vira reconstrução às cegas. O `$B` desta execução é o mesmo usado pela
+§1.1 para copiar o `.env.production` antes de editá-lo — por isso aquela seção
+recusa rodar com `B` indefinido em vez de escrever num caminho público.
 
 ### 6.2 Sequência
 
@@ -516,6 +592,11 @@ de `redis://` no log significaria apenas que o serviço ainda não conectou.
 ## 7. Fechamento do incidente
 
 ### 7.1 A sequência completa
+
+**Esta tabela é a fonte canônica da ordem.** Resumo em prosa — meu, de e-mail, de
+mensagem — não substitui nem reordena o que está aqui. Em 28/09/2026 um resumo
+meu omitiu o passo 7 e colocou a rotação antes da validação pós-deploy; o dono do
+projeto recusou. Divergiu do quadro, o quadro vence.
 
 | # | Passo | Seção |
 |---|---|---|
@@ -827,6 +908,12 @@ prova é a medição depois dela.**
    para resolver.
 5. **A composição da interrupção não foi observada** (§8.4). Risco aceito pelo
    dono do projeto, com a mitigação operacional descrita lá.
+6. **O host cria arquivo legível por todos, por padrão.** `umask 0002` e
+   `/opt/backups` em `775` estão medidos na §6.1. O procedimento contorna com
+   diretório exclusivo `700` e `umask 077`, mas o **padrão do host continua o
+   mesmo** depois desta execução: o próximo que gravar ali sem cuidado repete a
+   exposição. Não vira gate — mudar o modo de um diretório compartilhado por
+   outras stacks é decisão de infraestrutura, e não foi tomada.
 
 **Débito de infraestrutura, registrado e não tratado agora.** As anotações do run
 #50 avisam que o rótulo `ubuntu-latest` migra para **Ubuntu 26 em 19/10/2026**: o
