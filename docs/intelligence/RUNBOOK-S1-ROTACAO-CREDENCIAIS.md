@@ -483,9 +483,9 @@ cada artefato verificado antes de o passo se declarar concluído:
 cd /opt/apps/prospectai
 C="docker compose --env-file .env.production -f compose.prod.yml"
 B=$(mktemp -d /opt/backups/prospectai-s0-XXXXXXXX)
-chmod 700 "$B"
 ( set -euo pipefail
   : "${B:?diretorio de backup nao criado}" "${C:?compose nao definido}"
+  chmod 700 "$B"
   umask 077
   docker exec prospectai-prod-postgres-1 pg_dump -U propectai propectai \
     | gzip -c > "$B/propectai.sql.gz"
@@ -495,6 +495,10 @@ chmod 700 "$B"
   tar -tzf "$B/prospectai-arvore.tgz" >/dev/null
   $C images > "$B/imagens.txt"
   test -s "$B/imagens.txt"
+  test "$(stat -c '%a' "$B")" = 700
+  test "$(stat -c '%a' "$B/propectai.sql.gz")" = 600
+  test "$(stat -c '%a' "$B/prospectai-arvore.tgz")" = 600
+  test "$(stat -c '%a' "$B/imagens.txt")" = 600
 )
 rc=$?
 if [ "$rc" -eq 0 ]; then
@@ -514,7 +518,10 @@ criar.
 
 O `chmod 700` é explícito por política, não por necessidade — o `mktemp -d` já
 nasce `700`. Deixar a linha escrita significa que uma mudança futura de default
-não passa despercebida.
+não passa despercebida. Ele fica **dentro** do subshell, depois do `${B:?}`: do
+lado de fora o seu status de saída não entraria no `rc`, e um `chmod` que
+falhasse — diretório em sistema de arquivos sem suporte a modo, por exemplo —
+passaria sem ninguém notar.
 
 O `C` é definido **aqui**, e não só na §1.1: na ordem da §7.1 esta seção roda
 primeiro, e com `C` indefinido o `$C images` falharia dentro do subshell.
@@ -540,6 +547,7 @@ reclama. Com a linha de guarda, o subshell morre antes do `umask` e sai
 | `gzip -t` | dump truncado ou corrompido. Medido: corrupção no meio devolve `1`, arquivo truncado devolve `1`, lixo no fim devolve `2`. Os três não-zero |
 | `tar -tzf` | árvore ilegível. Ler o índice inteiro é o que distingue arquivo gravado de arquivo gravável |
 | `test -s` | `imagens.txt` vazio — o caso exato do `$C` quebrado |
+| os quatro `test "$(stat -c '%a' …)"` | modo errado no diretório ou em qualquer dos três arquivos. Medido: com `umask 002` em vez de `077`, os arquivos nascem `664` e o subshell sai `rc=1` mesmo com dump e árvore íntegros |
 
 **Por que `rc=$?` e não `if ( … ); then`.** Medido: `set -e` é **desligado**
 dentro de um subshell usado como condição de `if`. A forma
@@ -548,15 +556,25 @@ ramo verdadeiro. Escrito assim, todo o endurecimento acima seria decorativo — 
 aparência da guarda sem a guarda. O subshell roda solto, o `$?` é capturado na
 linha seguinte, e só então se decide.
 
-**O `stat` continua, e mudou de papel.** Ele é evidência de permissões e
-tamanho, não a guarda: quem garante integridade é o `gzip -t`, o `tar -tzf`, o
-`test -s` e o status de saída. Tamanho é sinal **auxiliar** — um `.sql.gz` de
-poucas dezenas de bytes chama atenção, mas tamanho grande não prova nada sobre o
-conteúdo, e por isso nunca foi suficiente. Esperado: `700` no diretório, `600`
-em cada arquivo, e os três nomeados — `propectai.sql.gz`, `prospectai-arvore.tgz`,
-`imagens.txt`.
+**Confidencialidade é guarda, não evidência.** Num host compartilhado, um dump
+legível por terceiros é tão inaceitável quanto um dump corrompido — a diferença é
+que o corrompido só custa o rollback, e o legível custa a base inteira. Por isso
+os quatro `test` de modo ficam **dentro** do subshell: `BACKUP_OK` só pode
+existir depois de integridade **e** confidencialidade passarem. Antes desta
+correção, `BACKUP_OK` era impresso e só então o `stat` mostrava as permissões —
+para um operador ler, se lesse.
 
-**Em caso de `BACKUP_FALHOU`:** parar. Não seguir para a §6.2, não apagar o
+**O `stat` externo continua, como saída de evidência.** Ele não decide mais nada:
+o que decide são o `gzip -t`, o `tar -tzf`, o `test -s`, os quatro `test` de modo
+e o status de saída. Tamanho, em particular, é sinal **auxiliar** — um `.sql.gz`
+de poucas dezenas de bytes chama atenção, mas tamanho grande não prova nada sobre
+o conteúdo, e por isso nunca foi suficiente. O que ele imprime: `700` no
+diretório, `600` em cada arquivo, e os três nomeados — `propectai.sql.gz`,
+`prospectai-arvore.tgz`, `imagens.txt`.
+
+**Em caso de `BACKUP_FALHOU`:** parar. O `stat` **não roda** — para inspecionar,
+o operador o executa à mão sobre o `$B` impresso na própria mensagem. Não seguir
+para a §6.2, não apagar o
 diretório — ele fica, privado e nomeado, para inspeção — e **não reaproveitá-lo**
 na tentativa seguinte, que ganha o seu próprio `mktemp`. Um `tar` que devolve
 diferente de zero por "file changed as we read it" também para o procedimento, e
