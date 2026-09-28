@@ -4,6 +4,16 @@
 dono do projeto entre opções apresentadas; a §11 registra o mecanismo, a data e
 o que foi recusado, para que nenhuma delas dependa de eu ter "entendido" uma
 preferência.
+
+**Bloqueios em 28/09/2026** — o passo 1 da §7.1 ainda não passou:
+
+```
+LOCAL_AUTOMATED_TEST = PASS      §8.3
+REMOTE_CI            = PENDING   nada commitado
+TTY_MANUAL           = PENDING   §8.4 — três elos medidos, a composição não
+GATE_S0              = OPEN
+GATE_NET             = OPEN (HIGH)
+```
 **Nada aqui foi executado** — nenhuma senha girada, nenhum container recriado,
 nenhum arquivo do servidor alterado.
 **Escrito em:** 25/09/2026
@@ -501,35 +511,115 @@ disso" — e nada além. Continuam abertos, e é preciso que fiquem visíveis:
 
 ---
 
-## 8. Verificação manual de não-eco em TTY real
+## 8. Não-eco em TTY — execução de 26 a 28/09/2026
 
-**Por que é manual.** O teste automatizado (`apps/api/test/rotacao-senha.spec.ts`)
-roda a CLI com `spawn` e `stdin` **não-TTY**: ele cobre o caminho do cano, e
-prova que a senha não sai em `stdout` nem em `stderr`. O caminho do terminal —
-`readline` com `_writeToOutput` silenciado — **não é exercido por teste nenhum**,
-e não há forma barata de exercê-lo: exigiria um pseudoterminal no CI.
+**Estado no fecho desta seção:**
 
-**Onde rodar:** máquina de desenvolvimento, banco local, conta descartável
-(`sdr@demo.propectai.local` do seed local). **Nunca** a primeira execução em
-produção, e **nunca** no OWNER.
+```
+LOCAL_AUTOMATED_TEST = PASS      27 casos em apps/api/test, verdes na máquina
+REMOTE_CI            = PENDING   o código não foi commitado nem enviado
+TTY_MANUAL           = PENDING   §8.4; passo 6 parcial
+```
 
-| # | Ação | Resultado exigido |
+`LOCAL_AUTOMATED_TEST` **não é CI.** Enquanto não houver commit, push e Actions
+verde no SHA correspondente, o que existe é teste que passou numa máquina.
+
+### 8.1 O que a execução encontrou
+
+A validação era para confirmar um comportamento. Encontrou **seis defeitos**, e
+os seis estavam no caminho do terminal — o caminho que nenhum teste exercitava,
+porque o teste da CLI usa `stdin` de cano.
+
+| # | Defeito | Consequência | Como apareceu |
+|---|---|---|---|
+| 1 | silêncio do eco era um flag no `process.stdout`, ligado **depois** de `rl.question()` | a **confirmação de senha podia não acontecer**, sem aviso: o prompt `Repita a senha` era engolido e a segunda leitura consumia a linha já no buffer | duas linhas em branco na saída, onde deveria haver uma |
+| 2 | `Ctrl+C` sem ouvinte de `SIGINT` no `readline` | o processo **não morria**: o sinal apenas pausava a entrada, e o terminal ficava em modo cru | processo parado no prompt |
+| 3 | rótulo escrito por fora do `readline` (1ª tentativa de conserto) | `readline` calculava coluna a partir de um prompt vazio → **linhas sobrescritas** | pedaço do prompt do shell escrito sobre a linha de erro |
+| 4 | descarte do resto do pedaço após o Enter | colagem em **dois** pedaços deixaria a 2ª linha no buffer do console, e o PowerShell a executaria como comando — **senha no histórico do shell** | identificado como risco antes de executar, a partir de uma pergunta do dono do projeto |
+| 5 | `\r\n` contado como **duas** quebras | colar duas linhas punha uma linha vazia entre elas; a confirmação recebia o vazio | invisível digitando (Enter manda só `\r`); apareceu ao investigar por que `Ctrl+V` não colava |
+| 6 | sequência ANSI contaminando o texto | `ESC` era filtrado, mas `[D` de uma seta e `[200~` de colagem **entravam na senha** — e havia comentário afirmando o contrário | mesma investigação |
+
+Os defeitos 5 e 6 eram **invisíveis à digitação e visíveis só à colagem**, que é
+o caminho que a rotação real vai usar: a senha nova vem de gerenciador de senhas.
+
+### 8.2 Passos observados
+
+Conta descartável `sdr@demo.propectai.local`, banco local, senhas descartáveis.
+
+| # | Ação | Resultado exigido | Observado |
+|---|---|---|---|
+| 1 | rodar `pnpm db:senha <conta> "<motivo>"` | `Senha nova: ` na mesma linha | **OK**, 5 execuções |
+| 2 | digitar 12+ caracteres | nada na tela | **OK** |
+| 3a | Enter | `Repita a senha: ` aparece | **OK**, 5 execuções |
+| 3b | colar duas linhas de uma vez | 2ª pergunta aparece, é respondida pela fila, nada escapa para o shell | **OK** — com **clique direito**; `Ctrl+V` não cola em modo cru |
+| 4 | duas entradas diferentes | `As duas digitacoes nao conferem. Nada foi alterado.`, saída 1 | **OK** |
+| 5 | duas entradas iguais | três linhas, nenhuma com a senha | **OK** |
+| 6 | rolar a tela | nenhum fragmento, nenhuma linha sobrescrita | **PARCIAL** — nada no visível; varredura completa não reportada |
+| 7 | `Get-History` | comandos sem senha, nenhuma entrada espúria | **OK** — 14 entradas, todas legítimas |
+| 8 | `Ctrl+C` no prompt, depois digitar | mensagem, saída ≠ 0, e **o eco de volta** | **NÃO EXECUTADO** — 7 tentativas, 7 caminhos felizes |
+
+**O passo 8 não foi executado em nenhuma das sete tentativas.** Todas terminaram
+com as duas digitações concluídas e rotação bem-sucedida, o que exige duas linhas
+completas de entrada — ou seja, o `Ctrl+C` não chegou ao processo em nenhuma
+delas. Não há observação da CLI interrompida. `TTY_MANUAL` continua `PENDING`
+porque **não foi medido**, e não porque algo falhou.
+
+### 8.3 O que mudou no código, e o que isso tira do manual
+
+A interpretação das teclas saiu de `prisma/set-senha.ts` e virou função **pura**
+em `prisma/lib/teclas-de-segredo.ts`, testada em
+`apps/api/test/teclas-de-segredo.spec.ts` — mesmo arranjo de `rotacionar-senha.ts`,
+e o import de `prisma/lib` existe **só no teste**.
+
+Os casos: `Ctrl+C` e `Ctrl+D`, `\r\n` como uma quebra, cinco sequências ANSI,
+backspace **por ponto de código** (apagar um emoji não pode deixar meia unidade
+UTF-16 no texto), sequência cortada entre dois pedaços de `data`, linha vazia
+legítima, acento e emoji.
+
+A razão é de método, não de estética: **depois de cinco tentativas sem conseguir
+medir o `Ctrl+C`, ficou claro que um passo dependente de um gesto humano
+irrepetível não verifica nada.** O que pode virar asserção, virou.
+
+Sobrou **um** item manual, e ele não cabe em runner nenhum:
+
+> Depois de um `Ctrl+C` no prompt, o terminal volta a ecoar?
+
+`desligarTerminal()` chama `setRawMode(eraCru)` — efeito no dispositivo, não
+valor devolvido. Nenhuma asserção alcança isso.
+
+### 8.4 `TTY_MANUAL` — o que está medido e o que não está
+
+Depois da sétima tentativa frustrada, a pergunta foi decomposta em elos que se
+medem separadamente. Isso muda o valor do `PENDING`: ele deixa de ser "não
+sabemos nada" e passa a nomear **um** elo.
+
+| Elo | Estado | Como foi estabelecido |
 |---|---|---|
-| 1 | `pnpm db:senha sdr@demo.propectai.local "teste de eco"` | aparece `Senha nova: ` |
-| 2 | Digitar 12+ caracteres | **nada** na tela: sem caracteres, sem asteriscos |
-| 3 | Enter | aparece `Repita a senha: ` |
-| 4 | Digitar algo **diferente** | `As duas digitacoes nao conferem. Nada foi alterado.`, código de saída 1 |
-| 5 | Repetir com as duas iguais | as três linhas da §3.3, nenhuma contendo a senha |
-| 6 | Rolar o terminal para cima | nenhum fragmento da senha em lugar nenhum |
-| 7 | `Get-History` (PowerShell) | o comando aparece **sem** a senha |
-| 8 | Repetir o passo 1 e dar `Ctrl+C` no prompt; depois digitar qualquer coisa | os caracteres **voltam** a aparecer |
+| o terminal entrega `Ctrl+C` ao processo em modo cru | **PASS** | `node -e` mínimo, fora da CLI: imprimiu `byte 3` |
+| o parser transforma `0x03` em `interrompido` | **PASS** | 2 casos em `teclas-de-segredo.spec.ts` |
+| `setRawMode(false)` devolve o terminal | **PASS** | o mesmo `node -e` restaurou e o prompt voltou usável |
+| **a composição dos três dentro da CLI** | **PENDENTE** | nunca executada |
 
-O passo 8 é a única linha desta tabela cujo resultado eu **não sei prever**:
-`rl.close()` restaura o eco, mas `SIGINT` no meio da pergunta pode encerrar o
-processo sem passar por lá, e o terminal ficaria mudo para o comando seguinte.
-Se acontecer, `stty sane` (ou fechar a janela, no PowerShell) recupera — e o
-fato entra neste documento como comportamento medido, não como defeito
-descoberto na hora errada.
+O elo que falta não é hipotético nem improvável — as três pontas estão provadas,
+e o caminho entre elas é `interromper() → desligarTerminal()`, seis linhas.
+**Mas não foi observado, e por isso não está verificado.**
+
+Falta, então:
+
+1. Uma execução com `Ctrl+C` no primeiro prompt, **sem digitar senha**, com:
+   `Interrompido no prompt. Nada foi alterado.`, `$LASTEXITCODE` ≠ 0, e os
+   caracteres do comando seguinte aparecendo na tela.
+2. A varredura completa do scroll, fechando o passo 6.
+
+Se o eco **não** voltar, o gate falha e a correção vem antes de qualquer
+produção. `stty sane` — ou fechar a janela, no PowerShell — recupera o terminal
+no momento, e não conta como conserto.
+
+**O que este `PENDING` bloqueia, e o que não bloqueia.** Ele bloqueia o passo 1
+da §7.1, e portanto todo o resto do procedimento de produção. Ele **não** é, por
+si, argumento contra commitar o código: o commit não toca no servidor, e o
+bloqueio continua registrado aqui, no cabeçalho e na §7.1. A decisão sobre essa
+separação é do dono do projeto.
 
 ---
 

@@ -34,10 +34,20 @@
  *    forense em nome de um numero maior.
  *
  * Agora o filtro e `revokedAt = null AND expiresAt > agora`, e o campo se chama
- * `tokensValidosRevogados`. **O mesmo `agora`** vai na condicao e no valor
- * gravado: com dois `new Date()` existiria uma janela, minuscula porem real, em
- * que um token selecionado como valido receberia um `revokedAt` anterior a
- * propria expiracao considerada.
+ * `tokensValidosRevogados`.
+ *
+ * **O mesmo `agora`** vai na condicao e no valor gravado. Com dois `new Date()`
+ * — `T1` na condicao, `T2` no valor, e `T1 <= T2` pela ordem de avaliacao —
+ * existiria a janela `T1 < expiresAt < T2`: o token entraria na selecao por
+ * ainda valer em `T1` e receberia `revokedAt = T2`, **posterior a propria
+ * expiracao**. A linha passaria a afirmar que foi revogada enquanto valia,
+ * quando na verdade ja havia caducado. Janela minuscula; afirmacao falsa do
+ * mesmo tamanho de qualquer outra.
+ *
+ * > **Correcao de 26/09/2026.** A primeira versao desta nota dizia `revokedAt`
+ * > *anterior* a expiracao. O sentido estava invertido: `T2` vem depois de `T1`,
+ * > nunca antes. A assercao do teste (`revokedAt <= expiresAt`) sempre esteve na
+ * > direcao certa — era a prosa que estava errada.
  */
 
 import type { PrismaClient } from '@prisma/client';
