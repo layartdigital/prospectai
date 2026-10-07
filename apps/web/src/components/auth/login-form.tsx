@@ -4,7 +4,7 @@ import { AlertCircle, Loader2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3101';
+import { clientApiUrl } from '@/lib/client-api-url';
 
 export function LoginForm() {
   const router = useRouter();
@@ -40,7 +40,7 @@ export function LoginForm() {
     setError(null);
 
     try {
-      const response = await fetch(`${API_URL}/api/v1/auth/login`, {
+      const response = await fetch(clientApiUrl('/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // Necessário para o navegador aceitar os cookies HttpOnly da API.

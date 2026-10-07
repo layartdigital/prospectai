@@ -5,7 +5,8 @@ import { AlertCircle, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3101';
+import { clientApiUrl } from '@/lib/client-api-url';
+
 const MIN_PASSWORD_LENGTH = 10;
 
 export function AcceptInviteForm({
@@ -41,7 +42,7 @@ export function AcceptInviteForm({
     setError(null);
 
     try {
-      const response = await fetch(`${API_URL}/api/v1/invitations/accept`, {
+      const response = await fetch(clientApiUrl('/invitations/accept'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

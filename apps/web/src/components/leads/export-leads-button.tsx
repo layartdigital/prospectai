@@ -4,7 +4,7 @@ import { Download, Loader2, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3101';
+import { clientApiUrl } from '@/lib/client-api-url';
 
 /**
  * Exportação CSV da listagem.
@@ -15,9 +15,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3101';
  * seria incoerente com a regra que o resto do produto segue — gate age depois
  * da ação, nunca antes.
  *
- * O download passa por fetch e blob, não por `<a href>` direto: a API vive em
- * outra porta e precisa do cookie de sessão, e o 403 precisa virar mensagem na
- * tela em vez de página de erro do navegador.
+ * O download passa por fetch e blob, não por `<a href>` direto: a chamada
+ * precisa do cookie de sessão e o 403 precisa virar mensagem na tela em vez de
+ * página de erro do navegador. O endereço é relativo — mesma origem da
+ * aplicação, com o gateway (produção) ou o rewrite do Next (desenvolvimento)
+ * encaminhando `/api`.
  */
 export function ExportLeadsButton({ query }: { query: string }) {
   const [busy, setBusy] = useState(false);
@@ -32,7 +34,7 @@ export function ExportLeadsButton({ query }: { query: string }) {
 
     try {
       const response = await fetch(
-        `${API_URL}/api/v1/leads/export${query ? `?${query}` : ''}`,
+        clientApiUrl(`/leads/export${query ? `?${query}` : ''}`),
         { credentials: 'include' },
       );
 

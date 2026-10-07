@@ -1,6 +1,6 @@
 'use client';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3101';
+import { clientApiUrl } from './client-api-url';
 
 export class ClientApiError extends Error {
   constructor(
@@ -18,7 +18,7 @@ export async function clientApi<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(`${API_URL}/api/v1${path}`, {
+  const response = await fetch(clientApiUrl(path), {
     ...init,
     credentials: 'include',
     headers: {

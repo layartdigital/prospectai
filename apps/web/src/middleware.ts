@@ -99,6 +99,21 @@ function clearSessionAndRedirect(request: NextRequest): NextResponse {
   return response;
 }
 
+/**
+ * `/api` fica fora do middleware.
+ *
+ * Desde 07/10/2026 o navegador chama `/api/v1/...` na própria origem. Sem esta
+ * exclusão, uma chamada sem cookie — o próprio POST de login — seria
+ * redirecionada para `/login` pelo middleware antes de chegar ao rewrite, e o
+ * login local responderia 307 em vez de 200.
+ *
+ * Isso não retira autenticação da API. Em produção as chamadas `/api` nunca
+ * passam por aqui: o gateway as entrega direto ao Nest. A autorização real
+ * está nos guards e controllers da API; este middleware é navegação da camada
+ * web, não autoridade de acesso.
+ */
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|webp)$).*)'],
+  matcher: [
+    '/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|webp)$).*)',
+  ],
 };

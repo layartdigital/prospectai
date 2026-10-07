@@ -4,7 +4,7 @@ import { LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3101';
+import { clientApiUrl } from '@/lib/client-api-url';
 
 /**
  * Sair não é um link.
@@ -21,7 +21,7 @@ export function LogoutButton() {
     setLeaving(true);
 
     try {
-      await fetch(`${API_URL}/api/v1/auth/logout`, {
+      await fetch(clientApiUrl('/auth/logout'), {
         method: 'POST',
         credentials: 'include',
       });

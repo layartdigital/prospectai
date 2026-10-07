@@ -30,8 +30,14 @@ RUN corepack enable \
     && corepack prepare pnpm@10.30.1 --activate \
     && chmod -R a+rX /opt/corepack
 
-ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+# Nao existe mais ARG NEXT_PUBLIC_API_URL. Removido em 07/10/2026.
+#
+# `NEXT_PUBLIC_*` e resolvido em tempo de build e gravado dentro do JavaScript
+# entregue ao navegador: o endereco publico do ambiente ficava compilado na
+# imagem, e trocar de endereco exigia reconstruir a imagem da web. O navegador
+# passou a chamar `/api/v1/...` na propria origem, e quem encaminha e o
+# gateway. O lado servidor do Next continua usando `API_INTERNAL_URL`, definida
+# abaixo e lida em tempo de execucao.
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY . .
