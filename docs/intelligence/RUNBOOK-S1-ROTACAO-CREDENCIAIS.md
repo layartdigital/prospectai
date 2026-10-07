@@ -20,14 +20,28 @@ S0_REMEDIATION              = PASS
 GATE_S0                     = PASS
 GATE_NET                    = OPEN (HIGH)
 BASELINE_CI                 = PASS      56958dd, run #56
-CI_DO_COMMIT_DE_FECHAMENTO  = pendente ate o push deste commit
+CI_DO_COMMIT_DE_FECHAMENTO  = PASS      cb83f49, run #57
 JWT_ACCESS_SECRET_ROTATIONS = 5
 ```
 
 `BASELINE_CI` e `CI_DO_COMMIT_DE_FECHAMENTO` são coisas diferentes, e juntá-las
 seria herdar verde de um commit para outro. O `#56` aprovou `56958dd`, que é o
-SHA de **produto** no ar. O commit que carrega este fechamento é documental e
-ainda não tem run quando esta linha é escrita.
+SHA de **produto** no ar; o `#57` aprovou `cb83f49`, o commit documental que
+fechou o incidente. Quando esta linha foi escrita pela primeira vez, o `#57`
+ainda não existia e o campo dizia `pendente` — o run veio depois do push, e só
+então o valor mudou.
+
+O `#57` foi medido no nível de **step**, não apenas de job, porque conclusão de
+job verde não prova que todo step executou — foi assim que o `#53` enganou, com
+`Relatório de RLS` verde ao lado de `Portão de RLS` pulado:
+
+```
+job   Tipos                      = success
+job   Testes e verificacao de RLS = success
+step  Suite completa             = success
+step  Portao de RLS              = success
+step  Relatorio de RLS           = success
+```
 
 **Estado anterior, em 28/09/2026**, preservado como histórico:
 
@@ -1252,7 +1266,7 @@ Dois efeitos vieram daí, e os dois foram observados:
 |---|---|
 | `packages/types/src/seed-usuarios.ts` | lê `SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD` **em separado**; recusa senha ausente nomeando a variável; recusa abaixo de `SENHA_MINIMA = 12`; recusa as duas iguais; `upsertDeUsuario` devolve `update: { name }` — **sem `passwordHash`** |
 | `prisma/seed.ts` | chama `pessoasDoSeed(process.env)` e calcula **um hash por pessoa**; o comentário do arquivo registra o motivo da regra |
-| `packages/types/src/seed-usuarios.test.ts` | doze testes, entre eles *"SEED_SDR_PASSWORD é realmente consumida — não é variável decorativa"*, *"as duas variáveis com o mesmo valor: recusado"*, *"em usuário existente, NÃO toca em passwordHash"* e *"rodar o seed de novo com outra senha não muda o que seria gravado no existente"* |
+| `packages/types/src/seed-usuarios.test.ts` | **dez** testes de regressão, em duas suítes, entre eles *"SEED_SDR_PASSWORD é realmente consumida — não é variável decorativa"*, *"as duas variáveis com o mesmo valor: recusado"*, *"em usuário existente, NÃO toca em passwordHash"* e *"rodar o seed de novo com outra senha não muda o que seria gravado no existente"* |
 
 Como `S0-SEED-01` e `S0-SEED-02` estão corrigidos no HEAD, **não** abrem gate,
 **não** entram como risco remanescente, e é incorreto afirmar que rodar

@@ -290,8 +290,9 @@ que recusava senha curta ou já em uso **antes** de ela chegar à CLI. A prova �
 matriz de `verify` da §9 do runbook.
 
 **`S0-SEED-01` e `S0-SEED-02` são históricos.** Estão corrigidos no HEAD
-aprovado, em `packages/types/src/seed-usuarios.ts`, `prisma/seed.ts` e doze
-testes de regressão em `packages/types/src/seed-usuarios.test.ts`. Não abrem
+aprovado, em `packages/types/src/seed-usuarios.ts`, `prisma/seed.ts` e **dez**
+testes de regressão, em duas suítes, em
+`packages/types/src/seed-usuarios.test.ts`. Não abrem
 gate e não constam como risco atual.
 
 ### 5.2 Rotações de senha — nove eventos
