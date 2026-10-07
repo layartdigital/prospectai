@@ -22,6 +22,14 @@ demonstração funcionais no ambiente online. OWNER e SDR compartilham o mesmo
 `passwordHash` (impressão `md5` idêntica nas duas linhas): o seed grava um hash
 único para os dois. A senha do repositório abre as duas contas.
 
+> **Causa confirmada em 07/10/2026, lendo `2c901f2:prisma/seed.ts`.** Não era
+> coincidência de hash: o seed calculava **um** `argonHash` a partir de
+> `SEED_OWNER_PASSWORD` e gravava o **mesmo** `passwordHash` em todos os usuários
+> do laço, no `create` e também no `update` do `upsert`. Detalhe medido junto:
+> `SEED_SDR_PASSWORD` não determinava senha alguma — aparecia só no `console.log`
+> que anunciava as credenciais. O ambiente anunciava uma credencial de SDR que
+> não existia. Ver §5.
+
 #### Acréscimo de 28/09/2026 — uma terceira cópia, no `.env.production`
 
 Medição de pré-voo no servidor `108.174.144.216`, em `/opt/apps/prospectai`, com
@@ -250,17 +258,148 @@ de origem pode ser o do bridge e não o do visitante.
 | 5 | Cadastro público (`/auth/register`) em ambiente exposto por IP | qualquer um cria conta e workspace |
 | 6 | `S0-NET-01`: 3102 público em paralelo ao nginx do host | aplicação exposta fora da camada de políticas |
 
+## 5. Remediação — 28/09 a 07/10/2026
+
+Esta seção registra o que foi feito e o que foi medido. Ela **não** altera a
+classificação do evento de 11/08: continua
+`UNRECOGNIZED_AUTHENTICATION ACTIVITY / SUSPECTED_CREDENTIAL_COMPROMISE`. Nada
+do que se apurou na remediação transformou suspeita em invasão comprovada.
+
+### 5.1 Achados abertos durante a remediação
+
+| id | O que é | Estado |
+|---|---|---|
+| `S0-AUTH-01` | suspeita de que a verificação de senha não rejeitava senha incorreta | **RETIRADO** |
+| `S0-CRED-02` | OWNER e SDR compartilhavam a mesma credencial | **REMEDIATED** |
+| `S0-SEED-01` | o `update` do `upsert` do seed regravava `passwordHash` | **HISTORICAL_DEFECT / ALREADY_REMEDIATED** no HEAD `56958dd` |
+| `S0-SEED-02` | `SEED_SDR_PASSWORD` não controlava a senha real do SDR | **HISTORICAL_DEFECT / ALREADY_REMEDIATED** no HEAD `56958dd` |
+
+**`S0-AUTH-01` — levantado e retirado no mesmo dia.** Em 29/09, duas senhas
+inventadas autenticaram o OWNER numa sonda interna, enquanto um e-mail
+inexistente era recusado. O gateway foi parado por precaução. A leitura de
+`auth.service.ts` mostrou `validateCredentials` correto — `argonVerify` com o
+resultado usado, sem atalho de ambiente — e uma sonda com literal escrito pelo
+operador devolveu `401` para as duas contas. A hipótese de bypass caiu; o que
+havia era entrada contaminada no instrumento de teste. **Classificado como
+retirado, não como corrigido: não havia defeito.**
+
+**`S0-CRED-02` — causa e remediação.** A causa é o seed histórico (§1.1). A
+remediação final, em 07/10, deu a cada conta uma credencial exclusiva, vinda do
+gerenciador de senhas, nunca digitada em interface HTTP pública, com pré-teste
+que recusava senha curta ou já em uso **antes** de ela chegar à CLI. A prova é a
+matriz de `verify` da §9 do runbook.
+
+**`S0-SEED-01` e `S0-SEED-02` são históricos.** Estão corrigidos no HEAD
+aprovado, em `packages/types/src/seed-usuarios.ts`, `prisma/seed.ts` e doze
+testes de regressão em `packages/types/src/seed-usuarios.test.ts`. Não abrem
+gate e não constam como risco atual.
+
+### 5.2 Rotações de senha — nove eventos
+
+Todos com `origem: "cli"`, `tenantId` nulo e sem hash na trilha.
+
+| data/hora | conta | revogados | motivo registrado |
+|---|---|---|---|
+| 28/09 20:18:18 | OWNER | 1 | credencial publicada em `.env.example` |
+| 28/09 20:19:08 | SDR | 0 | hash compartilhado com o OWNER |
+| 29/09 18:12:11 | OWNER | 8 | separar credenciais e revogar sessões de teste |
+| 29/09 18:12:54 | SDR | 4 | separar credenciais e revogar sessões de teste |
+| 29/09 18:18:31 | OWNER | 0 | senha exclusiva do owner |
+| 29/09 18:19:26 | SDR | 0 | senha exclusiva do sdr |
+| **29/09 18:21:43** | **OWNER** | **0** | **`teste de canal - nao deve alterar`** |
+| 29/09 18:25:00 | OWNER | 0 | senha exclusiva do owner |
+| 29/09 18:30:07 | SDR | 0 | senha exclusiva do sdr |
+
+**A linha de 18:21:43 precisa de contexto, e a trilha não será reescrita.** O
+motivo registrado diz *"não deve alterar"* — e o comando **alterou** a senha do
+OWNER. Um auditor lendo só aquela linha seria enganado pelo campo que existe
+justamente para explicar a mudança.
+
+O que aconteceu: um teste do canal de entrada da CLI foi enviado por cano com
+duas linhas **diferentes**, na expectativa — **errada** — de que a dupla
+digitação recusasse. O `set-senha.ts` não confirma fora do TTY; ele lê a primeira
+linha e segue, e isso está escrito no cabeçalho do próprio arquivo. A senha do
+OWNER passou a ser uma **credencial fraca conhecida**, de 12 caracteres, usada no
+teste. O valor **não** é registrado aqui.
+
+Mitigação e contenção, na mesma sessão operacional: o **gateway estava parado**,
+portanto a API não era alcançável pela internet; a credencial fraca foi
+substituída, quatro minutos depois, pela senha exclusiva e longa do OWNER, com
+verificação por matriz de `verify`; e a credencial fraca não casa hoje com conta
+nenhuma. A previsão errada foi da Executora, está nomeada como tal, e a §3.1 do
+runbook passou a documentar os dois modos da CLI para que ninguém repita.
+
+As rotações de 18:18, 18:19, 18:25 e 18:30 aparecem em pares porque as duas
+primeiras receberam, por erro de operação, a **mesma** senha nas duas contas — o
+que a matriz de `verify` detectou e as duas últimas corrigiram, já com o portão
+de pré-teste. Nenhuma delas é incidente novo: são tentativas da **mesma**
+remediação.
+
+### 5.3 `JWT_ACCESS_SECRET` — cinco rotações, um único objetivo
+
+Não são cinco incidentes. São cinco execuções da mesma remediação, quatro das
+quais não produziram a evidência pretendida:
+
+| # | quando | desfecho |
+|---|---|---|
+| 1 a 3 | 28/09, 20:22 / 20:42 / 20:51 | sem sessão controlada preparada antes da troca: `E6` não observável |
+| 4 | 29/09, 12:17 | havia sessão, mas a sonda de depois rodou 16 min 56 s após a de antes, acima do TTL de 15 min do access token: resultado inválido |
+| 5 | 07/10, 12:21 | **prova determinística**, com Bearer controlado: `200` → `401` → `200` |
+
+O `401` só apareceu na quinta porque só nela o mesmo token foi reapresentado
+dentro da validade, sem navegador no caminho. O refresh token é opaco e validado
+contra o banco, então **não** é afetado por trocar o segredo de acesso — é essa
+propriedade que anulou as quatro primeiras tentativas sem que nada estivesse
+quebrado.
+
+### 5.4 O que a remediação entregou, medido
+
+- credenciais finais de OWNER e SDR **distintas entre si**, provadas por matriz
+  de `verify` contra os dois `passwordHash`;
+- credencial publicada em `2c901f2` **morta** nas duas contas, provada por sonda
+  mecânica alimentada do histórico Git, sem exibir o valor;
+- refresh tokens válidos revogados: OWNER `8 → 0`, SDR `4 → 0`;
+- `JWT_ACCESS_SECRET` rotacionado, com invalidação provada;
+- senha do Redis mascarada nos logs do container final: `1` mascarado, `0` em
+  claro;
+- Postgres e Redis **não recriados** em nenhuma das cinco rotações, verificado
+  por `Created`/`StartedAt` idênticos desde 28/09.
+
+### 5.5 Backups — aviso explícito de rollback
+
+O `propectai.sql.gz` em `/opt/backups/prospectai-s0-THD4OPOl` é de 29/09, criado
+**antes** da separação final das credenciais. Ele é
+`PRE-REMEDIATION / FORENSIC BACKUP`. Restaurá-lo reintroduz o estado de
+autenticação anterior, inclusive o compartilhamento OWNER/SDR. **Não é rollback
+seguro de produção** sem a sequência de remediação descrita na §10 do runbook.
+
+Existem ainda seis cópias de `.env.production` no mesmo diretório, com segredos
+reais — entre eles credencial de banco ainda válida. Estão `600 root:root` em
+diretório `700 root:root`. Não foram apagadas, e a política de retenção fica
+registrada como dívida `BACKUP_SECRET_RETENTION`.
+
+### 5.6 O que a remediação **não** fechou
+
+As senhas finais de OWNER e SDR **nunca atravessaram** a interface HTTP pública.
+Enquanto o `GATE_NET` estiver aberto, usá-las em `http://108.174.144.216:3102`
+— HTTP simples, `COOKIE_SECURE=false` — as expõe em claro e desfaz essa
+propriedade.
+
+---
+
 ## 4. O que este documento não cobre, e onde ficam as fronteiras
 
-Não cobre a remediação. O procedimento está em
-`RUNBOOK-S1-ROTACAO-CREDENCIAIS.md`, escrito em 25/09/2026 e ainda **não
-executado**.
+Não cobre o procedimento de remediação, que está em
+`RUNBOOK-S1-ROTACAO-CREDENCIAIS.md`, escrito em 25/09/2026 e **executado entre
+28/09 e 07/10/2026**. O resultado medido está na §5 deste documento e na §9 do
+runbook. Até 07/10 esta linha dizia "ainda não executado", e descrevia
+corretamente o estado daquela data.
 
 **Estado dos gates:**
 
 | Gate | Estado | Cobre | Fecha quando |
 |---|---|---|---|
-| `GATE_S0` | **`OPEN`** — `S0_DISCOVERY = PASS`, `S0_REMEDIATION = PENDING` | o incidente de credencial: §1.1, §1.2, §1.3 | as evidências **E1–E9** da §9 do runbook estiverem coletadas |
+| `GATE_S0` | **`PASS`** em 07/10/2026 — `S0_DISCOVERY = PASS`, `S0_REMEDIATION = PASS` | o incidente de credencial: §1.1, §1.2, §1.3 | fechou: as evidências **E1–E9** da §9 do runbook estão coletadas e coladas |
 | `GATE_NET` | **`OPEN`**, HIGH | `S0-NET-01` (§1.4): a 3102 publicada em `0.0.0.0` | houver caminho por HTTPS num nome que resolva, e a publicação pública sair |
 
 **As lacunas de observabilidade da §3 não pertencem a nenhum dos dois.** A 1, a 2

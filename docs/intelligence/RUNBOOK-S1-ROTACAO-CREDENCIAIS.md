@@ -5,8 +5,31 @@ dono do projeto entre opções apresentadas; a §11 registra o mecanismo, a data
 o que foi recusado, para que nenhuma delas dependa de eu ter "entendido" uma
 preferência.
 
-**Estado em 28/09/2026**, depois do `fix(cli)` e da decisão do dono do projeto
-sobre o TTY:
+**Estado em 07/10/2026 — incidente S0 fechado.** As evidências `E1`–`E9` estão
+coletadas e coladas na §9. A remediação operacional terminou em 07/10/2026, com a
+prova determinística da `E6`:
+
+```
+E1 E2 E3 E4 E7 E9           = PASS
+E5_REDEFINED                = PASS      §9, matriz de verify
+E6                          = PASS      §9, Bearer controlado
+E8                          = PASS      §9, sonda mecanica do historico Git
+S0-AUTH-01                  = RETIRADO
+S0-CRED-02                  = REMEDIATED
+S0_REMEDIATION              = PASS
+GATE_S0                     = PASS
+GATE_NET                    = OPEN (HIGH)
+BASELINE_CI                 = PASS      56958dd, run #56
+CI_DO_COMMIT_DE_FECHAMENTO  = pendente ate o push deste commit
+JWT_ACCESS_SECRET_ROTATIONS = 5
+```
+
+`BASELINE_CI` e `CI_DO_COMMIT_DE_FECHAMENTO` são coisas diferentes, e juntá-las
+seria herdar verde de um commit para outro. O `#56` aprovou `56958dd`, que é o
+SHA de **produto** no ar. O commit que carrega este fechamento é documental e
+ainda não tem run quando esta linha é escrita.
+
+**Estado anterior, em 28/09/2026**, preservado como histórico:
 
 ```
 LOCAL_AUTOMATED_TEST = PASS                            §8.3
@@ -18,16 +41,20 @@ GATE_NET             = OPEN (HIGH)
 ```
 
 O último run que exercitou **código de produto** foi o #50 (`f3b383f`, §8.5). Os
-runs #51, #52 e #54 cobrem commits documentais e um de orquestração de teste:
-passaram, e é isso que provam — que o repositório segue verde, não que algo novo
-do produto foi verificado. O #53 (`41233dd`) **falhou**, e a correção está em
-`19802df`; a §10 registra as duas dívidas que sobraram dali.
+runs #51, #52, #54, #55 e #56 cobrem commits documentais e um de orquestração de
+teste: passaram, e é isso que provam — que o repositório segue verde, não que
+algo novo do produto foi verificado. O #53 (`41233dd`) **falhou**, e a correção
+está em `19802df`; a §10 registra as duas dívidas que sobraram dali.
 
-O passo 1 da §7.1 deixa de bloquear: não porque foi verificado, mas porque o
+O passo 1 da §7.1 deixou de bloquear: não porque foi verificado, mas porque o
 risco foi **aceito e registrado**. As duas coisas não são a mesma, e a §8.4
 explica a diferença e o que ela custa.
-**Nada aqui foi executado** — nenhuma senha girada, nenhum container recriado,
-nenhum arquivo do servidor alterado.
+
+**O procedimento foi executado.** Entre 28/09 e 07/10/2026 as credenciais do
+OWNER e do SDR foram giradas, o `JWT_ACCESS_SECRET` foi rotacionado cinco vezes,
+e as sessões válidas foram revogadas. A frase *"nada aqui foi executado"*, que
+constava deste cabeçalho até 28/09, descrevia o estado daquele dia e deixou de
+valer — o que aconteceu desde então está na §9 e no `S0-FORENSICS`.
 **Escrito em:** 25/09/2026
 **Ambiente alvo:** `108.174.144.216`, projeto Compose `prospectai-prod`
 **Leitura prévia obrigatória:** `S0-FORENSICS-2026-08-11.md` (o que aconteceu),
@@ -36,9 +63,11 @@ nenhum arquivo do servidor alterado.
 **O que este documento é:** o procedimento para (a) levar o HEAD ao ambiente
 online, (b) girar as credenciais comprometidas, (c) provar que giraram.
 
-**O que este documento não é:** ele não fecha o `GATE_S0`. A §9 lista as
-evidências que permitem fechá-lo; enquanto elas não existirem,
-`S0_REMEDIATION = PENDING` e `GATE_S0 = OPEN`.
+**O que este documento não é:** ele não fecha o `GATE_NET`. Até 07/10/2026 ele
+também não fechava o `GATE_S0` — a §9 listava as evidências que permitiriam
+fechá-lo, e enquanto elas não existiram o estado foi `S0_REMEDIATION = PENDING`,
+`GATE_S0 = OPEN`. Elas foram coletadas, estão coladas na §9, e o `GATE_S0` passou
+a `PASS` em 07/10/2026. O `GATE_NET` segue `OPEN (HIGH)` e tem frente própria.
 
 ---
 
@@ -268,6 +297,35 @@ A senha entra por `stdin`, nunca por argumento — argumento aparece no históri
 do shell, no `ps` de qualquer processo da máquina e no log de auditoria do
 sistema operacional. Nada de senha e nada de hash sai em log, em `stdout` ou na
 trilha.
+
+#### Os dois modos de entrada, e por que a diferença importa
+
+`lerSegredo`, em `prisma/set-senha.ts`, se comporta de forma **diferente**
+conforme o `stdin` seja um terminal ou um cano. Está no código, e está escrito no
+cabeçalho do próprio arquivo — não é acidente:
+
+| modo | o que faz |
+|---|---|
+| **TTY** | pergunta `Senha nova`, pergunta `Repita a senha`, compara, e recusa se diferirem |
+| **cano / `stdin` não-TTY** | lê **apenas a primeira linha** e segue. **Não pergunta, não confirma, não compara.** |
+
+A confirmação inteira está atrás de `if (process.stdin.isTTY)`. Fora do terminal
+ela não existe, e a rotação acontece com a primeira linha que chegar.
+
+**Medido em produção em 07/10/2026, não suposto.** Um comando de teste que mandou
+duas linhas **diferentes** por cano — escrito na expectativa de ser recusado —
+**trocou a senha do OWNER** pela primeira delas. A expectativa estava errada; o
+código fez exatamente o que a sua própria documentação diz. O evento está
+registrado no `S0-FORENSICS`.
+
+A regra operacional que sai daí: **cano só com portão externo**. Quem alimentar
+esta CLI por pipe tem de validar a entrada **antes** de enviá-la — comprimento,
+ineditismo, o que o caso exigir — porque dentro da CLI não há segunda chance. A
+remediação final de 07/10 usou pipe exatamente assim, com um pré-teste que
+recusou quatro entradas antes de deixar a quinta passar.
+
+Não escrever, aqui nem em lugar nenhum, que *"duas linhas no cano são recusadas"*.
+Foi falsificado em produção.
 
 ### 3.2 Antes de rodar
 
@@ -897,65 +955,198 @@ REMOTE_CI = PASS
 
 ---
 
-## 9. Evidências para mover `GATE_S0` de `OPEN` para `PASS`
+## 9. Evidências que moveram `GATE_S0` de `OPEN` para `PASS`
 
-Nenhuma delas imprime senha ou hash. `E5` imprime a impressão `md5` **do hash**,
-que é o mesmo indicador já usado na apuração do S0.
+Coletadas entre 28/09 e 07/10/2026. Nenhuma delas imprime senha, hash completo,
+token ou cookie.
 
-| id | Evidência | Como | Esperado |
+**Três definições mudaram durante a coleta**, porque as originais não provavam o
+que diziam provar. As versões antigas ficam registradas aqui, com o motivo, em
+vez de desaparecerem: um critério que falha precisa ser visível para não voltar.
+
+| id | Evidência | Como | Resultado medido |
 |---|---|---|---|
-| **E1** | O que está no ar é o que o CI aprovou | `git log -1 --format='%H'` no servidor | igual ao SHA verde no GitHub Actions |
-| **E2** | Pré-condições de ambiente | `grep -o '^[A-Z_]*=' .env.production \| sort` **e** as **duas** medições da §1.1: comprimento/igualdade **e** comparação contra `2c901f2` | `JWT_REFRESH_SECRET` **ausente**; `owner_len=48 sdr_len=48 iguais=nao`; `owner_match_publicado=nao sdr_match_publicado=nao`. Presença não serve; comprimento sem a comparação também não |
-| **E3** | A rotação deixou trilha | consulta 1, abaixo | uma linha por conta rotacionada, `tenantId` nulo, `after` com `motivo`, `origem` e `tokensValidosRevogados`, **sem** hash |
-| **E4** | Os refresh tokens válidos caíram, e exatamente eles | consulta 2 **imediatamente antes** da rotação e **imediatamente depois**, com a saída da CLI no meio | `validos_antes = X`; `CLI revogou = X`; `validos_depois = 0` — os três números, para a conta rotacionada |
-| **E5** | As contas deixaram de compartilhar credencial | consulta 3 | as duas impressões **diferentes** |
-| **E6** | O segredo global girou | `docker inspect -f '{{.State.StartedAt}}' prospectai-prod-api-1` + DevTools do navegador com a sessão antiga | `StartedAt` posterior ao backup do `.env.production`; requisição com o cookie antigo devolve **401** |
-| **E7** | A senha do Redis saiu dos logs | os dois `grep -c` da §6.4 | `≥1` e **`0`** |
-| **E8** | A credencial publicada morreu | tentar login com `Demo@123456` na interface | **falha** |
+| **E1** | O que está no ar é o que o CI aprovou | `git rev-parse HEAD` no servidor | `56958ddc6d2a56d8cfe1275d5bfa310197d62c6c`, igual ao SHA do run #56 |
+| **E2** | Pré-condições de ambiente | nomes das variáveis, comprimentos, e comparação contra `2c901f2` | `JWT_REFRESH_SECRET` ausente; `SEED_*` substituídas, 48/48, distintas, nenhuma igual à publicada |
+| **E3** | A rotação deixou trilha | consulta 1 | nove linhas `SECURITY.PASSWORD_ROTATED`, `tenantId` nulo em todas, `after` com `motivo`, `origem` e `tokensValidosRevogados`, **sem** hash |
+| **E4** | Os refresh tokens válidos caíram, e exatamente eles | consulta 2 antes e depois, com a saída da CLI no meio | OWNER `8 → 8 → 0`; SDR `4 → 4 → 0` |
+| **E5** | As contas deixaram de compartilhar credencial | **matriz de `verify`**, abaixo | OWNER `MATCH`/`NO_MATCH`; SDR `NO_MATCH`/`MATCH` |
+| **E6** | O segredo global girou e invalidou o que estava assinado com o anterior | **Bearer controlado**, abaixo | `200` → `401` → `200` |
+| **E7** | A senha do Redis saiu dos logs | os dois `grep -c` da §6.4, no container final | `1` e **`0`** |
+| **E8** | A credencial publicada morreu | **sonda mecânica** a partir do histórico Git, abaixo | OWNER `401`, SDR `401` |
 | **E9** | O exemplo deixou de publicar credencial **nova** | `.env.example` no `HEAD` público | `SEED_*_PASSWORD` vazias |
 
 ```sql
 -- consulta 1
-SELECT "createdAt", "tenantId", action, "entityType", after
+SELECT "createdAt", "tenantId", action, "entityId", after
 FROM audit_logs WHERE action = 'SECURITY.PASSWORD_ROTATED'
 ORDER BY "createdAt" DESC;
 
 -- consulta 2
-SELECT u.email,
-       count(*) FILTER (WHERE rt."revokedAt" IS NULL AND rt."expiresAt" > now()) AS validos
-FROM users u LEFT JOIN refresh_tokens rt ON rt."userId" = u.id
-GROUP BY u.email ORDER BY validos DESC, u.email;
-
--- consulta 3
-SELECT email, left(md5("passwordHash"), 12) AS impressao FROM users
-WHERE email IN ('owner@demo.propectai.local', 'sdr@demo.propectai.local');
+SELECT count(*) FROM refresh_tokens rt JOIN users u ON u.id = rt."userId"
+WHERE u.email = :email AND rt."revokedAt" IS NULL AND rt."expiresAt" > now();
 ```
 
-**A E4 só existe como trio.** Medir depois e ver zero não prova nada: zero é
-também o que se vê quando não havia nada para revogar. A medição de antes é o
-que dá significado à de depois, e a saída da CLI é o que liga as duas. Se
-`validos_antes` e o número da CLI divergirem, **pare** — alguém abriu sessão
-entre a leitura e a rotação, e a janela precisa ser explicada antes de o gate
-fechar. Por isso as duas consultas e a rotação vão na mesma sessão SSH, em
-sequência, sem nada no meio.
+### E4 só existe como trio
 
-Colar as três medições assim, no fecho deste documento:
+Medir depois e ver zero não prova nada: zero é também o que se vê quando não
+havia nada para revogar. A medição de antes é o que dá significado à de depois, e
+a saída da CLI é o que liga as duas. Se `validos_antes` e o número da CLI
+divergirem, **pare** — alguém abriu sessão entre a leitura e a rotação.
+
+Acrescentado em 07/10: as duas consultas e a rotação vão na mesma sessão SSH
+**e com o gateway parado**. Sem isso, a sessão de um navegador aberto renova
+sozinha no meio da medição e os três números deixam de fechar por motivo que não
+é defeito nenhum.
+
+### E5 — por que a versão por impressão de hash foi descartada
+
+A definição original era:
 
 ```
-validos_antes  = X
-CLI revogou    = X
-validos_depois = 0
+SELECT email, left(md5("passwordHash"), 12) FROM users WHERE email IN (...);
+-- esperado: as duas impressões diferentes
 ```
 
-**E9 é a mais fraca da lista, de propósito.** Ela não prova que a senha deixou de
-estar publicada — o histórico do repositório é público e imutável (§1.4). Quem
-carrega esse peso é a **E8**. Se `E8` falhar e `E9` passar, o gate continua
-`OPEN`, e a leitura correta é "o exemplo foi limpo e a credencial continua viva".
+**Isso não prova nada sobre as senhas.** Argon2 usa sal por hash: duas senhas
+**idênticas** produzem `passwordHash` diferentes. A evidência media apenas que
+dois hashes são dois hashes. Foi exatamente por essa fresta que o `S0-CRED-02`
+passou despercebido — as impressões divergiam, e as contas compartilhavam senha.
 
-Com **E1 a E9 coletadas e coladas neste documento**: `S0_REMEDIATION = PASS`,
-`GATE_S0 = PASS`. Faltando qualquer uma, o gate continua `OPEN` — inclusive se
-todas as ações tiverem sido executadas. **Ação executada não é evidência; o que
-prova é a medição depois dela.**
+A definição canônica passa a ser uma **matriz de `verify`**: cada senha final é
+verificada, com `argonVerify`, contra o `passwordHash` das **duas** contas.
+
+```
+senha final do OWNER →  owner = MATCH     sdr = NO_MATCH
+senha final do SDR   →  owner = NO_MATCH  sdr = MATCH
+```
+
+Medido em 07/10/2026, com a senha entrando por `stdin` e o instrumento validado
+por controle negativo (uma cadeia inventada devolveu `NO_MATCH` nas duas contas
+antes de qualquer medição valer):
+
+```
+OWNER   PRECHECK=OK  bytes=99   owner=MATCH     sdr=NO_MATCH
+SDR     PRECHECK=OK  bytes=33   owner=NO_MATCH  sdr=MATCH
+```
+
+O padrão exigido exclui sozinho a hipótese de as duas senhas serem iguais: se
+fossem, a primeira matriz já teria dado `MATCH` nas duas.
+
+### E6 — por que o teste pelo navegador foi descartado
+
+A definição original mandava abrir o DevTools com a sessão antiga e conferir
+`401` depois da rotação. **Quatro tentativas falharam**, nenhuma por defeito do
+produto:
+
+1. nas três primeiras não havia sessão controlada preparada antes da rotação;
+2. na quarta havia, e a sonda de depois rodou **16 min 56 s** após a de antes —
+   mais que o TTL de 15 minutos do access token. O `200` observado veio de um
+   token **novo**, obtido pelo caminho de refresh, que é opaco e validado contra
+   o banco e portanto **não** é afetado pela troca do `JWT_ACCESS_SECRET`.
+
+A lição é de desenho, não de disciplina: enquanto a aba estiver viva, o produto
+renova o token sozinho, e a prova se anula sem avisar. Qualquer `E6` que dependa
+de navegador tem esse defeito embutido.
+
+A prova canônica passa a ser **Bearer controlado**, sem navegador, sem cookie,
+sem refresh, sem middleware e sem intervalo humano. O `JwtAuthGuard` aceita
+`Authorization: Bearer` quando não há cookie (`extractToken`), e o payload é
+`{ sub, email }` mais `iat`/`exp` — medido no código, não suposto.
+
+```
+TOKEN A, assinado com o segredo antigo  → GET /api/v1/auth/me → 200
+rotaciona JWT_ACCESS_SECRET, recria SOMENTE a api (--no-deps)
+MESMO TOKEN A, ainda dentro da validade → GET /api/v1/auth/me → 401
+TOKEN B, assinado com o segredo novo    → GET /api/v1/auth/me → 200
+```
+
+O terceiro passo não é enfeite. Sem ele, o `401` do token A seria igualmente
+compatível com "a API subiu quebrada" — e `/api/v1/health` não serve de controle,
+porque é rota pública e não exercita o guard.
+
+Medido em 07/10/2026, contra `http://127.0.0.1:3101` de dentro do container:
+
+```
+E6_OLD_BEFORE = 200   restante 593 s
+E6_OLD_AFTER  = 401   restante 479 s
+E6_NEW_AFTER  = 200   restante 593 s
+POSTGRES_CHANGED = NAO     REDIS_CHANGED = NAO
+```
+
+Linha do tempo, reconstruída dos próprios tokens: `12:20:57Z` token A emitido ·
+`12:21:04Z` `OLD_BEFORE` · `12:21:11Z` backup do env · `12:21:48Z` API recriada,
+`12:21:59Z` iniciada · `12:22:58Z` `OLD_AFTER`, 59 s após o start · `12:23:17Z`
+token B. Cento e quatorze segundos entre as duas sondas, com 479 s de validade
+sobrando — o `401` não pode ser expiração.
+
+**Desvio de forma, registrado porque aconteceu.** O procedimento previa comparar
+`sha256` do arquivo do token antes e depois, para provar que era o mesmo objeto.
+**O hash de antes não chegou a ser coletado** — a linha não foi executada. A
+continuidade do TOKEN A foi estabelecida por outro caminho: o `restante_s` das
+duas sondas é calculado a partir do claim `exp` **de dentro do token**, e caiu de
+593 para 479 contra o mesmo `exp`, enquanto um token regenerado volta a ~593
+(é o que o TOKEN B mostra). O arquivo lido na limpeza carregava esse mesmo `exp`.
+A revisão independente aceitou essa evidência como suficiente. **Não foi medido
+`sha256` e este documento não afirma que foi.**
+
+A sonda `startup probe` logo após o `--force-recreate` devolveu `ERR, 200, 200,
+200, 200` — a primeira amostra cai na janela em que o container ainda subia.
+Isso não é "5/5".
+
+### E8 — por que as rodadas por interface foram descartadas
+
+A definição original mandava tentar login com a credencial publicada na
+interface. Três rodadas foram **anuladas**, e nenhuma delas por defeito do
+produto:
+
+1. um `read -rs` interativo consumiu a **linha seguinte de um bloco colado** como
+   se fosse a senha — 55 bytes, exatamente o comprimento daquela linha;
+2. a mesma cadeia de 12 bytes foi entregue em prompts com rótulos diferentes,
+   tornando "senha publicada" e "senha atual" indistinguíveis;
+3. sem registro do que entrou, `401/401` teria sido assinado como `PASS` com
+   entrada errada.
+
+O conserto não foi pedir mais cuidado: foi **tirar o humano do laço**. A prova
+canônica passa a ser uma sonda mecânica que lê a credencial publicada
+**diretamente do histórico Git**, por cano fechado até a API interna, sem nunca
+exibi-la, sem passá-la por argumento e sem gravá-la em arquivo.
+
+Medido em 07/10/2026, fonte `2c901f2:.env.example`, antes e depois da remediação
+final, quatro execuções no total:
+
+```
+E8_OWNER  STATUS=401  BYTES=11  SET_COOKIE=nao
+E8_SDR    STATUS=401  BYTES=11  SET_COOKIE=nao
+```
+
+As duas variáveis do arquivo-fonte devolveram **a mesma impressão** — ou seja, a
+credencial publicada era **uma só** para as duas contas, e não duas. Isso é
+consequência direta do defeito histórico do seed, registrado adiante.
+
+As rodadas humanas anuladas **não** são evidência e não aparecem nesta linha.
+
+### E9 continua sendo a mais fraca da lista, de propósito
+
+Ela não prova que a senha deixou de estar publicada — o histórico do repositório
+é público e imutável (§1.4). Quem carrega esse peso é a **E8**. Se `E8` falhasse
+e `E9` passasse, a leitura correta seria "o exemplo foi limpo e a credencial
+continua viva".
+
+### Resultado
+
+Com `E1`–`E9` coletadas e coladas aqui: **`S0_REMEDIATION = PASS`,
+`GATE_S0 = PASS`** em 07/10/2026.
+
+O que isso significa: a credencial publicada foi girada, não autentica mais
+nenhuma das duas contas, OWNER e SDR deixaram de compartilhar senha, as sessões
+válidas foram revogadas e o segredo de assinatura foi trocado com prova de
+invalidação. O que **não** significa: que o ambiente esteja fechado. O
+`GATE_NET` segue `OPEN (HIGH)`, e é outra frente.
+
+**Ação executada continua não sendo evidência; o que prova é a medição depois
+dela.** Esta seção existe porque quatro tentativas de `E6` e três de `E8`
+passaram perto de ser assinadas sem medir.
 
 ---
 
@@ -992,12 +1183,86 @@ prova é a medição depois dela.**
    second after the test run has completed"* — handle aberto, anterior a
    `19802df`, sem efeito no resultado hoje. Dívida, sem gate: um dia isso vira
    job travado em vez de aviso.
+9. **O dump de banco em `/opt/backups` é anterior à remediação.** O
+   `propectai.sql.gz` foi criado em 29/09/2026, **antes** da separação final das
+   credenciais. Ele é `PRE-REMEDIATION / FORENSIC BACKUP`, e **não** é rollback
+   seguro de produção: restaurá-lo reintroduz o `passwordHash` antigo, o
+   compartilhamento OWNER/SDR e o estado de refresh tokens de antes. Qualquer
+   restauração desse dump exige, **imediatamente e na mesma janela**: rotação do
+   OWNER, rotação do SDR com senha distinta, revogação dos refresh válidos,
+   rotação do `JWT_ACCESS_SECRET` e revalidação de `E5`, `E6` e `E8`. Sem esses
+   cinco passos, restaurar o dump desfaz o fechamento deste incidente.
+10. **`BACKUP_SECRET_RETENTION` — múltiplas cópias de `.env.production` com
+    segredos reais.** São seis em `/opt/backups/prospectai-s0-THD4OPOl`, e só a
+    última tem carimbo de tempo no nome; pela nomenclatura não dá para
+    reconstruir a ordem — *"final"* não é a final. Elas contêm segredos de JWT já
+    mortos **e** credencial de banco que continua válida. Estão `600 root:root`
+    dentro de diretório `700 root:root`, portanto contidas, e **não foram
+    apagadas**. Falta política: carimbo temporal em todas, retenção definida,
+    decisão de quais manter e descarte seguro das obsoletas. Dívida registrada,
+    sem gate, e deliberadamente fora do commit de fechamento.
 
 **Débito de infraestrutura, registrado e não tratado agora.** As anotações do run
 #50 avisam que o rótulo `ubuntu-latest` migra para **Ubuntu 26 em 19/10/2026**: o
 runner muda de imagem sem que nada no repositório mude. Não vira gate — abrir
 outra frente com o `GATE_S0` ainda em fechamento custaria mais do que rende —,
 mas a data entra na lista de coisas que mudam sozinhas.
+
+---
+
+## 10.1 Defeitos históricos que originaram o incidente, e os controles atuais
+
+Estes **não** são riscos remanescentes. São a causa raiz do S0, medida no commit
+que a publicou, e já corrigida no HEAD aprovado. Ficam registrados porque uma
+causa raiz sem registro volta.
+
+### `S0-CRED-02` — OWNER e SDR compartilhavam a mesma credencial
+
+**Estado: `REMEDIATED`.**
+
+Causa, medida em `2c901f2:prisma/seed.ts`:
+
+```ts
+const password = process.env.SEED_OWNER_PASSWORD ?? '<literal de demonstração>';
+const passwordHash = await argonHash(password);
+// ... e o mesmo `passwordHash` em todos os usuários do laço:
+create: { email: person.email, name: person.name, passwordHash },
+update: { name: person.name, passwordHash },
+```
+
+Uma senha, **um** `argonHash`, o mesmo hash gravado nas duas linhas. Não é
+"o Argon2 gerou hashes iguais" — é **reutilização do mesmo hash calculado uma
+vez**. A distinção importa: a primeira frase descreveria um fenômeno impossível,
+a segunda descreve o que o código fazia.
+
+Dois efeitos vieram daí, e os dois foram observados:
+
+- **`S0-SEED-01` — o ramo `update` do `upsert` regravava `passwordHash`.** Rodar
+  o seed daquela época contra um ambiente já em uso **redefinia** a senha de quem
+  já existia, desfazendo em silêncio qualquer rotação feita por fora.
+- **`S0-SEED-02` — `SEED_SDR_PASSWORD` não determinava a senha do SDR.** Aquele
+  seed lia só `SEED_OWNER_PASSWORD`; a variável do SDR aparecia apenas no
+  `console.log` que anunciava as credenciais de demonstração. O ambiente
+  **anunciava** uma credencial de SDR que não existia, o que ajuda a explicar por
+  que o compartilhamento passou despercebido.
+
+**Controles no HEAD `56958dd`**, verificados em 07/10/2026:
+
+| arquivo | o que garante |
+|---|---|
+| `packages/types/src/seed-usuarios.ts` | lê `SEED_OWNER_PASSWORD` e `SEED_SDR_PASSWORD` **em separado**; recusa senha ausente nomeando a variável; recusa abaixo de `SENHA_MINIMA = 12`; recusa as duas iguais; `upsertDeUsuario` devolve `update: { name }` — **sem `passwordHash`** |
+| `prisma/seed.ts` | chama `pessoasDoSeed(process.env)` e calcula **um hash por pessoa**; o comentário do arquivo registra o motivo da regra |
+| `packages/types/src/seed-usuarios.test.ts` | doze testes, entre eles *"SEED_SDR_PASSWORD é realmente consumida — não é variável decorativa"*, *"as duas variáveis com o mesmo valor: recusado"*, *"em usuário existente, NÃO toca em passwordHash"* e *"rodar o seed de novo com outra senha não muda o que seria gravado no existente"* |
+
+Como `S0-SEED-01` e `S0-SEED-02` estão corrigidos no HEAD, **não** abrem gate,
+**não** entram como risco remanescente, e é incorreto afirmar que rodar
+`pnpm db:seed` hoje reverteria as senhas.
+
+> **Nota de método.** A primeira redação desta seção afirmou exatamente isso —
+> que o seed de hoje regravaria as senhas — a partir da leitura de `2c901f2`. Era
+> extrapolação de um commit histórico para o estado atual, e foi corrigida na
+> revisão. Fica registrada porque é a mesma classe de erro que anulou rodadas de
+> `E6` e `E8`: medir uma coisa e afirmar outra.
 
 ---
 
