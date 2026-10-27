@@ -79,7 +79,11 @@ services:
       gmaps-scraper:
         condition: service_started
     networks:
-      - internal
+      internal:
+      proxy_api:
+        ipv4_address: 172.30.250.3
+        aliases:
+          - api-proxy
 
   worker:
     build:
@@ -123,11 +127,19 @@ services:
       - web
       - api
     networks:
-      - internal
+      internal:
+      proxy_api:
+        ipv4_address: 172.30.250.2
 
 networks:
   internal:
     driver: bridge
+  proxy_api:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.250.0/29
+          gateway: 172.30.250.1
 
 volumes:
   prospectai_postgres_data:

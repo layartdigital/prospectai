@@ -15,6 +15,11 @@ async function bootstrap(): Promise<void> {
   // os bytes exatos, e a reserializacao que o parser faz — ordem de chaves,
   // espacos, escape de unicode — invalida a verificacao sem mudar o conteudo.
   const app = await NestFactory.create(AppModule, { bufferLogs: false, rawBody: true });
+
+  // Somente o gateway na rede proxy_api dedicada pode fornecer X-Forwarded-*.
+  // Nao confiar na rede internal inteira: web, worker e outros servicos tambem a compartilham.
+  app.getHttpAdapter().getInstance().set("trust proxy", "172.30.250.2");
+
   const config = app.get(ConfigService);
 
   const port = Number(config.get('API_PORT') ?? 3101);
