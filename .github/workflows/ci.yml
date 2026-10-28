@@ -163,11 +163,12 @@ jobs:
       APP_VERSION: ci
 
       # As quatro URLs. As tres de papel sao o que faz a suite de RLS provar
-      # alguma coisa: sem `DATABASE_URL_APP`, o `PrismaService` cai no
-      # `DATABASE_URL`, a aplicacao volta a ser dona superusuaria, e todo teste
-      # de isolamento passa **de graca**.
+      # alguma coisa. Sem `DATABASE_URL_APP` ou `DATABASE_URL_SISTEMA`, a API e
+      # o worker recusam criar o client (DB-REM-01) e a suite quebra alto; ate
+      # entao caiam no dono e todo teste de isolamento passava **de graca**.
       #
-      # A defesa contra isso nao e este arquivo: e a pre-condicao
+      # O que este arquivo nao pega e a variavel presente apontando para o
+      # dono. Contra isso continua valendo a pre-condicao
       # `current_user = 'propectai_app'` que abre cada `rls-*.spec.ts`. Ela
       # existe justamente porque este erro e silencioso.
       DATABASE_URL: postgresql://propectai:propectai_ci_only@localhost:5434/propectai?schema=public

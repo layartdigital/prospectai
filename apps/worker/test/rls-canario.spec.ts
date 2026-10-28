@@ -26,8 +26,9 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * tenant nenhum** — quem tem de recusar e a politica, ou nao ha politica.
  *
  * Precisa de `pnpm docker:up`, `pnpm db:migrate` e `DATABASE_URL_APP` no
- * `.env`. Sem a variavel, o `criarPrismaApp` avisa alto e estes testes viram
- * teatro: por isso o primeiro deles confere que o papel realmente mudou.
+ * `.env`. Sem a variavel, o `criarPrismaApp` recusa criar o client (DB-REM-01)
+ * e este arquivo nem carrega. Antes ele caia no dono e estes testes viravam
+ * teatro; o primeiro deles continua conferindo que o papel realmente mudou.
  */
 
 const admin = criarPrismaAdmin();
@@ -91,10 +92,11 @@ describe('pre-condicao', () => {
     /**
      * **Sem este teste, todos os outros deste arquivo passariam de graca.**
      *
-     * Se o `DATABASE_URL_APP` faltar, o `criarPrismaApp` cai no `DATABASE_URL`,
-     * a aplicacao volta a ser dona, o `FORCE` sai do caminho — e um teste de
-     * isolamento verde nao significaria nada. O aviso no console existe, mas
-     * aviso em suite de 300 testes ninguem le.
+     * Ate o DB-REM-01, se o `DATABASE_URL_APP` faltasse, o `criarPrismaApp`
+     * caia no `DATABASE_URL`, a aplicacao voltava a ser dona, o `FORCE` saia
+     * do caminho — e um teste de isolamento verde nao significaria nada. Hoje
+     * a falta da variavel impede o client de existir; este teste fica como
+     * segunda defesa, para o caso de a variavel existir e apontar para o dono.
      */
     const linhas = await app.$queryRaw<Array<{ usuario: string }>>`
       SELECT current_user AS usuario`;

@@ -65,6 +65,13 @@ migration, deixa de ser.** O `PRIMEIRO-DEPLOY-CREDENCIAIS.md` §4:
 O resultado de migrar sem acrescentar as variáveis: 34 políticas instaladas e
 integralmente contornadas. Pior que não ter RLS, porque parece ter.
 
+> **Atualização — DB-REM-01 (28/10/2026).** O trecho citado descreve o
+> comportamento anterior. Hoje, sem `DATABASE_URL_APP` ou
+> `DATABASE_URL_SISTEMA`, a API e o worker **recusam subir**, e o log nomeia a
+> variável (`CredencialDeBancoAusente`). O risco deixou de ser "contornada em
+> silêncio" e passou a ser "não sobe" — que é o que se quer de um erro de
+> ambiente.
+
 **Por isso o passo das variáveis vem antes de subir a aplicação, e não depois.**
 
 ### 2.2 O repositório de lá não tem commits

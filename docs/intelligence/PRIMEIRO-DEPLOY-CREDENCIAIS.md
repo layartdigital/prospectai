@@ -101,16 +101,22 @@ não sobrevivem. Foi a sexta ocorrência dessa armadilha nesta sessão.
 
 | variável | papel | quem usa |
 |---|---|---|
-| `DATABASE_URL` | o dono, superusuário | `prisma migrate`, e o fallback de tudo |
+| `DATABASE_URL` | o dono, superusuário | `prisma migrate`, e o fallback dos scripts e fixtures |
 | `DATABASE_URL_MIGRATOR` | `propectai_migrator` | scripts de `prisma/` e fixtures de teste |
 | `DATABASE_URL_APP` | `propectai_app` | **a aplicação** — API e worker |
 | `DATABASE_URL_SISTEMA` | `propectai_sistema` | os quatro caminhos que atravessam tenants |
 
-**Se `DATABASE_URL_APP` faltar, a aplicação cai no `DATABASE_URL` e roda como
-dono superusuário — que ignora a política inteira.** Não é hipótese: a fase B
-inteira depende dessa variável estar certa. A defesa é a pré-condição
-`current_user = 'propectai_app'` que abre cada `rls-*.spec.ts`, e ela só roda em
-teste. **Em produção não há quem avise.** Confira com a verificação do passo 6.
+**Se `DATABASE_URL_APP` ou `DATABASE_URL_SISTEMA` faltar, a API e o worker
+recusam subir** e o log diz qual variável falta (`CredencialDeBancoAusente`).
+Até o DB-REM-01 (28/10/2026) a aplicação caía no `DATABASE_URL` e rodava como
+dono superusuário — que ignora a política inteira —, com um aviso no log e
+nada mais: em produção não havia quem avisasse. A pré-condição
+`current_user = 'propectai_app'` que abre cada `rls-*.spec.ts` continua valendo
+como segunda defesa em teste. Confira com a verificação do passo 6.
+
+Para rodar como dono **de propósito** — reverter o passo 4 —, aponte
+`DATABASE_URL_APP` para a URL do dono. É uma linha, e fica visível na revisão
+do ambiente, ao contrário de uma linha ausente.
 
 ### 5. Semear, se for ambiente de demonstração
 
