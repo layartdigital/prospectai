@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { exigirUrlDoBanco } from '@propectai/types';
 
 /**
  * O papel que atravessa tenants — e o único jeito de chegar até ele.
@@ -47,26 +48,13 @@ import { PrismaClient } from '@prisma/client';
  * Ausência da variável
  * =============================================================================
  *
- * Sem `DATABASE_URL_SISTEMA` o serviço cai no `DATABASE_URL`, **em voz alta**,
- * exatamente como o `urlDaAplicacao` do `PrismaService`. Em desenvolvimento
- * isso funciona porque o dono do banco ignora política; em produção seria a
- * aplicação inteira rodando com privilégio de dono, que é o oposto do que este
- * arquivo existe para fazer. Silenciar seria o pior dos casos: tudo continuaria
- * funcionando, e a proteção não estaria no caminho.
+ * Sem `DATABASE_URL_SISTEMA` a API **não sobe** (DB-REM-01), exatamente como
+ * o `PrismaService` sem `DATABASE_URL_APP`. Até então o serviço caía no
+ * `DATABASE_URL`, em voz alta — o que em produção seria a aplicação inteira
+ * rodando com privilégio de dono, o oposto do que este arquivo existe para
+ * fazer, com tudo continuando a funcionar. Ver `exigirUrlDoBanco` em
+ * `@propectai/types`.
  */
-function urlDoSistema(): string | undefined {
-  const url = process.env.DATABASE_URL_SISTEMA;
-  if (url === undefined || url.trim() === '') {
-    console.warn(
-      '[db] DATABASE_URL_SISTEMA ausente — os caminhos que atravessam tenants ' +
-        'vao conectar como dono das tabelas. Funciona, e NAO e o desenho: ' +
-        'ver a migration 20260903120000_rls_papel_sistema.',
-    );
-    return undefined;
-  }
-  return url;
-}
-
 @Injectable()
 export class PrismaSistemaService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaSistemaService.name);
@@ -75,9 +63,8 @@ export class PrismaSistemaService implements OnModuleInit, OnModuleDestroy {
   private readonly client: PrismaClient;
 
   constructor() {
-    const datasourceUrl = urlDoSistema();
     this.client = new PrismaClient({
-      ...(datasourceUrl === undefined ? {} : { datasourceUrl }),
+      datasourceUrl: exigirUrlDoBanco(process.env, 'DATABASE_URL_SISTEMA'),
       log: [{ emit: 'stdout', level: 'error' }],
     });
   }

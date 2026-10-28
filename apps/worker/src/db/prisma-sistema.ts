@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { exigirUrlDoBanco } from '@propectai/types';
 
 /**
  * Client do worker que enxerga **a lista de tenants**, e so ela.
@@ -47,13 +48,15 @@ import { PrismaClient } from '@prisma/client';
  *
  * ---
  *
- * **A direcao do fallback foi escolhida, nao herdada.**
+ * **Faltando a variavel, o worker nao sobe** (DB-REM-01).
  *
- * Faltando a variavel, cai no `DATABASE_URL` — o dono — e avisa alto. Nao e o
- * ideal, e o menos ruim: o dono enxerga todos os tenants, entao o defeito e
- * "privilegio a mais, em voz alta". Cair no papel da aplicacao seria o oposto,
- * e o pior modo de falha que existe aqui: **nenhuma linha, nenhum erro, nenhum
- * aviso enviado**, indistinguivel de um dia em que nada expirava.
+ * A versao anterior escolhia entre duas quedas e registrava por que: cair no
+ * dono era "privilegio a mais, em voz alta"; cair no papel da aplicacao seria
+ * o pior modo de falha daqui — **nenhuma linha, nenhum erro, nenhum aviso
+ * enviado**, indistinguivel de um dia em que nada expirava. O raciocinio sobre
+ * a segunda continua certo. A saida que nenhuma das duas oferecia e nao cair:
+ * recusar subir nao tem privilegio a mais e nao e silenciosa. Ver
+ * `exigirUrlDoBanco` em `@propectai/types`.
  *
  * ---
  *
@@ -64,22 +67,8 @@ import { PrismaClient } from '@prisma/client';
  * nos dois; foi ele que derrubou a versao anterior deste comentario.
  */
 
-let avisou = false;
-
 export function criarPrismaSistema(): PrismaClient {
-  const url = process.env.DATABASE_URL_SISTEMA;
-
-  if (url === undefined || url.trim() === '') {
-    if (!avisou) {
-      console.warn(
-        '[db] DATABASE_URL_SISTEMA ausente — conectando como dono das tabelas. ' +
-          'A enumeracao funciona, mas com privilegio maior que o desenhado. ' +
-          'Ver apps/worker/src/db/prisma-sistema.ts.',
-      );
-      avisou = true;
-    }
-    return new PrismaClient();
-  }
-
-  return new PrismaClient({ datasourceUrl: url });
+  return new PrismaClient({
+    datasourceUrl: exigirUrlDoBanco(process.env, 'DATABASE_URL_SISTEMA'),
+  });
 }

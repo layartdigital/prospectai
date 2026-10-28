@@ -55,3 +55,56 @@ export function validarTenantId(valor: unknown): string {
   }
   return valor;
 }
+
+/**
+ * As duas credenciais de papel sem as quais a API e o worker nao sobem.
+ *
+ * `DATABASE_URL_MIGRATOR` fica de fora de proposito: ela e lida por scripts e
+ * fixtures de teste, que conectam como dono por desenho e caem no
+ * `DATABASE_URL` avisando. Esta regra vale para quem **executa a aplicacao**.
+ */
+export type VariavelDeCredencial = 'DATABASE_URL_APP' | 'DATABASE_URL_SISTEMA';
+
+export class CredencialDeBancoAusente extends Error {
+  readonly variavel: VariavelDeCredencial;
+
+  constructor(variavel: VariavelDeCredencial) {
+    super(
+      `${variavel} ausente ou vazia. O processo recusa subir: sem ela o Prisma ` +
+        'conectaria pelo DATABASE_URL, como dono superusuario, e a politica de ' +
+        'RLS sairia do caminho sem nada quebrar. Para conectar como dono de ' +
+        `proposito, aponte ${variavel} para a URL do dono — explicito, e visivel ` +
+        'na revisao do ambiente.',
+    );
+    this.name = 'CredencialDeBancoAusente';
+    this.variavel = variavel;
+  }
+}
+
+/**
+ * Le a URL de um papel do banco, **ou recusa subir**.
+ *
+ * Ate o DB-REM-01 a ausencia da variavel era um aviso: a API e o worker caiam
+ * no `DATABASE_URL` e continuavam rodando como dono superusuario, com o RLS
+ * fora do caminho. O aviso era alto, e ainda assim era o unico ponto do
+ * sistema que **falhava abrindo** — o RLS falha fechando (tenant nao declarado
+ * devolve zero linhas), a selecao de credencial falhava liberando tudo. A
+ * auditoria SEC-DB-01 registrou isso como `SEC-DB-01.I`.
+ *
+ * Um aviso no log nao impede um deploy de servir trafego. Uma excecao no
+ * construtor impede: o processo nao sobe, o healthcheck nao passa, e o erro
+ * diz qual variavel falta.
+ *
+ * Recebe o ambiente por parametro em vez de ler `process.env` para que o
+ * contrato seja testavel sem processo e sem banco.
+ */
+export function exigirUrlDoBanco(
+  ambiente: Readonly<Record<string, string | undefined>>,
+  variavel: VariavelDeCredencial,
+): string {
+  const url = ambiente[variavel];
+  if (url === undefined || url.trim() === '') {
+    throw new CredencialDeBancoAusente(variavel);
+  }
+  return url;
+}
