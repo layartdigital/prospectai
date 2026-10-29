@@ -43,7 +43,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
  * do que diz provar, e nada indicaria isso.
  *
  * É exatamente o cenário para o qual o aviso alto do `criarPrismaApp` foi
- * escrito.
+ * escrito — e que, desde o DB-REM-01, virou recusa de criar o client.
  *
  * Precisa de `pnpm docker:up` e `pnpm db:migrate` antes.
  */

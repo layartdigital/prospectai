@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { TENANT_SETTING, validarTenantId } from '@propectai/types';
+import { TENANT_SETTING, exigirUrlDoBanco, validarTenantId } from '@propectai/types';
 
 /**
  * Teto da transacao com contexto de tenant.
@@ -50,24 +50,16 @@ const TX_MAX_WAIT_MS = 5_000;
  * o `DATABASE_URL`: `migrate`, `db:seed`, `db:studio` e os scripts de `prisma/`
  * passariam todos a conectar como um papel sem DDL, e a proxima migration
  * falharia. `directUrl` resolveria o `migrate` e deixaria o seed e os scripts
- * no mesmo problema. Entao e **opt-in por processo** — e reverter o passo 4
- * vira apagar uma linha do `.env`.
+ * no mesmo problema. Entao e **opt-in por processo**.
  *
- * O aviso e alto de proposito. Silenciar seria o pior dos casos: a API voltaria
- * a conectar como dono, o `FORCE` sairia do caminho, e **tudo continuaria
- * funcionando** — com os testes de isolamento passando sem a politica no meio.
+ * **Sem a variavel, a API nao sobe** (DB-REM-01). Ate entao ela caia no
+ * `DATABASE_URL` com um aviso, e o pior caso descrito aqui — conectar como
+ * dono, o `FORCE` fora do caminho, e **tudo continuando a funcionar** — so
+ * dependia de alguem ler o log. Ver `exigirUrlDoBanco` em `@propectai/types`.
+ *
+ * Reverter o passo 4 continua sendo uma linha do `.env`, agora explicita:
+ * apontar `DATABASE_URL_APP` para a URL do dono.
  */
-function urlDaAplicacao(): string | undefined {
-  const url = process.env.DATABASE_URL_APP;
-  if (url === undefined || url.trim() === '') {
-    console.warn(
-      '[db] DATABASE_URL_APP ausente — conectando como dono das tabelas. ' +
-        'A politica de RLS NAO esta no caminho. Ver passo 4 do PLANO-RLS-v1.md.',
-    );
-    return undefined;
-  }
-  return url;
-}
 
 /**
  * Declara o tenant numa transacao **que ja existe**.
@@ -102,9 +94,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
-    const datasourceUrl = urlDaAplicacao();
     super({
-      ...(datasourceUrl === undefined ? {} : { datasourceUrl }),
+      datasourceUrl: exigirUrlDoBanco(process.env, 'DATABASE_URL_APP'),
       log:
         process.env.NODE_ENV === 'development'
           ? [{ emit: 'stdout', level: 'warn' }, { emit: 'stdout', level: 'error' }]

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { exigirUrlDoBanco } from '@propectai/types';
 
 /**
  * Client de execucao do worker, com o papel que **esta** sujeito a politica.
@@ -22,33 +23,22 @@ import { PrismaClient } from '@prisma/client';
  * **opt-in por processo.** `DATABASE_URL` continua sendo o dono; so quem
  * executa a aplicacao le a variavel nova.
  *
- * De brinde, reverter o passo 4 vira apagar uma linha do `.env`.
+ * Reverter o passo 4 continua sendo uma linha do `.env`, agora explicita:
+ * apontar `DATABASE_URL_APP` para a URL do dono.
+ *
+ * ---
+ *
+ * **Sem a variavel, o worker nao sobe** (DB-REM-01). Ate entao ele caia no
+ * `DATABASE_URL` em voz alta, no mesmo padrao do `criarPrismaAdmin` — e o
+ * silencio que o aviso combatia so era evitado se alguem lesse o log: a
+ * aplicacao conectava como dono, o `FORCE` deixava de valer, e **tudo
+ * continuava funcionando**. O `criarPrismaAdmin` dos testes mantem a queda,
+ * porque la conectar como dono e o objetivo. Ver `exigirUrlDoBanco` em
+ * `@propectai/types`.
  */
 
-let avisou = false;
-
 export function criarPrismaApp(): PrismaClient {
-  const url = process.env.DATABASE_URL_APP;
-
-  if (url === undefined || url.trim() === '') {
-    /**
-     * Cai no `DATABASE_URL`, mas **em voz alta** — mesmo padrao do
-     * `criarPrismaAdmin`.
-     *
-     * O silencio aqui seria pior que o erro: a aplicacao voltaria a conectar
-     * como dono, o `FORCE` deixaria de valer, e **tudo continuaria
-     * funcionando**. Um teste de isolamento passaria sem que a politica
-     * estivesse no caminho de nada.
-     */
-    if (!avisou) {
-      console.warn(
-        '[db] DATABASE_URL_APP ausente — conectando como dono das tabelas. ' +
-          'A politica de RLS NAO esta no caminho. Ver passo 4 do PLANO-RLS-v1.md.',
-      );
-      avisou = true;
-    }
-    return new PrismaClient();
-  }
-
-  return new PrismaClient({ datasourceUrl: url });
+  return new PrismaClient({
+    datasourceUrl: exigirUrlDoBanco(process.env, 'DATABASE_URL_APP'),
+  });
 }

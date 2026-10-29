@@ -135,10 +135,10 @@ afterAll(async () => {
 
 bloco('pre-condicao', () => {
   it('a API nao esta conectada como dono das tabelas', async () => {
-    // Sem esta linha, todos os testes abaixo passariam de graca com o
-    // `DATABASE_URL_APP` ausente: o `PrismaService` cairia no `DATABASE_URL`,
-    // a aplicacao voltaria a ser dona superusuaria, e a politica sairia do
-    // caminho sem nada quebrar.
+    // Sem a variavel o `PrismaService` ja recusa subir (DB-REM-01). Esta linha
+    // cobre o que sobra: `DATABASE_URL_APP` presente e apontando para o dono —
+    // a aplicacao seria dona superusuaria e a politica sairia do caminho sem
+    // nada quebrar.
     const linhas = await prisma.$queryRaw<Array<{ usuario: string }>>`
       SELECT current_user AS usuario`;
     expect(linhas[0]?.usuario).toBe('propectai_app');
