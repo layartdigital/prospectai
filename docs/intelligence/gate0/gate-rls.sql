@@ -241,4 +241,89 @@ BEGIN
 END $$;
 
 \echo 'ok  6. propectai_app nao tem BYPASSRLS'
+
+-- =====================================================================
+-- 7. Tabela sem RLS só é gravável pela aplicação se estiver na lista
+-- =====================================================================
+--
+-- DB-REM-02, opção (a) de 29/10: tabela nova continua nascendo com DML para o
+-- `propectai_app` (default privilege da `rls_papeis`). Para tabela com
+-- `tenantId` isso é o desejado — a política a protege, e as checagens 1 a 3
+-- garantem que a política existe.
+--
+-- O que sobra é a tabela **sem** RLS: nela o DML do runtime não tem rede
+-- nenhuma. A lista abaixo é o conjunto medido em `bbf977f` de tabelas sem RLS
+-- que a aplicação escreve de fato. Tabela nova fora dela deixa este portão
+-- vermelho até alguém decidir — pôr na lista, ou revogar a escrita na própria
+-- migration que a criou.
+DO $$
+DECLARE
+  fora_da_lista text;
+BEGIN
+  SELECT string_agg(c.relname, ', ' ORDER BY c.relname)
+    INTO fora_da_lista
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public'
+     AND c.relkind = 'r'
+     AND NOT c.relrowsecurity
+     AND (has_table_privilege('propectai_app', c.oid, 'INSERT')
+       OR has_table_privilege('propectai_app', c.oid, 'UPDATE')
+       OR has_table_privilege('propectai_app', c.oid, 'DELETE'))
+     AND c.relname NOT IN ('users', 'refresh_tokens', 'billing_events',
+                           'tenants', 'plans', 'segment_locales');
+
+  IF fora_da_lista IS NOT NULL THEN
+    RAISE EXCEPTION
+      'Tabela sem RLS gravavel por propectai_app fora da lista: %. Sem politica, o DML do runtime nao tem rede. Decida: entra na lista da checagem 7, ou a migration revoga INSERT, UPDATE e DELETE.',
+      fora_da_lista;
+  END IF;
+END $$;
+
+\echo 'ok  7. tabela sem RLS so e gravavel pela aplicacao se estiver na lista'
+
+-- =====================================================================
+-- 8. O migrator não trunca, nem cria trigger ou FK
+-- =====================================================================
+--
+-- DB-REM-03. O `propectai_migrator` tem `BYPASSRLS`: um TRUNCATE dele apaga os
+-- dados de todos os tenants num comando, e nada no repositório usa isso.
+-- Confere as tabelas existentes **e** o default privilege — revogar só nas
+-- existentes faria a próxima tabela nascer truncável de novo.
+DO $$
+DECLARE
+  com_privilegio text;
+  default_ruim int;
+BEGIN
+  SELECT string_agg(c.relname, ', ' ORDER BY c.relname)
+    INTO com_privilegio
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public'
+     AND c.relkind = 'r'
+     AND (has_table_privilege('propectai_migrator', c.oid, 'TRUNCATE')
+       OR has_table_privilege('propectai_migrator', c.oid, 'TRIGGER')
+       OR has_table_privilege('propectai_migrator', c.oid, 'REFERENCES'));
+
+  IF com_privilegio IS NOT NULL THEN
+    RAISE EXCEPTION
+      'propectai_migrator tem TRUNCATE, TRIGGER ou REFERENCES em: %. Com BYPASSRLS, TRUNCATE apaga todos os tenants num comando.',
+      com_privilegio;
+  END IF;
+
+  SELECT count(*)
+    INTO default_ruim
+    FROM pg_default_acl d
+    CROSS JOIN LATERAL aclexplode(d.defaclacl) a
+   WHERE d.defaclobjtype = 'r'
+     AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'propectai_migrator')
+     AND a.privilege_type IN ('TRUNCATE', 'TRIGGER', 'REFERENCES');
+
+  IF default_ruim > 0 THEN
+    RAISE EXCEPTION
+      'Default privilege ainda concede TRUNCATE, TRIGGER ou REFERENCES ao propectai_migrator. A proxima tabela criada nasceria truncavel.';
+  END IF;
+END $$;
+
+\echo 'ok  8. propectai_migrator nao tem TRUNCATE, TRIGGER nem REFERENCES'
 \echo '--- portao de RLS: tudo certo ---'
