@@ -24,6 +24,15 @@ específico, que não é primeiro deploy: já existe coisa no ar.
 > hoje ela vai no arquivo da tabela. O `--env-file .env.production` continua em
 > todo comando: é dele que o Compose tira o `REDIS_PASSWORD`. Os passos abaixo
 > ficam como foram executados, porque são registro.
+>
+> **Mesmo dia, OBS-WEB-ENV-01.** `web` e `worker` não leem mais o
+> `.env.production` inteiro: cada um tem uma lista fechada no `environment` do
+> `compose.prod.yml`, com o valor vindo por interpolação. **Variável nova que o
+> `web` ou o `worker` precise tem de entrar em três lugares**: no
+> `.env.production`, na lista do serviço no `compose.prod.yml` e na lista
+> `exato` de `infra/scripts/checar-segredos-compose.sh` — senão o CI reprova, ou
+> o serviço sobe sem ela. Se uma chave da lista sumir do `.env.production`, todo
+> `$C` falha com `required variable … is missing a value`, de propósito.
 
 ---
 
