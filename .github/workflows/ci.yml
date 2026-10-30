@@ -92,6 +92,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # DB-REM-04 (30/10/2026): cada servico do `compose.prod.yml` so recebe as
+      # credenciais de banco que usa. Roda antes da instalacao porque nao
+      # depende dela — so do `docker compose` e do `jq` do runner — e falha em
+      # segundos. Arquivos de ambiente falsos, numa pasta temporaria.
+      - name: Segredos por servico (compose.prod.yml)
+        run: bash infra/scripts/checar-segredos-compose.sh
+
       # v6, e sem `with: version` — ver o bloco `env`.
       #
       # ⚠ Esta acao tem sucessor: a v6.0.10 aponta os usuarios para `pnpm/setup`.

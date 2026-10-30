@@ -21,6 +21,10 @@ out/
 # ter um checkout de verdade deste repositorio: sem esta linha, um `git add -A`
 # rodado la colocaria as senhas de producao num commit.
 .env.production
+# Os dois arquivos que o DB-REM-04 (30/10/2026) separou do `.env.production`:
+# credenciais de runtime do banco e as do dono. Mesmo motivo da linha acima.
+.env.banco
+.env.dono
 
 # Prisma - client gerado
 prisma/generated/
