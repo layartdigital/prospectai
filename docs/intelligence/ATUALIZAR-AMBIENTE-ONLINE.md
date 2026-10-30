@@ -299,6 +299,19 @@ $C stop api worker
 $C run --rm api pnpm db:deploy
 ```
 
+> **Atualização — 30/10/2026.** Este comando não funciona mais desde 27/10: a
+> API ganhou IP fixo na rede `proxy_api` (`aba2ee7`), e o container avulso
+> disputa o IP com o que está rodando — `Address already in use`, medido. Use o
+> serviço `ops` do `compose.prod.yml`, que roda a mesma imagem só na rede
+> interna:
+>
+> ```bash
+> $C --profile ops run --rm ops
+> ```
+>
+> O mesmo vale para todo `$C run --rm api …` deste documento e do
+> `RUNBOOK-S1-ROTACAO-CREDENCIAIS.md`: troque por `$C --profile ops run --rm ops …`.
+
 `db:deploy` é `prisma migrate deploy`, não `migrate dev` — o segundo cria shadow
 database e faz perguntas, e pergunta sem terminal vira travamento. Conecta pelo
 `DATABASE_URL`, o dono (`schema.prisma`, `datasource db`), e por isso consegue
@@ -372,6 +385,8 @@ invariante 6 do portão confere.
 ```bash
 $C run --rm api pnpm db:seed
 ```
+
+> Desde 30/10: `$C --profile ops run --rm ops pnpm db:seed` — ver a nota do 3c.
 
 Aqui é obrigatório, e não opcional como em produção real: é o seed que grava
 `Plan.limits`, e é por ele que o **FREE com uma auditoria** chega ao banco. Sem
