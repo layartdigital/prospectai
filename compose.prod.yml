@@ -11,11 +11,22 @@ name: prospectai-prod
 # Agora são três arquivos, todos `600 root:root`, fora do Git e da imagem:
 #
 #   .env.production   comum (Redis, JWT, provedores); nenhuma credencial de banco
+#                     — inteiro só para api e ops; os outros, por interpolação
 #   .env.banco        DATABASE_URL_APP, DATABASE_URL_SISTEMA — api, worker, ops
 #   .env.dono         DATABASE_URL, DATABASE_URL_MIGRATOR, POSTGRES_*, SEED_*
 #                     — postgres e ops
 #
 # Quem precisa do dono (migrate, seed, troca de senha) passa pelo `ops`.
+#
+# OBS-WEB-ENV-01, 30/10/2026: `web` e `worker` deixaram de ler o
+# `.env.production` inteiro. Recebiam o `JWT_ACCESS_SECRET` — com ele se forja
+# token de acesso de qualquer tenant — sem usá-lo. Agora cada um tem uma lista
+# fechada no `environment`, tirada do código (`process.env.*` em `apps/web` e
+# `apps/worker/src`, medido em `42bf6a6`). Os valores vêm por interpolação do
+# `--env-file .env.production`; o `:?` faz o Compose recusar o comando se a
+# chave sumir do arquivo, em vez de entregar texto vazio ao serviço (o worker
+# leria `SCRAPER_MAX_CONCURRENT_JOBS=""` como concorrência 0).
+#
 # A regra é verificada no CI por `infra/scripts/checar-segredos-compose.sh`.
 
 services:
@@ -114,9 +125,19 @@ services:
       context: .
       dockerfile: infra/docker/worker.prod.Dockerfile
     restart: unless-stopped
+    # Só o que `apps/worker/src` lê. Sem JWT, cookie ou origem web: o worker
+    # não autentica ninguém. O `REDIS_URL` carrega a senha do Redis, e é
+    # necessário.
     env_file:
-      - .env.production
       - .env.banco
+    environment:
+      NODE_ENV: ${NODE_ENV:?falta NODE_ENV no .env.production}
+      REDIS_URL: ${REDIS_URL:?falta REDIS_URL no .env.production}
+      SCRAPER_BASE_URL: ${SCRAPER_BASE_URL:?falta SCRAPER_BASE_URL no .env.production}
+      SCRAPER_MAX_CONCURRENT_JOBS: ${SCRAPER_MAX_CONCURRENT_JOBS:?falta SCRAPER_MAX_CONCURRENT_JOBS no .env.production}
+      SCRAPER_TIMEOUT_SECONDS: ${SCRAPER_TIMEOUT_SECONDS:?falta SCRAPER_TIMEOUT_SECONDS no .env.production}
+      LEAD_SOURCE_PROVIDER: ${LEAD_SOURCE_PROVIDER:?falta LEAD_SOURCE_PROVIDER no .env.production}
+      SITE_AUDIT_PROVIDER: ${SITE_AUDIT_PROVIDER:?falta SITE_AUDIT_PROVIDER no .env.production}
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,12 +153,14 @@ services:
       context: .
       dockerfile: infra/docker/web.prod.Dockerfile
     restart: unless-stopped
-    # Nenhuma credencial de banco: o front-end fala com a API, nunca com o
-    # Postgres.
-    env_file:
-      - .env.production
+    # Nenhum segredo: o front-end fala com a API, nunca com o Postgres nem com
+    # o Redis, e não valida token. Só o que `apps/web` lê (`next.config.mjs`
+    # incluído).
     environment:
       API_INTERNAL_URL: http://api:3101
+      APP_VERSION: ${APP_VERSION:?falta APP_VERSION no .env.production}
+      NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:?falta NEXT_PUBLIC_APP_VERSION no .env.production}
+      NODE_ENV: ${NODE_ENV:?falta NODE_ENV no .env.production}
     depends_on:
       - api
     networks:

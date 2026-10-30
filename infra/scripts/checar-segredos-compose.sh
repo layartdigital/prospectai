@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Segredos por servico no compose.prod.yml — DB-REM-04 (SEC-DB-01.N), 30/10/2026.
+# Segredos por servico no compose.prod.yml — DB-REM-04 (SEC-DB-01.N) e
+# OBS-WEB-ENV-01, 30/10/2026.
 #
 # Verifica a FIACAO, e nao o conteudo dos arquivos reais: monta o compose numa
 # pasta temporaria, com tres arquivos de ambiente falsos (chaves sentinela, sem
@@ -7,7 +8,11 @@
 # ambiente final de cada servico.
 #
 # Pega, por exemplo: alguem pondo `.env.dono` no `web`; a `api` voltando a ler
-# o `DATABASE_URL`; um servico novo que ninguem classificou.
+# o `DATABASE_URL`; o `web` ou o `worker` ganhando uma chave fora da lista
+# (o `JWT_ACCESS_SECRET`, por exemplo); um servico novo que ninguem classificou.
+#
+# `web`, `worker`, `redis`, `gateway` e `gmaps-scraper` tem lista EXATA: chave
+# nova nesses servicos so passa se entrar tambem aqui, de proposito.
 #
 # Nao pega: uma chave do dono escrita de volta no `.env.production` do servidor.
 # Isso so se mede la (rodada M1 do roteiro do DB-REM-04, so nomes).
@@ -25,10 +30,15 @@ trap 'rm -rf "$T"' EXIT
 
 cp "$RAIZ/compose.prod.yml" "$T/compose.prod.yml"
 
-printf '%s\n' \
-  'REDIS_PASSWORD=sentinela-redis' \
-  'JWT_ACCESS_SECRET=sentinela-comum' \
-  'COMUM_SENTINELA=1' > "$T/.env.production"
+# Os 23 nomes do `.env.production` do servidor em 30/10 (W0/W4, so nomes),
+# com valores falsos.
+for k in AI_PROVIDER API_INTERNAL_URL API_PORT APP_NAME APP_VERSION \
+  COOKIE_DOMAIN COOKIE_SECURE JWT_ACCESS_SECRET JWT_ACCESS_TTL JWT_REFRESH_TTL \
+  LEAD_SOURCE_PROVIDER NEXT_PUBLIC_API_URL NEXT_PUBLIC_APP_VERSION NODE_ENV \
+  REDIS_PASSWORD REDIS_URL SCRAPER_BASE_URL SCRAPER_MAX_CONCURRENT_JOBS \
+  SCRAPER_PORT SCRAPER_TIMEOUT_SECONDS SITE_AUDIT_PROVIDER WEB_ORIGIN WEB_PORT; do
+  echo "$k=sentinela"
+done > "$T/.env.production"
 
 printf '%s\n' \
   'DATABASE_URL_APP=sentinela-app' \
@@ -66,6 +76,16 @@ proibir() { # servico regex rotulo
   fi
 }
 
+exato() { # servico chave... — o ambiente tem estas chaves e nenhuma outra
+  local s="$1"; shift
+  local esperado obtido
+  esperado="$(printf '%s\n' "$@" | sed '/^$/d' | sort)"
+  obtido="$(chaves "$s" | sort)"
+  if [ "$esperado" != "$obtido" ]; then
+    falhar "$s: sobra [$(comm -13 <(echo "$esperado") <(echo "$obtido") | tr '\n' ' ')] falta [$(comm -23 <(echo "$esperado") <(echo "$obtido") | tr '\n' ' ')]"
+  fi
+}
+
 exigir() { # servico chave
   if ! chaves "$1" | grep -qx "$2"; then
     falhar "$1 nao recebe $2"
@@ -82,22 +102,21 @@ for s in $(jq -r '.services | keys[]' "$T/resolvido.json"); do
 done
 
 proibir postgres "$BANCO" 'de runtime'
+proibir postgres '^(JWT_|REDIS_|COOKIE_)' 'comum'
 exigir  postgres POSTGRES_PASSWORD
 
-proibir redis "$DONO" 'do dono'
-proibir redis "$BANCO" 'de runtime'
-exigir  redis REDIS_PASSWORD
+proibir api "$DONO" 'do dono'
+exigir  api DATABASE_URL_APP
+exigir  api DATABASE_URL_SISTEMA
+exigir  api JWT_ACCESS_SECRET
 
-for s in api worker; do
-  proibir "$s" "$DONO" 'do dono'
-  exigir  "$s" DATABASE_URL_APP
-  exigir  "$s" DATABASE_URL_SISTEMA
-done
-
-for s in web gateway gmaps-scraper; do
-  proibir "$s" "$DONO" 'do dono'
-  proibir "$s" "$BANCO" 'de runtime'
-done
+exato worker DATABASE_URL_APP DATABASE_URL_SISTEMA LEAD_SOURCE_PROVIDER NODE_ENV \
+  REDIS_URL SCRAPER_BASE_URL SCRAPER_MAX_CONCURRENT_JOBS SCRAPER_TIMEOUT_SECONDS \
+  SITE_AUDIT_PROVIDER
+exato web API_INTERNAL_URL APP_VERSION NEXT_PUBLIC_APP_VERSION NODE_ENV
+exato redis REDIS_PASSWORD
+exato gateway ''
+exato gmaps-scraper DISABLE_TELEMETRY
 
 exigir ops DATABASE_URL
 exigir ops DATABASE_URL_MIGRATOR
