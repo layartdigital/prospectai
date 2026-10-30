@@ -1,5 +1,11 @@
 # Runbook S1_C3 — rotação de credenciais e fechamento do incidente S0
 
+> **Atualização — 30/10/2026.** Todo `$C run --rm api …` deste documento falha
+> desde 27/10 com `Address already in use`: a API ganhou IP fixo na rede
+> `proxy_api` (`aba2ee7`). Para repetir qualquer passo, use o serviço `ops` do
+> `compose.prod.yml` — `$C --profile ops run --rm ops …`, com o mesmo comando
+> depois. Os comandos abaixo ficam como foram executados, porque são registro.
+
 **Estado:** revisado em 25/09/2026. As três decisões da §11 foram escolhidas pelo
 dono do projeto entre opções apresentadas; a §11 registra o mecanismo, a data e
 o que foi recusado, para que nenhuma delas dependa de eu ter "entendido" uma

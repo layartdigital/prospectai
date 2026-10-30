@@ -131,6 +131,34 @@ services:
       proxy_api:
         ipv4_address: 172.30.250.2
 
+  # Comando avulso com a imagem da API: migrations, seed, troca de senha.
+  #
+  # Existe porque `run --rm api` deixou de funcionar em 27/10 (`aba2ee7`): a
+  # API ganhou IP fixo na `proxy_api`, e o container avulso disputa esse IP com
+  # o que está rodando ("Address already in use", medido em 30/10). Este
+  # serviço usa a mesma imagem, mas só a rede `internal` e sem IP fixo.
+  #
+  # Só existe com `--profile ops`: `up`, `build` e `pull` comuns o ignoram.
+  #   $C --profile ops run --rm ops                      # migrate deploy
+  #   $C --profile ops run --rm ops pnpm db:seed
+  #   $C --profile ops run --rm ops pnpm db:senha EMAIL "motivo"
+  #
+  # `pull_policy: never`: a imagem vem do `$C build api`. Sem isto, imagem
+  # ausente faria o Compose procurar `prospectai-prod-api` no Docker Hub — um
+  # nome que qualquer pessoa pode registrar lá.
+  ops:
+    image: prospectai-prod-api:latest
+    pull_policy: never
+    profiles: ["ops"]
+    env_file:
+      - .env.production
+    command: ["pnpm", "db:deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
 networks:
   internal:
     driver: bridge
