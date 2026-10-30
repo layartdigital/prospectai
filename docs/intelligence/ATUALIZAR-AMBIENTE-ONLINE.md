@@ -33,6 +33,23 @@ específico, que não é primeiro deploy: já existe coisa no ar.
 > `exato` de `infra/scripts/checar-segredos-compose.sh` — senão o CI reprova, ou
 > o serviço sobe sem ela. Se uma chave da lista sumir do `.env.production`, todo
 > `$C` falha com `required variable … is missing a value`, de propósito.
+>
+> **DB-REM-06 (desenho de 30/10; vale a partir da janela que o aplicar).** As
+> migrations deixam de rodar como superusuário. A `20261030190000_dono_sem_superusuario`
+> é a última aplicada como `propectai`; ela cria o papel `propectai_dono`
+> (`NOSUPERUSER NOCREATEROLE NOCREATEDB BYPASSRLS`) e passa a ele a posse de
+> tudo no `public`. Depois da janela, o `DATABASE_URL` do `.env.dono` aponta
+> para o `propectai_dono`, e `$C --profile ops run --rm ops` aplica migration
+> como ele.
+>
+> - **Migration que precise de superusuário** (criar papel, `ALTER ROLE`,
+>   extensão não confiável) falha com `permission denied`. Esse passo sai da
+>   migration e vira operação: `$C exec postgres psql -U propectai -d propectai`
+>   — socket local, sem senha, só para quem já é root no servidor.
+> - **Objeto criado assim fica do `propectai`**, e a checagem 9 do portão
+>   (`gate-rls.sql`) acusa. Corrigir com `ALTER … OWNER TO propectai_dono`.
+> - **Dev local não muda:** continua aplicando tudo como superusuário. O CI
+>   aplica em dois estágios, como a produção.
 
 ---
 

@@ -326,4 +326,67 @@ BEGIN
 END $$;
 
 \echo 'ok  8. propectai_migrator nao tem TRUNCATE, TRIGGER nem REFERENCES'
+
+-- ---------------------------------------------------------------------------
+-- 9. O schema public pertence ao propectai_dono, que nao e superusuario
+--    (DB-REM-06, 30/10/2026)
+-- ---------------------------------------------------------------------------
+--
+-- Tres coisas, cada uma com um modo de falha silencioso se faltar:
+--
+--   * atributos: sem BYPASSRLS, migration de dado sob FORCE afeta zero linhas
+--     sem erro; com SUPERUSER/CREATEROLE/CREATEDB, o DB-REM-06 nao fez nada;
+--   * posse: objeto criado por outro papel (o superusuario, numa emergencia)
+--     faz a proxima migration falhar ao altera-lo — e, se o default privilege
+--     daquele papel faltar, o app fica sem grant;
+--   * default privilege: sem ele, a proxima tabela nasce inacessivel ao app.
+DO $$
+DECLARE
+  fora text;
+  attr record;
+  sem_default int;
+BEGIN
+  SELECT * INTO attr FROM pg_roles WHERE rolname = 'propectai_dono';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'papel propectai_dono nao existe.';
+  END IF;
+  IF attr.rolsuper OR attr.rolcreaterole OR attr.rolcreatedb OR NOT attr.rolbypassrls THEN
+    RAISE EXCEPTION
+      'propectai_dono com atributos errados (super=%, createrole=%, createdb=%, bypassrls=%). Precisa ser NOSUPERUSER NOCREATEROLE NOCREATEDB BYPASSRLS: sem BYPASSRLS, migration de dado sob FORCE afeta zero linhas sem erro.',
+      attr.rolsuper, attr.rolcreaterole, attr.rolcreatedb, attr.rolbypassrls;
+  END IF;
+
+  SELECT string_agg(o, ', ' ORDER BY o) INTO fora FROM (
+    SELECT c.relname || ' (' || pg_get_userbyid(c.relowner) || ')' AS o
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m','S','f','c')
+       AND c.relowner <> attr.oid
+    UNION ALL
+    SELECT t.typname || ' (' || pg_get_userbyid(t.typowner) || ')'
+      FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE n.nspname = 'public' AND t.typtype IN ('e','d') AND t.typowner <> attr.oid
+    UNION ALL
+    SELECT p.proname || ' (' || pg_get_userbyid(p.proowner) || ')'
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.proowner <> attr.oid
+  ) x;
+  IF fora IS NOT NULL THEN
+    RAISE EXCEPTION
+      'Objetos do schema public fora do propectai_dono: %. Foram criados por outro papel (provavelmente o superusuario): a proxima migration falha ao altera-los, e o app pode ficar sem grant.',
+      fora;
+  END IF;
+
+  SELECT count(*) INTO sem_default
+    FROM (VALUES ('propectai_app'), ('propectai_migrator')) v(papel)
+   WHERE NOT EXISTS (
+     SELECT 1 FROM pg_default_acl d CROSS JOIN LATERAL aclexplode(d.defaclacl) a
+      WHERE d.defaclrole = attr.oid AND d.defaclobjtype = 'r'
+        AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = v.papel)
+        AND a.privilege_type = 'SELECT');
+  IF sem_default > 0 THEN
+    RAISE EXCEPTION
+      'Default privilege do propectai_dono nao concede SELECT em tabelas novas ao app ou ao migrator. A proxima tabela nasceria inacessivel.';
+  END IF;
+END $$;
+\echo 'ok  9. o schema public pertence ao propectai_dono, que nao e superusuario'
 \echo '--- portao de RLS: tudo certo ---'

@@ -258,11 +258,38 @@ jobs:
       # `migrate deploy`, e nao `migrate dev`: o segundo cria shadow database,
       # compara desvio e faz perguntas. Em CI nada disso e desejavel, e a
       # ausencia de terminal transformaria uma pergunta em travamento.
-      - name: Aplicar migrations
-        run: pnpm db:deploy
+      #
+      # **Dois estagios desde o DB-REM-06 (30/10/2026).** Em producao, as
+      # migrations ate a `20261030190000_dono_sem_superusuario` rodaram como
+      # superusuario; as seguintes rodam como `propectai_dono`, que nao e. O CI
+      # repete isso: sem o segundo estagio, uma migration futura que so funciona
+      # como superusuario (criar papel, por exemplo) passaria aqui e quebraria
+      # no servidor.
+      #
+      # O primeiro estagio copia o schema e as migrations ate a do DB-REM-06
+      # para uma pasta temporaria e aplica so essas, como `propectai`. O
+      # segundo aplica o resto pela pasta normal: o Prisma pula as ja
+      # registradas em `_prisma_migrations` (os arquivos sao os mesmos, entao o
+      # checksum bate).
+      - name: Aplicar migrations ate o DB-REM-06 (superusuario)
+        run: |
+          ULTIMA=20261030190000_dono_sem_superusuario
+          test -d "prisma/migrations/$ULTIMA"
+          T="$RUNNER_TEMP/migrations-superusuario"
+          mkdir -p "$T/migrations"
+          cp prisma/schema.prisma "$T/"
+          cp prisma/migrations/migration_lock.toml "$T/migrations/"
+          for d in prisma/migrations/*/; do
+            n="$(basename "$d")"
+            cp -r "$d" "$T/migrations/$n"
+            [ "$n" = "$ULTIMA" ] && break
+          done
+          [ "$(basename "$(ls -d "$T"/migrations/*/ | tail -1)")" = "$ULTIMA" ]
+          echo "estagio 1: $(ls -d "$T"/migrations/*/ | wc -l) migrations, ate $ULTIMA"
+          pnpm exec prisma migrate deploy --schema "$T/schema.prisma"
 
       # ---------------------------------------------------------------------
-      - name: Dar senha aos tres papeis
+      - name: Dar senha aos quatro papeis
         # **As migrations criam os papeis SEM senha, e isso e proposital** — o
         # repositorio nao ganha um segredo. O comentario final da
         # `20260826230000_rls_papeis` justifica dizendo que "o Postgres local do
@@ -288,7 +315,17 @@ jobs:
           ALTER ROLE propectai_migrator PASSWORD 'migrator_ci_only';
           ALTER ROLE propectai_app       PASSWORD 'app_ci_only';
           ALTER ROLE propectai_sistema   PASSWORD 'sistema_ci_only';
+          ALTER ROLE propectai_dono      PASSWORD 'dono_ci_only';
           SQL
+
+      # ---------------------------------------------------------------------
+      - name: Aplicar as migrations seguintes (propectai_dono)
+        # Segundo estagio do DB-REM-06 — ver o comentario do primeiro. Hoje
+        # pode nao haver nenhuma migration depois da do DB-REM-06; o passo roda
+        # do mesmo jeito, e o `migrate deploy` confirma que nada ficou pendente.
+        env:
+          DATABASE_URL: postgresql://propectai_dono:dono_ci_only@localhost:5434/propectai?schema=public
+        run: pnpm db:deploy
 
       # ---------------------------------------------------------------------
       - name: Semear o catalogo
