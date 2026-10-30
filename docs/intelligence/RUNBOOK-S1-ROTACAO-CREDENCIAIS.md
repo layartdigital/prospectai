@@ -6,6 +6,14 @@
 > `compose.prod.yml` — `$C --profile ops run --rm ops …`, com o mesmo comando
 > depois. Os comandos abaixo ficam como foram executados, porque são registro.
 
+> **Atualização — 30/10/2026 (DB-REM-04).** As credenciais de banco e as senhas
+> do seed (`SEED_*`) saíram do `.env.production`: `DATABASE_URL_APP` e
+> `DATABASE_URL_SISTEMA` estão no `.env.banco`; `DATABASE_URL`,
+> `DATABASE_URL_MIGRATOR`, `POSTGRES_*` e `SEED_*` estão no `.env.dono`. Os dois
+> são `600 root:root`, fora do Git e da imagem. Ao repetir uma rotação dessas
+> chaves, o `cp -p`, o `sed -i` e o `printf >>` vão no arquivo novo, não no
+> `.env.production`. Para o `JWT_*`, nada muda.
+
 **Estado:** revisado em 25/09/2026. As três decisões da §11 foram escolhidas pelo
 dono do projeto entre opções apresentadas; a §11 registra o mecanismo, a data e
 o que foi recusado, para que nenhuma delas dependa de eu ter "entendido" uma

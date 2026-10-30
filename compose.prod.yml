@@ -1,11 +1,32 @@
 name: prospectai-prod
 
+# Segredos por serviço — DB-REM-04 (SEC-DB-01.N), 30/10/2026.
+#
+# Até aqui todo serviço recebia o `.env.production` inteiro. Medido em 30/10
+# (M1, só nomes): `api`, `worker` e `web` carregavam as sete chaves de banco,
+# inclusive a senha do superusuário (`DATABASE_URL`, `POSTGRES_PASSWORD`) e a do
+# migrator, que tem `BYPASSRLS`. Nenhum deles usa essas chaves. Uma execução de
+# código em qualquer um entregava o banco inteiro.
+#
+# Agora são três arquivos, todos `600 root:root`, fora do Git e da imagem:
+#
+#   .env.production   comum (Redis, JWT, provedores); nenhuma credencial de banco
+#   .env.banco        DATABASE_URL_APP, DATABASE_URL_SISTEMA — api, worker, ops
+#   .env.dono         DATABASE_URL, DATABASE_URL_MIGRATOR, POSTGRES_*, SEED_*
+#                     — postgres e ops
+#
+# Quem precisa do dono (migrate, seed, troca de senha) passa pelo `ops`.
+# A regra é verificada no CI por `infra/scripts/checar-segredos-compose.sh`.
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Só o que a imagem do Postgres lê: POSTGRES_USER, POSTGRES_PASSWORD e
+    # POSTGRES_DB (o resto do `.env.dono` vem junto e é inofensivo aqui — é o
+    # próprio banco).
     env_file:
-      - .env.production
+      - .env.dono
     environment:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
@@ -26,8 +47,10 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    env_file:
-      - .env.production
+    # Só a própria senha, e não o arquivo inteiro. O `command` já a recebia por
+    # interpolação; o healthcheck a lê do ambiente do container.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     command:
       [
         "redis-server",
@@ -71,6 +94,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
+      - .env.banco
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,6 +116,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
+      - .env.banco
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,6 +132,8 @@ services:
       context: .
       dockerfile: infra/docker/web.prod.Dockerfile
     restart: unless-stopped
+    # Nenhuma credencial de banco: o front-end fala com a API, nunca com o
+    # Postgres.
     env_file:
       - .env.production
     environment:
@@ -150,8 +177,11 @@ services:
     image: prospectai-prod-api:latest
     pull_policy: never
     profiles: ["ops"]
+    # O único serviço com os três arquivos: é por aqui que passa o dono.
     env_file:
       - .env.production
+      - .env.banco
+      - .env.dono
     command: ["pnpm", "db:deploy"]
     depends_on:
       postgres:

@@ -10,6 +10,21 @@ Complementa o `PRIMEIRO-DEPLOY-CREDENCIAIS.md`, que cobre **só o banco** e diz
 isso de si mesmo na primeira linha. Este cobre a atualização deste ambiente
 específico, que não é primeiro deploy: já existe coisa no ar.
 
+> **Atualização — 30/10/2026 (DB-REM-04).** As credenciais de banco saíram do
+> `.env.production`. Agora são três arquivos em `/opt/apps/prospectai`, todos
+> `600 root:root`:
+>
+> | Arquivo | Chaves | Lido por |
+> |---|---|---|
+> | `.env.production` | comuns (Redis, JWT, provedores) | todos os serviços com `env_file` |
+> | `.env.banco` | `DATABASE_URL_APP`, `DATABASE_URL_SISTEMA` | `api`, `worker`, `ops` |
+> | `.env.dono` | `DATABASE_URL`, `DATABASE_URL_MIGRATOR`, `POSTGRES_*`, `SEED_*` | `postgres`, `ops` |
+>
+> Onde este documento manda escrever uma dessas chaves no `.env.production`,
+> hoje ela vai no arquivo da tabela. O `--env-file .env.production` continua em
+> todo comando: é dele que o Compose tira o `REDIS_PASSWORD`. Os passos abaixo
+> ficam como foram executados, porque são registro.
+
 ---
 
 ## 1. O que está lá, medido
@@ -323,6 +338,10 @@ desenvolvimento antes do build, e o `prisma` é uma delas.
 Isto cria os três papéis, as 34 políticas e as tabelas novas.
 
 ### 4. Dar senha aos três papéis — e escrevê-las no `.env.production`
+
+> **Atualização — 30/10/2026.** Desde o DB-REM-04 as URLs de `APP` e `SISTEMA`
+> ficam no `.env.banco` e a do `MIGRATOR` no `.env.dono`, e não mais no
+> `.env.production`. Ver a nota no topo.
 
 > **Trocado em 22/09/2026, na execução.** A versão anterior mandava digitar três
 > senhas no `\password` e depois copiá-las para o arquivo. Duas chances de a

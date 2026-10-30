@@ -9,7 +9,6 @@ dotenv.config();
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6381',
-  databaseUrl: process.env.DATABASE_URL ?? '',
   scraperBaseUrl: process.env.SCRAPER_BASE_URL ?? 'http://localhost:8081',
   /**
    * O scraper impoe teto de 300 segundos por job. Buscas maiores precisam
