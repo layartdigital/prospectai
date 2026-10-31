@@ -64,8 +64,21 @@ createServer(async (req, res) => {
       chamadas.length = 0;
       return json(res, 200, { ok: true });
     }
+    const ck = req.headers.cookie ?? '';
+    const sessaoCk = /(?:^|;\s*)as=(\w+)/.exec(ck)?.[1] ?? 'alfa';
+    const usuarioCk = /(?:^|;\s*)usr=(\w+)/.exec(ck)?.[1] ?? 'u1';
+    // Bancada: `as=fora` simula sessao encerrada (logout em outra aba / access token invalido).
+    if (sessaoCk === 'fora') return json(res, 401, { message: 'Unauthorized' });
     const t = ator(req);
     const rota = p.slice('/api/v1'.length);
+    if (rota === '/auth/me') {
+      const nome = sessaoCk === 'beta' ? 'Beta' : 'Alfa';
+      return json(res, 200, {
+        user: { id: `usr_${usuarioCk}`, email: `${usuarioCk}@${sessaoCk}.test`, name: `Usuário ${usuarioCk}`, avatarUrl: null },
+        tenant: { id: t.id, name: nome, slug: sessaoCk, role: 'OWNER', planCode: 'FREE' },
+        tenants: [], onboardingCompleted: true,
+      });
+    }
     const q = url.searchParams;
 
     if (rota === '/leads') {

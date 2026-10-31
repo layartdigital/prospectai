@@ -4,6 +4,8 @@
 **Branch:** `feat/prompt-04-intelligence-explorer` · **Parada para homologação — nada foi mesclado, publicado ou implantado.**
 **`F:\drmind` (Bellvia) não foi modificado.**
 
+> **Atualizações posteriores:** correções de homologação em `P04-QA-RELATORIO.md` (QA-01) e `P04-QA-02-RELATORIO.md` (QA-02, o mais recente: CI estendido, troca de workspace, script local endurecido). Este relatório descreve a primeira entrega e não foi reescrito.
+
 ---
 
 ## A. O que foi entregue

@@ -35,6 +35,10 @@ Prefixo global: `/api/v1`. Ambos os endpoints exigem sessão (`JwtAuthGuard`) e 
 
 **Erros.** 400 referência malformada, relação não permitida para o tipo, prova de profundidade inválida (ausente, adulterada, de outro nó ou de outro workspace), profundidade máxima atingida · 401 sem sessão · 404 nó inexistente, de lead excluído, de outro workspace ou inconsistente entre workspaces.
 
+## Sessão e troca de workspace (cliente) — P04-QA-02
+
+Nenhum endpoint foi criado ou alterado. O Explorer web passou a consultar o endpoint **já existente** `GET /auth/me` para detectar que o usuário ou o workspace dos cookies mudou (foco da aba, a cada 20 s enquanto visível, e depois de 401/403 do Explorer). A resposta é comparada, no navegador, com a identidade com que a página foi montada; a recusa do servidor (prova de profundidade, RLS) continua sendo a barreira dos dados, e o descarte do estado da tela é a barreira **visual**. A consulta é leve, só leitura e sem efeito colateral.
+
 ## Profundidade (regra do servidor)
 
 `GRAPH_LIMITS.maxDepth = 3`. A API é sem estado, então o servidor não lembra por onde o usuário passou: ele **assina** `(workspace, ref, depth)` com HMAC-SHA-256 em cada nó devolvido (`depthProof`) e **exige a assinatura de volta** em `expand`. Reduzir `parentDepth` para escapar do teto, reaproveitar a prova de outro nó, ou de outro workspace, resulta em 400 **antes de qualquer consulta ao banco**. A chave é derivada do segredo de acesso com rótulo próprio (nunca se confunde com um JWT). A prova não é autorização: quem pode ler o nó continua sendo decidido por tenant e RLS. Rotacionar o segredo de acesso invalida as provas em circulação; o efeito para o usuário é "recarregue o grafo".

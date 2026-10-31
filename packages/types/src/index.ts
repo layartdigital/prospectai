@@ -35,3 +35,4 @@ export * from './scoring-engine';
 export * from './system';
 export * from './team-api';
 export * from './tenant-context';
+export * from './session-identity';

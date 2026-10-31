@@ -60,6 +60,8 @@ Renderizador SVG próprio, sem biblioteca de grafos (decisão: nenhuma nova depe
 
 Acessibilidade: cada nó é `role="button"` com `aria-label`, navegação por Tab, setas movem a vista, `+`/`-`/`0` controlam zoom, Esc limpa a seleção, botões visíveis para aproximar/afastar/enquadrar, e uma lista alternativa só para leitor de tela. Sinal `DESCONHECIDO` aparece em cinza neutro com a explicação "Não verificado. Isso não significa que o sinal não exista."
 
+**Sessão e workspace (P04-QA-02).** O estado do grafo vive só em memória da tela. `app/(app)/intelligence/page.tsx` calcula `chaveDeIdentidade(sessão)` no servidor e a passa como `key` e como prop `identidade` do `ExplorerWorkspace`. `useVigiaDeSessao` compara a prop com `GET /auth/me` (foco, visibilidade, `pageshow`, `online`, 20 s, e depois de 401/403 das requisições do Explorer). Se a identidade difere, `descartarTudo()` aborta o que está em voo, invalida a geração (respostas tardias são descartadas), zera grafo/seleção/cursores/filtros/buscas, mostra o aviso e chama `router.replace('/intelligence')` + `router.refresh()`; a chave nova remonta a tela do zero. 401 sozinho não decide (o access token dura 15 min): só dispara `router.refresh()`, e o servidor renova ou manda para o login. Falha de rede/5xx na checagem não apaga trabalho. A recusa HMAC de uma expansão **não** limpa a tela e por isso não foi aceita como prova; o teste olha o texto e o DOM.
+
 Rótulos de aresta aparecem só em grafos pequenos ou nas arestas do nó selecionado (até 8), para não gerar ruído com dezenas de notas.
 
 Âncoras para um futuro tour: `data-tour="explorer-header|search|canvas|details|filters"`. Nenhuma biblioteca de tour foi adicionada.
@@ -72,6 +74,6 @@ Só o contrato (`intelligence-ai-contract.ts`): estado `INDISPONIVEL`, requisiç
 
 ADR-002 (aceito) mantém "não adotar agora". O Explorer é implementação própria; **nenhum código do Flowsint foi copiado**. Referência de licença e releases em `THIRD_PARTY_FLOWSINT.md`.
 
-## 8. Verificação — estado após P04-QA-01
+## 8. Verificação — estado após P04-QA-02
 
-Nenhum gate do monorepo (typecheck, lint, build, jest) pôde ser executado no ambiente desta sessão (registro npm negado pela política de rede; push para o GitHub barrado pelo proxy de git). **Nenhuma dessas etapas é declarada aprovada.** O que existe é evidência de bancada, rotulada como tal, em `P04-INDICE-DE-EVIDENCIAS.md` e `P04-QA-RELATORIO.md`.
+Nenhum gate do monorepo (typecheck, lint, build, jest) pôde ser executado no ambiente desta sessão: registro npm negado pela política de rede e push barrado pelo proxy de git. **Nenhuma dessas etapas é declarada aprovada.** O `ci.yml` foi estendido para cobrir todas, e o procedimento para o proprietário publicar a branch e abrir o PR rascunho está em `qa/COMO-RODAR.md`. O que existe é evidência de bancada, rotulada como tal, em `P04-INDICE-DE-EVIDENCIAS.md` e `P04-QA-02-RELATORIO.md`.

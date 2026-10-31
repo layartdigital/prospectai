@@ -38,6 +38,12 @@ on:
   pull_request:
     branches: [main]
 
+# P04-QA-02 (31/10/2026): este workflow so LE o repositorio. Nao ha deploy, SSH,
+# acesso ao servidor de producao nem segredo de producao em nenhum job: os bancos
+# sao efemeros (servico do runner) e todas as credenciais abaixo sao descartaveis.
+permissions:
+  contents: read
+
 # Um push novo cancela a execucao anterior do mesmo ramo. A suite leva ~6 min e
 # nao ha valor em terminar a verificacao de um commit ja substituido.
 concurrency:
@@ -122,7 +128,45 @@ jobs:
       # `typecheck:all`, e nao `typecheck`: o primeiro cobre tambem os testes e
       # os scripts (`tsconfig.tests.json`, `tsconfig.scripts.json`), e foi em
       # arquivo de teste que os defeitos apareceram.
-      - run: pnpm typecheck:all
+      - name: Typecheck completo (fontes, testes e scripts)
+        run: pnpm typecheck:all
+
+      # P04-QA-02: lint e passo obrigatorio. Sem `continue-on-error`: qualquer
+      # erro de ESLint/`next lint` derruba o job e, por `needs:`, tudo o que
+      # vem depois.
+      - name: Lint
+        run: pnpm lint
+
+  # ===========================================================================
+  # P04-QA-02 (31/10/2026): builds de producao da API e da web.
+  #
+  # Separados do job `testes` de proposito: aquele define `NODE_ENV=test` no
+  # nivel do job, e `next build` recusa/avisa com NODE_ENV nao padrao. Aqui
+  # NODE_ENV nao e definido, e cada build roda pelo turbo para que `^build`
+  # (o pacote `@propectai/types`) seja construido antes.
+  # ===========================================================================
+  builds:
+    name: Builds (API e web)
+    runs-on: ubuntu-latest
+    needs: tipos
+    env:
+      APP_VERSION: ci
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+
+      - name: Build da API (nest build)
+        run: pnpm exec turbo run build --filter=@propectai/api
+
+      - name: Build da web (next build)
+        run: pnpm exec turbo run build --filter=@propectai/web
 
   # ===========================================================================
   testes:
@@ -336,6 +380,15 @@ jobs:
         run: pnpm db:seed
 
       # ---------------------------------------------------------------------
+      # P04-QA-02: o teste HTTP de isolamento do Intelligence Explorer roda
+      # sozinho e primeiro, como passo proprio. Se ele cair, o log aponta o
+      # Explorer direto em vez de se perder entre os ~400 testes da suite.
+      # Mesmo codigo da suite completa: nao ha mock de Prisma — banco real,
+      # papel `propectai_app` (sem BYPASSRLS) e requisicoes HTTP reais.
+      - name: Isolamento HTTP do Intelligence Explorer
+        run: pnpm --filter @propectai/api exec jest test/intelligence-tenant.spec.ts --runInBand
+
+      # ---------------------------------------------------------------------
       - name: Suite completa
         run: pnpm test
 
@@ -370,3 +423,24 @@ jobs:
         run: |
           psql -h localhost -p 5434 -U propectai -d propectai \
                -f docs/intelligence/gate0/verificacoes-fase-b.sql
+
+  # ===========================================================================
+  # P04-QA-02: ponto unico para "required status check". `if: always()` para que
+  # ele rode (e falhe) mesmo quando um job anterior foi pulado por falha de
+  # `needs:` — um job pulado nao reprova sozinho, e sem este portao um PR com
+  # `tipos` vermelho poderia mostrar so "skipped" nos demais.
+  # ===========================================================================
+  resultado:
+    name: Resultado do CI
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [tipos, builds, testes]
+    steps:
+      - name: Todos os jobs obrigatorios precisam ter passado
+        env:
+          TIPOS: ${{ needs.tipos.result }}
+          BUILDS: ${{ needs.builds.result }}
+          TESTES: ${{ needs.testes.result }}
+        run: |
+          echo "tipos=$TIPOS builds=$BUILDS testes=$TESTES"
+          [ "$TIPOS" = "success" ] && [ "$BUILDS" = "success" ] && [ "$TESTES" = "success" ]

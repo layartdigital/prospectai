@@ -34,6 +34,7 @@ import { EntitySearchPanel } from './entity-search-panel';
 import { GraphCanvas } from './graph-canvas';
 import { KIND_STYLE, humanizarDatas } from './graph-style';
 import { NodeDetailsPanel } from './node-details-panel';
+import { useVigiaDeSessao } from './use-vigia-de-sessao';
 
 const FILTRO_VAZIO: FiltroLeads = { search: '', city: '', category: '' };
 
@@ -45,10 +46,20 @@ function mensagem(erro: unknown, padrao: string): string {
   return padrao;
 }
 
-export function ExplorerWorkspace() {
+export function ExplorerWorkspace({ identidade }: { identidade: string }) {
   const router = useRouter();
   const params = useSearchParams();
   const leadParam = params.get('lead');
+
+  // Sessao/workspace mudou (P04-QA-02). Enquanto `true`, NADA do estado anterior e
+  // renderizado, e nenhuma resposta tardia e aceita — ver `descartarTudo`.
+  const [sessaoMudou, setSessaoMudou] = useState(false);
+  const invalida = useRef(false);
+  // Preenchido logo apos `useVigiaDeSessao` (os efeitos abaixo so rodam depois da montagem).
+  const vigia = useRef<{ verificarAgora: () => Promise<void> }>({ verificarAgora: async () => undefined });
+  const duvidarDaSessao = useCallback((e: unknown): void => {
+    if (e instanceof ClientApiError && (e.statusCode === 401 || e.statusCode === 403)) void vigia.current.verificarAgora();
+  }, []);
 
   // ---- busca de leads ----------------------------------------------------
   const [filtro, setFiltro] = useState<FiltroLeads>(FILTRO_VAZIO);
@@ -61,32 +72,37 @@ export function ExplorerWorkspace() {
   useEffect(() => {
     let vivo = true;
     buscarFacetas()
-      .then((f) => vivo && setFacetas(f))
-      .catch(() => vivo && setFacetas({ states: [], cities: [], categories: [], stages: [] }));
+      .then((f) => vivo && !invalida.current && setFacetas(f))
+      .catch(() => vivo && !invalida.current && setFacetas({ states: [], cities: [], categories: [], stages: [] }));
     return () => {
       vivo = false;
     };
   }, []);
 
   useEffect(() => {
+    if (invalida.current) return;
     let vivo = true;
     setBuscando(true);
     const espera = setTimeout(() => {
       buscarLeads(filtro)
         .then((r) => {
-          if (!vivo) return;
+          if (!vivo || invalida.current) return;
           setResultados(r.items);
           setTotal(r.total);
           setErroBusca(null);
         })
-        .catch((e: unknown) => vivo && setErroBusca(mensagem(e, 'Não foi possível buscar os leads.')))
-        .finally(() => vivo && setBuscando(false));
+        .catch((e: unknown) => {
+          if (!vivo || invalida.current) return;
+          setErroBusca(mensagem(e, 'Não foi possível buscar os leads.'));
+          duvidarDaSessao(e);
+        })
+        .finally(() => vivo && !invalida.current && setBuscando(false));
     }, 280);
     return () => {
       vivo = false;
       clearTimeout(espera);
     };
-  }, [filtro]);
+  }, [filtro, duvidarDaSessao]);
 
   // ---- grafo -------------------------------------------------------------
   const [grafo, setGrafo] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({ nodes: [], edges: [] });
@@ -138,8 +154,55 @@ export function ExplorerWorkspace() {
     [],
   );
 
+  /**
+   * A sessao ou o workspace mudou: joga fora TUDO o que pertence ao dono anterior.
+   * Grafo, selecao (e com ela o painel de detalhes), cursores de paginacao, filtros de
+   * tipo, limites omitidos, resultados de busca e erros. Requisicoes pendentes sao
+   * abortadas e suas respostas tardias descartadas pela geracao (`novaGeracao`) e por
+   * `invalida`. Nada e reaproveitado: a tela so volta com a chave nova do servidor.
+   */
+  const descartarTudo = useCallback((): void => {
+    invalida.current = true;
+    novaGeracao();
+    cursores.current = new Map();
+    aplicarGrafo({ nodes: [], edges: [] }, new Map());
+    setSelecionado(null);
+    setOcultos(new Set());
+    setCortados({});
+    setCarregandoGrafo(false);
+    setExpandindo(null);
+    setErroGrafo(null);
+    setErroExpansao(null);
+    setFacetas(null);
+    setResultados([]);
+    setTotal(0);
+    setBuscando(false);
+    setErroBusca(null);
+    setSessaoMudou(true);
+  }, [aplicarGrafo, novaGeracao]);
+
+  vigia.current = useVigiaDeSessao({
+    identidade,
+    aoMudar: () => {
+      descartarTudo();
+      // Sai do lead do workspace anterior (ele nem existe no novo) e pede ao servidor a identidade nova.
+      router.replace('/intelligence', { scroll: false });
+      router.refresh();
+    },
+    // 401 sem prova de troca: o servidor renova (ou manda para o login) e devolve a chave certa.
+    aoIncerta: () => router.refresh(),
+  });
+
+  const [demoraRefresh, setDemoraRefresh] = useState(false);
+  useEffect(() => {
+    if (!sessaoMudou) return;
+    const t = setTimeout(() => setDemoraRefresh(true), 6000);
+    return () => clearTimeout(t);
+  }, [sessaoMudou]);
+
   const carregar = useCallback(
     async (leadId: string): Promise<void> => {
+      if (invalida.current) return;
       const { id, sinal } = novaGeracao();
       setCarregandoGrafo(true);
       setExpandindo(null);
@@ -161,14 +224,16 @@ export function ExplorerWorkspace() {
         if (id !== geracao.current) return;
         aplicarGrafo({ nodes: [], edges: [] }, new Map());
         setErroGrafo(mensagem(e, 'Não foi possível carregar o grafo deste lead.'));
+        duvidarDaSessao(e);
       } finally {
         if (id === geracao.current) setCarregandoGrafo(false);
       }
     },
-    [aplicarGrafo, novaGeracao],
+    [aplicarGrafo, novaGeracao, duvidarDaSessao],
   );
 
   useEffect(() => {
+    if (invalida.current) return;
     if (leadParam) void carregar(leadParam);
     else {
       novaGeracao();
@@ -190,6 +255,7 @@ export function ExplorerWorkspace() {
 
   const expandir = useCallback(
     async (no: GraphNode, kind: GraphNodeKind): Promise<void> => {
+      if (invalida.current) return;
       const chave = `${no.ref}|${kind}`;
       // Mesma expansao ja em andamento: ignora o clique repetido (nao busca a mesma pagina duas vezes).
       if (emVoo.current.has(chave)) return;
@@ -234,6 +300,7 @@ export function ExplorerWorkspace() {
       } catch (e) {
         if (id !== geracao.current) return;
         setErroExpansao(mensagem(e, 'Não foi possível carregar estas relações.'));
+        duvidarDaSessao(e);
       } finally {
         if (id === geracao.current) {
           emVoo.current.delete(chave);
@@ -241,7 +308,7 @@ export function ExplorerWorkspace() {
         }
       }
     },
-    [aplicarGrafo],
+    [aplicarGrafo, duvidarDaSessao],
   );
 
   // ---- derivados ---------------------------------------------------------
@@ -274,6 +341,33 @@ export function ExplorerWorkspace() {
 
   const temGrafo = grafo.nodes.length > 0;
   const ajusteKey = `${leadParam ?? ''}:${visiveis.nodes.length}`;
+
+  // Sessao/workspace mudou: nenhuma entidade, resultado ou detalhe do dono anterior e desenhado.
+  if (sessaoMudou) {
+    return (
+      <div
+        className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-card border border-line bg-surface px-6 text-center"
+        role="status"
+        data-testid="explorer-sessao-mudou"
+      >
+        <AlertTriangle className="h-6 w-6 text-warning" aria-hidden="true" />
+        <p className="text-sm font-semibold text-navy-900">A sessão ou o workspace mudou</p>
+        <p className="max-w-sm text-xs text-muted">
+          Por segurança, descartamos o grafo, os detalhes e os resultados que estavam na tela. Atualizando com a sessão atual…
+        </p>
+        <Loader2 className="h-4 w-4 animate-spin text-muted" aria-hidden="true" />
+        {demoraRefresh ? (
+          <button
+            type="button"
+            onClick={() => window.location.assign('/intelligence')}
+            className="rounded-control bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+          >
+            Recarregar a página
+          </button>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
