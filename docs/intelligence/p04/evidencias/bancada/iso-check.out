@@ -1,0 +1,51 @@
+Output format is unaligned.
+Field separator is "|".
+=== CASO 1: Alfa le o que e dele (papel propectai_app, tenant declarado) ===
+BEGIN
+tnt_alfa_0000000001
+ALFA lead|1
+ALFA score|1
+ALFA motivos|5
+ALFA presenca|1
+ALFA cartao|1
+ALFA notas|30
+ALFA atividades|3
+ALFA auditorias|1
+ALFA checagens|3
+ALFA leads da pesquisa (com tenantId no where)|4
+ALFA leads da pesquisa (SEM tenantId no where; so RLS)|4
+ROLLBACK
+=== CASO 2: Beta, com os ids do Alfa, nao le NADA (com tenantId do Beta no where) ===
+BEGIN
+tnt_beta_0000000001
+BETA lead do alfa|0
+BETA pesquisa do alfa|0
+BETA score do alfa|0
+BETA presenca do alfa|0
+BETA cartao do alfa|0
+BETA auditoria do alfa|0
+BETA notas do alfa|0
+BETA leads da pesquisa do alfa|1
+ROLLBACK
+=== CASO 3: defesa em camadas: Beta SEM filtro de tenantId no where (so a RLS segura) ===
+BEGIN
+tnt_beta_0000000001
+RLS-ONLY lead do alfa|0
+RLS-ONLY pesquisa do alfa|0
+RLS-ONLY score do alfa|0
+RLS-ONLY notas do alfa|0
+RLS-ONLY cartao do alfa|0
+RLS-ONLY auditoria do alfa|0
+RLS-ONLY checagem do alfa|0
+ROLLBACK
+=== CASO 4: sem contexto de tenant (contexto nao declarado) = negacao total ===
+BEGIN
+SEM-CONTEXTO leads|0
+SEM-CONTEXTO notas|0
+ROLLBACK
+=== CASO 5: o intruso do Beta que aponta para a pesquisa do Alfa ===
+BEGIN
+tnt_beta_0000000001
+BETA ve o proprio intruso|1
+BETA ve a pesquisa que o intruso aponta|0
+ROLLBACK

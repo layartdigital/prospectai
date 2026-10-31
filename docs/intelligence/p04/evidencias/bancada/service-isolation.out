@@ -1,0 +1,145 @@
+TAP version 13
+# Subtest: o dono enxerga as proprias relacoes (servico real, RLS real)
+    # Subtest: grafo inicial: lead, pesquisa, score, presenca e cartao, com 4 arestas verificadas
+    ok 1 - grafo inicial: lead, pesquisa, score, presenca e cartao, com 4 arestas verificadas
+      ---
+      duration_ms: 1179.440326
+      type: 'test'
+      ...
+    # Subtest: contagens de filhos vem em expansions, sem enviar os filhos
+    ok 2 - contagens de filhos vem em expansions, sem enviar os filhos
+      ---
+      duration_ms: 776.225184
+      type: 'test'
+      ...
+    # Subtest: telefone sai mascarado no plano que mascara
+    ok 3 - telefone sai mascarado no plano que mascara
+      ---
+      duration_ms: 760.192082
+      type: 'test'
+      ...
+    # Subtest: plano que libera o numero mostra o numero
+    ok 4 - plano que libera o numero mostra o numero
+      ---
+      duration_ms: 736.960966
+      type: 'test'
+      ...
+    # Subtest: notas: pagina de 25, recortadas, proxima posicao e resto
+    ok 5 - notas: pagina de 25, recortadas, proxima posicao e resto
+      ---
+      duration_ms: 283.263379
+      type: 'test'
+      ...
+    # Subtest: nao devolve JSON livre nem URL do prospect
+    ok 6 - nao devolve JSON livre nem URL do prospect
+      ---
+      duration_ms: 419.763924
+      type: 'test'
+      ...
+    # Subtest: sinais sem verificacao chegam como DESCONHECIDO; AUSENTE e PRESENTE so quando o banco disse
+    ok 7 - sinais sem verificacao chegam como DESCONHECIDO; AUSENTE e PRESENTE so quando o banco disse
+      ---
+      duration_ms: 48.772601
+      type: 'test'
+      ...
+    # Subtest: motivos do score, etapa do cartao e checagens
+    ok 8 - motivos do score, etapa do cartao e checagens
+      ---
+      duration_ms: 372.104613
+      type: 'test'
+      ...
+    # Subtest: expandir a pesquisa lista so os leads do proprio tenant (4), sem o intruso do Beta
+    ok 9 - expandir a pesquisa lista so os leads do proprio tenant (4), sem o intruso do Beta
+      ---
+      duration_ms: 607.634112
+      type: 'test'
+      ...
+    1..9
+ok 1 - o dono enxerga as proprias relacoes (servico real, RLS real)
+  ---
+  duration_ms: 5187.171199
+  type: 'suite'
+  ...
+# Subtest: isolamento entre tenants
+    # Subtest: Beta com o id do lead do Alfa recebe 404 no grafo
+    ok 1 - Beta com o id do lead do Alfa recebe 404 no grafo
+      ---
+      duration_ms: 51.846801
+      type: 'test'
+      ...
+    # Subtest: id de outro tenant e id inexistente respondem igual
+    ok 2 - id de outro tenant e id inexistente respondem igual
+      ---
+      duration_ms: 78.508151
+      type: 'test'
+      ...
+    # Subtest: Beta nao expande nenhum tipo de no do Alfa (12 combinacoes)
+    ok 3 - Beta nao expande nenhum tipo de no do Alfa (12 combinacoes)
+      ---
+      duration_ms: 488.596305
+      type: 'test'
+      ...
+    # Subtest: Beta so enxerga o proprio grafo, sem nenhum id do Alfa
+    ok 4 - Beta so enxerga o proprio grafo, sem nenhum id do Alfa
+      ---
+      duration_ms: 725.583723
+      type: 'test'
+      ...
+    # Subtest: lead do Beta com searchId do Alfa nao ganha no de pesquisa
+    ok 5 - lead do Beta com searchId do Alfa nao ganha no de pesquisa
+      ---
+      duration_ms: 666.447983
+      type: 'test'
+      ...
+    # Subtest: e o Alfa nao enxerga o lead do Beta pelo mesmo caminho
+    ok 6 - e o Alfa nao enxerga o lead do Beta pelo mesmo caminho
+      ---
+      duration_ms: 100.10326
+      type: 'test'
+      ...
+    # Subtest: sem contexto de tenant a RLS nega tudo (a bancada consulta cru, fora do servico)
+    ok 7 - sem contexto de tenant a RLS nega tudo (a bancada consulta cru, fora do servico)
+      ---
+      duration_ms: 83.26899
+      type: 'test'
+      ...
+    1..7
+ok 2 - isolamento entre tenants
+  ---
+  duration_ms: 2195.150281
+  type: 'suite'
+  ...
+# Subtest: limites no servidor
+    # Subtest: relacao nao permitida, referencia malformada e profundidade
+    ok 1 - relacao nao permitida, referencia malformada e profundidade
+      ---
+      duration_ms: 0.921563
+      type: 'test'
+      ...
+    # Subtest: pageSize e limitado ao teto mesmo se o cliente pedir mais (o DTO barra antes; aqui, defesa em profundidade)
+    ok 2 - pageSize e limitado ao teto mesmo se o cliente pedir mais (o DTO barra antes; aqui, defesa em profundidade)
+      ---
+      duration_ms: 134.020558
+      type: 'test'
+      ...
+    # Subtest: parseNodeRef recusa o que o servico nunca deve consultar
+    ok 3 - parseNodeRef recusa o que o servico nunca deve consultar
+      ---
+      duration_ms: 0.32075
+      type: 'test'
+      ...
+    1..3
+ok 3 - limites no servidor
+  ---
+  duration_ms: 135.509167
+  type: 'suite'
+  ...
+1..3
+# tests 19
+# suites 3
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 7830.44172

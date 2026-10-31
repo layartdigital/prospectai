@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
+import { IntelligenceModule } from './intelligence/intelligence.module';
 import { LeadsModule } from './leads/leads.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OutreachModule } from './outreach/outreach.module';
@@ -37,6 +38,7 @@ import { TeamModule } from './team/team.module';
     BillingModule,
     EntitlementsModule,
     DashboardModule,
+    IntelligenceModule,
     LeadsModule,
     NotificationsModule,
     OutreachModule,
