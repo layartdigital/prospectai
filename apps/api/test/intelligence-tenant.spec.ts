@@ -11,6 +11,7 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 import { AppModule } from '../src/app.module';
+import { ProvaDeProfundidade } from '../src/intelligence/depth-proof';
 import { conferirLimpeza } from './limpeza';
 import { criarPrismaAdmin } from './prisma-admin';
 
@@ -67,6 +68,13 @@ const ids = {
   check: '',
   intruso: '', // lead do Beta apontando para a pesquisa do Alfa
   leadBeta: '',
+  // QA-01: lead do Alfa EXCLUIDO LOGICAMENTE e seus filhos; cartao "orfao"
+  delLead: '',
+  delScore: '',
+  delPresence: '',
+  delAudit: '',
+  delCard: '',
+  orfaoCard: '', // cartao do tenant Alfa apontando para um lead do Beta
 };
 
 const BOOT_TIMEOUT_MS = 60_000;
@@ -115,8 +123,30 @@ async function get<T>(actor: Actor | null, rota: string): Promise<{ status: numb
 }
 
 const graph = (a: Actor | null, leadId: string) => get<GraphResponse>(a, `/intelligence/graph?leadId=${leadId}`);
-const expand = (a: Actor | null, ref: string, kind: string, extra = '') =>
-  get<GraphExpandResponse>(a, `/intelligence/expand?ref=${encodeURIComponent(ref)}&kind=${kind}${extra}`);
+
+/**
+ * Prova de profundidade como um cliente honesto a teria: a mesma que o servidor
+ * emitiria para o no `ref` na profundidade `depth`, neste tenant. Os testes de
+ * adulteracao passam `prova` explicitamente. O segredo e o mesmo do ambiente do
+ * app em teste (`JWT_ACCESS_SECRET`).
+ */
+function provaHonesta(tenantId: string, ref: string, depth: number): string {
+  return new ProvaDeProfundidade(process.env.JWT_ACCESS_SECRET as string).assinar(tenantId, ref, depth);
+}
+
+const expand = (
+  a: Actor | null,
+  ref: string,
+  kind: string,
+  extra = '',
+  depth = 0,
+  prova?: string,
+) =>
+  get<GraphExpandResponse>(
+    a,
+    `/intelligence/expand?ref=${encodeURIComponent(ref)}&kind=${kind}&parentDepth=${depth}` +
+      `&parentDepthProof=${prova ?? (a ? provaHonesta(a.tenantId, ref, depth) : 'x'.repeat(22))}${extra}`,
+  );
 
 beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -228,6 +258,27 @@ beforeAll(async () => {
     },
   });
   ids.leadBeta = leadBeta.id;
+
+  // QA-01 — lead excluido logicamente, com score, presenca, auditoria e cartao.
+  // Esses filhos nao tem `deletedAt` proprio: quem os esconde e a exclusao do lead.
+  const apagado = await admin.lead.create({
+    data: {
+      tenantId: t,
+      name: `Lead apagado do Alfa ${suffix}`,
+      fingerprint: fingerprint(`Lead apagado do Alfa ${suffix}`),
+      websiteStatus: 'SEM_SITE',
+      deletedAt: new Date(),
+    },
+  });
+  ids.delLead = apagado.id;
+  ids.delScore = (await admin.leadScore.create({ data: { tenantId: t, leadId: apagado.id, value: 10, level: 'BAIXA' } })).id;
+  ids.delPresence = (await admin.leadDigitalPresence.create({ data: { tenantId: t, leadId: apagado.id } })).id;
+  ids.delAudit = (
+    await admin.digitalPresenceAudit.create({ data: { tenantId: t, leadId: apagado.id, auditVersion: 'audit-v1', status: 'COMPLETED' } })
+  ).id;
+  ids.delCard = (await admin.pipelineCard.create({ data: { tenantId: t, leadId: apagado.id, stageId: stage.id } })).id;
+  // A FK `pipeline_cards.leadId` e simples: o banco aceita um cartao do Alfa apontando para lead do Beta.
+  ids.orfaoCard = (await admin.pipelineCard.create({ data: { tenantId: t, leadId: leadBeta.id, stageId: stage.id } })).id;
 }, BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
@@ -303,7 +354,7 @@ describe('Intelligence Explorer — o dono enxerga as proprias relacoes', () => 
     const atividades = await expand(alfa, `LEAD:${ids.lead}`, 'ACTIVITY');
     expect(atividades.texto).not.toContain('nao-deve-sair');
 
-    const checagens = await expand(alfa, `AUDIT:${ids.audit}`, 'AUDIT_CHECK', '&parentDepth=1');
+    const checagens = await expand(alfa, `AUDIT:${ids.audit}`, 'AUDIT_CHECK', '', 1);
     expect(checagens.status).toBe(200);
     expect(checagens.body.nodes).toHaveLength(1);
     expect(checagens.texto).not.toContain('nao-deve-sair');
@@ -311,7 +362,7 @@ describe('Intelligence Explorer — o dono enxerga as proprias relacoes', () => 
   });
 
   it('sinais sem verificacao chegam como DESCONHECIDO, nunca AUSENTE', async () => {
-    const { status, body } = await expand(alfa, `PRESENCE:${ids.presence}`, 'SIGNAL', '&pageSize=25&parentDepth=1');
+    const { status, body } = await expand(alfa, `PRESENCE:${ids.presence}`, 'SIGNAL', '&pageSize=25', 1);
     expect(status).toBe(200);
     expect(body.nodes).toHaveLength(7);
     expect(body.nodes.every((n) => n.state === 'DESCONHECIDO')).toBe(true);
@@ -319,11 +370,11 @@ describe('Intelligence Explorer — o dono enxerga as proprias relacoes', () => 
   });
 
   it('motivos do score e etapa do cartao', async () => {
-    const motivos = await expand(alfa, `SCORE:${ids.score}`, 'SCORE_REASON', '&parentDepth=1');
+    const motivos = await expand(alfa, `SCORE:${ids.score}`, 'SCORE_REASON', '', 1);
     expect(motivos.body.nodes).toHaveLength(1);
     expect(motivos.body.nodes[0]?.label).toBe('Sem site próprio');
 
-    const etapa = await expand(alfa, `PIPELINE_CARD:${ids.card}`, 'PIPELINE_STAGE', '&parentDepth=1');
+    const etapa = await expand(alfa, `PIPELINE_CARD:${ids.card}`, 'PIPELINE_STAGE', '', 1);
     expect(etapa.body.nodes[0]?.label).toBe('Novo');
   });
 
@@ -430,8 +481,12 @@ describe('Intelligence Explorer — limites no servidor', () => {
   });
 
   it('profundidade acima do teto e rejeitada', async () => {
-    expect((await expand(alfa, `LEAD:${ids.lead}`, 'NOTE', '&parentDepth=3')).status).toBe(400);
-    expect((await expand(alfa, `LEAD:${ids.lead}`, 'NOTE', '&parentDepth=99')).status).toBe(400);
+    // depth 3 com prova valida: o filho seria depth 4 (> maxDepth 3)
+    const r = await expand(alfa, `LEAD:${ids.lead}`, 'NOTE', '', 3);
+    expect(r.status).toBe(400);
+    expect(r.texto).toContain('Profundidade máxima');
+    // valor absurdo: barrado ja pelo DTO
+    expect((await expand(alfa, `LEAD:${ids.lead}`, 'NOTE', '', 99)).status).toBe(400);
   });
 
   it('parametro desconhecido e recusado (nada de leadId duplicado ou tenantId no query)', async () => {
@@ -442,5 +497,118 @@ describe('Intelligence Explorer — limites no servidor', () => {
   it('leadId com formato invalido responde 400', async () => {
     expect((await graph(alfa, 'x')).status).toBe(400);
     expect((await graph(alfa, "cm0';drop table leads;--")).status).toBe(400);
+  });
+});
+
+describe('Intelligence Explorer — profundidade imposta pelo servidor (QA-01)', () => {
+  it('todo no devolvido traz prova de profundidade, e a prova valida abre a expansao', async () => {
+    const { body } = await graph(alfa, ids.lead);
+    for (const n of body.nodes) expect(n.depthProof).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    const raiz = body.nodes.find((n) => n.kind === 'LEAD')!;
+    const r = await expand(alfa, raiz.ref, 'NOTE', '', raiz.depth, raiz.depthProof);
+    expect(r.status).toBe(200);
+    expect(r.body.nodes.every((n) => n.depth === 1 && !!n.depthProof)).toBe(true);
+  });
+
+  it('cadeia real lead -> pesquisa -> lead -> presenca chega ao teto; o passo seguinte e recusado', async () => {
+    const g = (await graph(alfa, ids.lead)).body;
+    const pesquisa = g.nodes.find((n) => n.kind === 'SEARCH')!; // depth 1
+    const leads = (await expand(alfa, pesquisa.ref, 'LEAD', '', pesquisa.depth, pesquisa.depthProof)).body;
+    const filho = leads.nodes.find((n) => n.ref === `LEAD:${ids.lead}`)!; // depth 2
+    expect(filho.depth).toBe(2);
+    const pres = (await expand(alfa, filho.ref, 'PRESENCE', '', filho.depth, filho.depthProof)).body;
+    const presenca = pres.nodes[0]!; // depth 3 = maxDepth
+    expect(presenca.depth).toBe(3);
+    const alem = await expand(alfa, presenca.ref, 'SIGNAL', '', presenca.depth, presenca.depthProof);
+    expect(alem.status).toBe(400);
+    expect(alem.texto).toContain('Profundidade máxima');
+  });
+
+  it('parentDepth reduzido artificialmente nao escapa do teto', async () => {
+    const g = (await graph(alfa, ids.lead)).body;
+    const pesquisa = g.nodes.find((n) => n.kind === 'SEARCH')!;
+    const leads = (await expand(alfa, pesquisa.ref, 'LEAD', '', pesquisa.depth, pesquisa.depthProof)).body;
+    const filho = leads.nodes.find((n) => n.ref === `LEAD:${ids.lead}`)!; // depth real = 2
+    for (const mentira of [0, 1]) {
+      const r = await expand(alfa, filho.ref, 'PRESENCE', '', mentira, filho.depthProof);
+      expect([mentira, r.status]).toEqual([mentira, 400]);
+      expect(r.texto).toContain('Prova de profundidade inválida');
+    }
+  });
+
+  it('prova ausente, adulterada, de outro no ou de outro tenant e recusada', async () => {
+    const raiz = (await graph(alfa, ids.lead)).body.nodes.find((n) => n.kind === 'LEAD')!;
+    const outro = (await graph(alfa, ids.lead)).body.nodes.find((n) => n.kind === 'SCORE')!;
+    const adulterada = raiz.depthProof!.slice(0, -1) + (raiz.depthProof!.endsWith('A') ? 'B' : 'A');
+    const casos: [string, string][] = [
+      ['adulterada', adulterada],
+      ['de outro no', outro.depthProof!],
+      ['de outro tenant', provaHonesta(beta.tenantId, raiz.ref, 0)],
+      ['tamanho errado', raiz.depthProof! + 'x'],
+    ];
+    for (const [rotulo, prova] of casos) {
+      const r = await expand(alfa, raiz.ref, 'NOTE', '', 0, prova);
+      expect([rotulo, r.status]).toEqual([rotulo, 400]);
+    }
+    // sem o parametro: o DTO ja barra
+    const sem = await get(alfa, `/intelligence/expand?ref=${encodeURIComponent(raiz.ref)}&kind=NOTE&parentDepth=0`);
+    expect(sem.status).toBe(400);
+  });
+
+  it('a prova de um tenant nao serve a outro, mesmo para o mesmo no', async () => {
+    const raiz = (await graph(alfa, ids.lead)).body.nodes.find((n) => n.kind === 'LEAD')!;
+    const r = await expand(beta, raiz.ref, 'NOTE', '', 0, raiz.depthProof);
+    expect(r.status).toBe(400);
+  });
+});
+
+describe('Intelligence Explorer — soft delete e dados inconsistentes (QA-01)', () => {
+  it('lead excluido responde 404 no grafo e em toda expansao direta', async () => {
+    expect((await graph(alfa, ids.delLead)).status).toBe(404);
+    for (const kind of ['NOTE', 'SCORE', 'PRESENCE', 'AUDIT', 'PIPELINE_CARD', 'ACTIVITY']) {
+      expect([kind, (await expand(alfa, `LEAD:${ids.delLead}`, kind)).status]).toEqual([kind, 404]);
+    }
+  });
+
+  it('score, presenca, auditoria e cartao de lead excluido nao abrem por referencia conhecida', async () => {
+    const casos: [string, string][] = [
+      [`SCORE:${ids.delScore}`, 'SCORE_REASON'],
+      [`PRESENCE:${ids.delPresence}`, 'SIGNAL'],
+      [`AUDIT:${ids.delAudit}`, 'AUDIT_CHECK'],
+      [`PIPELINE_CARD:${ids.delCard}`, 'PIPELINE_STAGE'],
+    ];
+    for (const [ref, kind] of casos) {
+      const r = await expand(alfa, ref, kind, '', 1);
+      expect([ref, r.status]).toEqual([ref, 404]);
+    }
+  });
+
+  it('controle positivo: as mesmas entidades de um lead ativo continuam abrindo', async () => {
+    expect((await expand(alfa, `SCORE:${ids.score}`, 'SCORE_REASON', '', 1)).status).toBe(200);
+    expect((await expand(alfa, `PRESENCE:${ids.presence}`, 'SIGNAL', '', 1)).status).toBe(200);
+    expect((await expand(alfa, `AUDIT:${ids.audit}`, 'AUDIT_CHECK', '', 1)).status).toBe(200);
+    expect((await expand(alfa, `PIPELINE_CARD:${ids.card}`, 'PIPELINE_STAGE', '', 1)).status).toBe(200);
+  });
+
+  it('cartao do Alfa que aponta para lead do Beta (FK simples) nao abre para nenhum dos dois', async () => {
+    const ref = `PIPELINE_CARD:${ids.orfaoCard}`;
+    expect((await expand(alfa, ref, 'PIPELINE_STAGE', '', 1)).status).toBe(404);
+    expect((await expand(beta, ref, 'PIPELINE_STAGE', '', 1)).status).toBe(404);
+  });
+
+  it('o Beta, com ids de entidades do Alfa (ativas ou de lead excluido), recebe sempre 404', async () => {
+    const refs: [string, string][] = [
+      [`SCORE:${ids.score}`, 'SCORE_REASON'],
+      [`SCORE:${ids.delScore}`, 'SCORE_REASON'],
+      [`PRESENCE:${ids.delPresence}`, 'SIGNAL'],
+      [`AUDIT:${ids.delAudit}`, 'AUDIT_CHECK'],
+      [`PIPELINE_CARD:${ids.delCard}`, 'PIPELINE_STAGE'],
+    ];
+    for (const [ref, kind] of refs) expect([ref, (await expand(beta, ref, kind, '', 1)).status]).toEqual([ref, 404]);
+  });
+
+  it('a pesquisa nao lista o lead excluido', async () => {
+    const r = await expand(alfa, `SEARCH:${ids.search}`, 'LEAD', '', 1);
+    expect(r.texto).not.toContain(ids.delLead);
   });
 });

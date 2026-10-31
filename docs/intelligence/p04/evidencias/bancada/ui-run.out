@@ -4,7 +4,7 @@ PASS URL passou a carregar ?lead=
 PASS raiz selecionada e painel mostra o lead
 PASS telefone aparece mascarado no painel
 PASS painel muda para o Score
-PASS conexao mostra proveniencia (FK) e selo Verificada
+PASS conexao mostra proveniencia (FK) e selo Vínculo no cadastro
 PASS expandir motivos traz 5 nos
 PASS expandir sinais traz 7 nos
 PASS paginacao de notas: 8 e depois 16 (sem duplicar)

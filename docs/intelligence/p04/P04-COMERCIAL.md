@@ -10,7 +10,7 @@
 
 ## Argumentos que a implementação sustenta
 
-- Cada ligação mostra sua origem no cadastro (selo "Verificada").
+- Cada ligação mostra sua origem no cadastro (selo "Vínculo no cadastro").
 - Sinais não verificados aparecem como "Desconhecido", sem acusar ausência.
 - Dados separados por workspace.
 - Funciona com a base que o usuário já tem; não exige nova integração.

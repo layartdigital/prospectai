@@ -1,0 +1,53 @@
+TAP version 13
+# Subtest: limites e desempenho (3.000 leads na mesma pesquisa; 1 lead com 5.000 notas)
+    # Subtest: grafo inicial de um lead pesado: numero de consultas e constante e pequeno
+    ok 1 - grafo inicial de um lead pesado: numero de consultas e constante e pequeno
+      ---
+      duration_ms: 990.856352
+      type: 'test'
+      ...
+    # Subtest: o numero de consultas NAO cresce com a quantidade de leads de uma pagina
+    ok 2 - o numero de consultas NAO cresce com a quantidade de leads de uma pagina
+      ---
+      duration_ms: 1232.208803
+      type: 'test'
+      ...
+    # Subtest: pagina final de 3.000 leads e o teto de pagina
+    ok 3 - pagina final de 3.000 leads e o teto de pagina
+      ---
+      duration_ms: 713.670076
+      type: 'test'
+      ...
+    # Subtest: notas: pageSize pedido acima do teto e cortado em 25; offset alto responde sem erro
+    ok 4 - notas: pageSize pedido acima do teto e cortado em 25; offset alto responde sem erro
+      ---
+      duration_ms: 515.278908
+      type: 'test'
+      ...
+    # Subtest: teto de nos por resposta e respeitado e informado em omitted
+    ok 5 - teto de nos por resposta e respeitado e informado em omitted
+      ---
+      duration_ms: 567.74392
+      type: 'test'
+      ...
+    # Subtest: registra o relatorio de consultas
+    ok 6 - registra o relatorio de consultas
+      ---
+      duration_ms: 2.455916
+      type: 'test'
+      ...
+    1..6
+ok 1 - limites e desempenho (3.000 leads na mesma pesquisa; 1 lead com 5.000 notas)
+  ---
+  duration_ms: 4024.946499
+  type: 'suite'
+  ...
+1..1
+# tests 6
+# suites 1
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4251.593796

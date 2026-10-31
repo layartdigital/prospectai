@@ -12,7 +12,7 @@ Quem prospecta e precisa entender **por que** um lead tem o score que tem e **o 
 2. **Entrada pelo menu.** O item **Intelligence** abre a tela vazia com a busca. Escolha um lead (busca por nome, filtros de cidade e categoria; lista ordenada do maior score para o menor).
 3. **Leia o grafo.** O lead fica no centro. Ao redor: a pesquisa que o encontrou, o score, a presença digital e o cartão do pipeline.
 4. **Carregue mais.** Selecione um nó; o painel da direita mostra os dados e botões **Carregar** por relação ("Nota — 16 de 30 no grafo"). Cada clique traz mais uma página, sem duplicar.
-5. **Entenda a origem.** Em "Conexões", cada ligação mostra o selo **Verificada**, a descrição e a coluna do banco de onde vem (ex.: `leads.searchId → prospecting_searches.id`).
+5. **Entenda a origem.** Em "Conexões", cada ligação mostra o selo **Vínculo no cadastro**, a descrição e a coluna do banco de onde vem (ex.: `leads.searchId → prospecting_searches.id`).
 6. **Filtre.** "Tipos no grafo" oculta tipos inteiros (ex.: as notas) sem recarregar.
 7. **Recomece.** "Explorar a partir deste lead" ou "Recomeçar deste lead" troca a raiz.
 8. **Navegue pelo teclado.** Tab entre nós, Enter seleciona, setas movem, `+`/`-`/`0` zoom e enquadramento, Esc limpa.

@@ -34,7 +34,7 @@ Ambos os endpoints usam `JwtAuthGuard` + `TenantGuard` (mesma cadeia dos demais 
 
 `GET /intelligence/graph?leadId=` devolve o lead e as relações 1:1 (pesquisa, score, presença, cartão). Relações de muitos itens (notas, atividades, auditorias, contatos, follow-ups, motivos, sinais) vêm só como contagem em `expansions`. 404 se o lead não existe **neste tenant**.
 
-`GET /intelligence/expand?ref=&kind=&offset=&pageSize=&parentDepth=` carrega uma relação de um nó, paginada. 400 se o par `(tipo do pai → kind)` não é expansível (`podeExpandir`, mesma função usada pela UI), se `parentDepth` passa de `maxDepth` ou se o `ref` é malformado. 404 se o pai não pertence ao tenant.
+`GET /intelligence/expand?ref=&kind=&offset=&pageSize=&parentDepth=&parentDepthProof=` carrega uma relação de um nó, paginada. 400 se o par `(tipo do pai → kind)` não é expansível (`podeExpandir`, mesma função usada pela UI), se a prova de profundidade é inválida, se a profundidade máxima foi atingida ou se o `ref` é malformado. 404 se o pai não pertence ao tenant ou pertence a lead excluído. **Referência completa em `P04-API-ENDPOINTS.md`.**
 
 A busca de leads de partida **reutiliza `GET /leads`** e as facetas existentes; não há endpoint de busca novo.
 
@@ -48,9 +48,11 @@ A busca de leads de partida **reutiliza `GET /leads`** e as facetas existentes; 
 2. Além do RLS, **todo `where` leva `tenantId` explícito** e filtros de soft-delete.
 3. `resolverPai` reconfirma que o nó pai pertence ao tenant antes de qualquer expansão.
 4. Colunas de JSON livre ou URL (`activity.metadata`, `check.result`, `observedUrl`) **ficam fora dos `select`**; texto de nota é truncado em 140 caracteres; telefone é mascarado no servidor conforme o plano (`EntitlementsService.maskPhone`).
-5. `ref` é validado por regex (`^[A-Za-z0-9_-]{8,64}$` por segmento) antes de chegar ao Prisma.
+5. **Profundidade imposta pelo servidor (QA-01).** Cada nó sai com `depthProof` (HMAC-SHA-256 de `tenant|ref|depth`, chave derivada de `JWT_ACCESS_SECRET` com rótulo próprio); `expand` recusa com 400, antes de consultar o banco, `parentDepth` sem prova válida.
+6. **Soft delete (QA-01).** Score, presença, auditoria e cartão não têm `deletedAt`; `resolverPai` exige `lead: { tenantId, deletedAt: null }`. Isso também esconde cartão cujo lead é de outro tenant.
+7. `ref` é validado por regex (`^[A-Za-z0-9_-]{8,64}$` por segmento) antes de chegar ao Prisma.
 
-**Achado registrado (decisão do dono, não executado):** `leads.searchId` tem FK simples, não composta com `tenantId`. Em tese permite um ponteiro para pesquisa de outro tenant. O serviço não é afetado (RLS + `tenantId` no where), mas a correção estrutural é uma migration de integridade que **não foi feita** por estar fora da autorização.
+**Achado registrado (decisão do dono, não executado; detalhes em `P04-QA-INTEGRIDADE-RELACIONAL.md`):** `leads.searchId` (e as FKs `leadId` de notas, atividades, contatos, follow-ups e cartões) são FKs simples, não composta com `tenantId`. Em tese permite um ponteiro para pesquisa de outro tenant. O serviço não é afetado (RLS + `tenantId` no where), mas a correção estrutural é uma migration de integridade que **não foi feita** por estar fora da autorização.
 
 ## 5. Front-end
 
@@ -70,16 +72,6 @@ Só o contrato (`intelligence-ai-contract.ts`): estado `INDISPONIVEL`, requisiç
 
 ADR-002 (aceito) mantém "não adotar agora". O Explorer é implementação própria; **nenhum código do Flowsint foi copiado**. Referência de licença e releases em `THIRD_PARTY_FLOWSINT.md`.
 
-## 8. Verificação e o que não foi possível executar
+## 8. Verificação — estado após P04-QA-01
 
-O ambiente de execução não alcança o registro npm; não há `node_modules` do monorepo. Portanto **typecheck do monorepo, ESLint, `next build`, `nest build` e jest da API não foram executados**. O que foi feito, rotulado como evidência de bancada:
-
-| Verificação | Resultado |
-|---|---|
-| `tsc --strict` nos 3 arquivos de `packages/types` (+ noUncheckedIndexedAccess) | OK |
-| Testes de unidade de `packages/types` (22 + 9 + 4 = 35) via shim local do vitest | 35/35 |
-| RLS como `propectai_app` em PG 16 local com o schema real (`iso-check.sql`) | Isolamento confirmado |
-| `IntelligenceService` **real** sobre PG 16 local via Prisma falso (19 testes, com mutação) | 19/19 |
-| UI em Chromium (Playwright) contra a bancada, incl. Beta × Alfa, 390 px e 820 px | 28/28 |
-
-A bancada **não** substitui o CI. O serviço nunca foi compilado contra os tipos gerados do Prisma real; esse é o principal risco residual e está listado no relatório.
+Nenhum gate do monorepo (typecheck, lint, build, jest) pôde ser executado no ambiente desta sessão (registro npm negado pela política de rede; push para o GitHub barrado pelo proxy de git). **Nenhuma dessas etapas é declarada aprovada.** O que existe é evidência de bancada, rotulada como tal, em `P04-INDICE-DE-EVIDENCIAS.md` e `P04-QA-RELATORIO.md`.

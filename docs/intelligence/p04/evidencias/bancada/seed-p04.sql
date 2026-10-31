@@ -61,3 +61,16 @@ COMMIT;
 -- soft delete: nao pode aparecer no grafo
 INSERT INTO lead_notes (id,"tenantId","leadId",content,"deletedAt","updatedAt") VALUES ('nte_alfa_apagada01','tnt_alfa_0000000001','lead_alfa_0000001','NOTA APAGADA nao deve aparecer',now(),now());
 INSERT INTO leads (id,"tenantId",name,fingerprint,"isDemo","deletedAt","updatedAt") VALUES ('lead_alfa_apagado1','tnt_alfa_0000000001','Lead apagado do Alfa','fp-alfa-del',true,now(),now());
+
+-- QA-01: filhos de um lead EXCLUIDO LOGICAMENTE (score, presenca, auditoria, cartao + filhos)
+-- e um cartao "orfao": tenant Alfa apontando para lead do Beta (as FKs simples permitem).
+BEGIN;
+INSERT INTO lead_scores (id,"tenantId","leadId",value,level,"updatedAt") VALUES ('scr_alfa_apagado01','tnt_alfa_0000000001','lead_alfa_apagado1',40,'MEDIA',now());
+INSERT INTO lead_score_reasons (id,"tenantId","scoreId",code,label,weight,polarity,evidence) VALUES ('rsn_alfa_apagado01','tnt_alfa_0000000001','scr_alfa_apagado01','SEM_SITE','MOTIVO DO LEAD APAGADO',30,'POSITIVE','x');
+INSERT INTO lead_digital_presences (id,"tenantId","leadId","hasWebsite","hasEmail","hasPhone","hasInstagram","hasFacebook","hasReviews","websiteHasHttps","whatsappStatus","updatedAt") VALUES ('prs_alfa_apagado01','tnt_alfa_0000000001','lead_alfa_apagado1','AUSENTE','DESCONHECIDO','DESCONHECIDO','DESCONHECIDO','DESCONHECIDO','DESCONHECIDO','DESCONHECIDO','UNKNOWN',now());
+INSERT INTO digital_presence_audits (id,"tenantId","leadId","auditVersion",status,"createdAt","updatedAt") VALUES ('aud_alfa_apagado01','tnt_alfa_0000000001','lead_alfa_apagado1','audit-v1','COMPLETED',now(),now());
+INSERT INTO digital_presence_checks (id,"tenantId","auditId","check",outcome) VALUES ('chk_alfa_apagado01','tnt_alfa_0000000001','aud_alfa_apagado01','DNS','FAILED');
+INSERT INTO pipeline_cards (id,"tenantId","leadId","stageId","enteredStageAt","updatedAt") VALUES ('crd_alfa_apagado01','tnt_alfa_0000000001','lead_alfa_apagado1','stg_alfa_000000001',now(),now());
+-- orfao entre tenants
+INSERT INTO pipeline_cards (id,"tenantId","leadId","stageId","enteredStageAt","updatedAt") VALUES ('crd_alfa_orfao00001','tnt_alfa_0000000001','lead_beta_00000001','stg_alfa_000000001',now(),now());
+COMMIT;

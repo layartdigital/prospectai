@@ -1,0 +1,16 @@
+PASS C1 A depois B: o grafo final e o de B
+PASS C1 resposta atrasada de A nao entra no grafo de B
+PASS C1 a URL e o painel acompanham B
+PASS C2 notas de A atrasadas nao aparecem no grafo de B
+PASS C2 o indicador de carregamento nao ficou preso
+PASS C3 a lista final e a do ultimo filtro
+PASS C3 resposta atrasada do filtro anterior nao reapareceu
+PASS C4 reiniciar: o grafo volta ao estado inicial (5 nos)
+PASS C4 notas da expansao interrompida nao entraram
+PASS C4 depois de reiniciar, a expansao recomeca da primeira pagina (8 notas)
+PASS C5 tres cliques seguidos geram UMA requisicao — requisicoes=1
+PASS C5 o grafo tem 8 notas (sem duplicar nem pular pagina) — notas=8
+PASS C6 notas E atividades presentes (a resposta mais lenta nao apagou a mais rapida) — notas=8 atividades=3
+PASS C7 expansao com a sessao trocada e recusada com mensagem clara
+PASS C7 nenhuma nota entrou no grafo
+PASS sem erro de JavaScript no console durante as corridas

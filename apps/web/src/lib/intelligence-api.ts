@@ -24,8 +24,8 @@ export interface FiltroLeads {
   category: string;
 }
 
-export function buscarGrafo(leadId: string): Promise<GraphResponse> {
-  return clientApi<GraphResponse>(`/intelligence/graph?leadId=${encodeURIComponent(leadId)}`);
+export function buscarGrafo(leadId: string, signal?: AbortSignal): Promise<GraphResponse> {
+  return clientApi<GraphResponse>(`/intelligence/graph?leadId=${encodeURIComponent(leadId)}`, signal ? { signal } : {});
 }
 
 export function expandirNo(params: {
@@ -33,16 +33,19 @@ export function expandirNo(params: {
   kind: GraphNodeKind;
   offset: number;
   pageSize: number;
+  /** `depth` e `depthProof` exatamente como o servidor devolveu para o no pai. */
   parentDepth: number;
-}): Promise<GraphExpandResponse> {
+  parentDepthProof: string;
+}, signal?: AbortSignal): Promise<GraphExpandResponse> {
   const q = new URLSearchParams({
     ref: params.ref,
     kind: params.kind,
     offset: String(params.offset),
     pageSize: String(params.pageSize),
     parentDepth: String(params.parentDepth),
+    parentDepthProof: params.parentDepthProof,
   });
-  return clientApi<GraphExpandResponse>(`/intelligence/expand?${q.toString()}`);
+  return clientApi<GraphExpandResponse>(`/intelligence/expand?${q.toString()}`, signal ? { signal } : {});
 }
 
 export function buscarLeads(filtro: FiltroLeads): Promise<LeadListResponse> {

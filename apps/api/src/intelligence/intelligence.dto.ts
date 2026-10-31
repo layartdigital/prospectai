@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { GRAPH_LIMITS, GRAPH_NODE_KINDS, type GraphNodeKind } from '@propectai/types';
+import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 
 /** Mesmo formato aceito por `parseNodeRef`; o servico valida de novo. */
@@ -36,15 +37,25 @@ export class ExpandQueryDto {
   @Max(GRAPH_LIMITS.maxPageSize)
   pageSize?: number = GRAPH_LIMITS.defaultPageSize;
 
-  @ApiPropertyOptional({
-    default: 0,
+  @ApiProperty({
     description:
-      'Profundidade do nó expandido na tela. Serve para o teto de custo e para numerar a ' +
-      'profundidade dos filhos; NÃO é verificação de autorização.',
+      'Profundidade do nó expandido, exatamente como o servidor a devolveu em `depth`. ' +
+      'Só vale acompanhada de `parentDepthProof`; o servidor recusa valor adulterado.',
+    minimum: 0,
+    maximum: GRAPH_LIMITS.maxDepth,
   })
-  @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(GRAPH_LIMITS.maxDepth)
-  parentDepth?: number = 0;
+  parentDepth!: number;
+
+  @ApiProperty({
+    description:
+      'Prova assinada (`depthProof`) devolvida pelo servidor junto do nó. Liga o nó, o ' +
+      'workspace e a profundidade; sem ela, ou com ela de outro nó/workspace, a resposta é 400.',
+  })
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{22}$/)
+  parentDepthProof!: string;
 }

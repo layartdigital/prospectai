@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Prisma } from '@prisma/client';
 import {
   EXPANDABLE_KINDS,
@@ -38,6 +39,7 @@ import {
 
 import { EntitlementsService } from '../entitlements/entitlements.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProvaDeProfundidade } from './depth-proof';
 
 type Tx = Prisma.TransactionClient;
 
@@ -66,6 +68,13 @@ interface Pagina {
 const iso = (d: Date): string => d.toISOString();
 const isoOuNull = (d: Date | null): string | null => (d ? d.toISOString() : null);
 
+/**
+ * Lead vivo do tenant. Score, presenca, auditoria e cartao nao tem `deletedAt`
+ * proprio: quem os esconde e a exclusao logica do lead. Sem este filtro, a
+ * referencia de um desses nos continuaria abrindo depois de o lead ser excluido.
+ */
+const LEAD_ATIVO = (tenantId: string): { tenantId: string; deletedAt: null } => ({ tenantId, deletedAt: null });
+
 const VAZIA: Pagina = { nodes: [], edges: [], total: 0 };
 
 /**
@@ -91,10 +100,15 @@ const VAZIA: Pagina = { nodes: [], edges: [], total: 0 };
  */
 @Injectable()
 export class IntelligenceService {
+  private readonly prova: ProvaDeProfundidade;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementsService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.prova = new ProvaDeProfundidade(config.getOrThrow<string>('JWT_ACCESS_SECRET'));
+  }
 
   /**
    * Ponto de integracao com o sistema de planos.
@@ -138,18 +152,32 @@ export class IntelligenceService {
     });
 
     const teto = aplicarTeto(nodes, edges, limites.maxNodesPerResponse);
-    return this.resposta(ref, teto, limites);
+    return this.resposta(tenantId, ref, teto, limites);
   }
 
   async expandir(
     tenantId: string,
     planCode: string,
-    pedido: { ref: string; kind: GraphNodeKind; offset: number; pageSize: number; parentDepth: number },
+    pedido: {
+      ref: string;
+      kind: GraphNodeKind;
+      offset: number;
+      pageSize: number;
+      parentDepth: number;
+      parentDepthProof: string;
+    },
   ): Promise<GraphExpandResponse> {
     const parsed = parseNodeRef(pedido.ref);
     if (!parsed) throw new BadRequestException('Referência inválida');
     if (!podeExpandir(parsed.kind, pedido.kind)) {
       throw new BadRequestException('Relação não disponível para este tipo de nó');
+    }
+
+    // A profundidade do pai e requisito do servidor: o valor do navegador so vale
+    // se vier com a assinatura que o proprio servidor emitiu para este no, neste
+    // tenant. Antes de qualquer consulta ao banco.
+    if (!this.prova.verificar(tenantId, pedido.ref, pedido.parentDepth, pedido.parentDepthProof)) {
+      throw new BadRequestException('Prova de profundidade inválida. Recarregue o grafo.');
     }
 
     const limites = this.limitesDoPlano(planCode);
@@ -168,7 +196,7 @@ export class IntelligenceService {
     });
 
     const teto = aplicarTeto(pagina.nodes, pagina.edges, limites.maxNodesPerResponse);
-    const base = this.resposta(pedido.ref, teto, limites);
+    const base = this.resposta(tenantId, pedido.ref, teto, limites);
     const lidos = offset + teto.nodes.length;
 
     return {
@@ -188,13 +216,14 @@ export class IntelligenceService {
   }
 
   private resposta(
+    tenantId: string,
     rootRef: string,
     teto: { nodes: GraphNode[]; edges: GraphEdge[]; cortados: Partial<Record<GraphNodeKind, number>> },
     limites: GraphLimits,
   ): GraphResponse {
     return {
       rootRef,
-      nodes: teto.nodes,
+      nodes: teto.nodes.map((n) => ({ ...n, depthProof: this.prova.assinar(tenantId, n.ref, n.depth) })),
       edges: teto.edges,
       omitted: teto.cortados,
       limits: limites,
@@ -224,20 +253,26 @@ export class IntelligenceService {
         return r ? { kind, id: r.id } : null;
       }
       case 'SCORE': {
-        const r = await tx.leadScore.findFirst({ where: { id, tenantId }, select: { id: true, leadId: true } });
+        const r = await tx.leadScore.findFirst({
+          where: { id, tenantId, lead: LEAD_ATIVO(tenantId) },
+          select: { id: true, leadId: true },
+        });
         return r ? { kind, id: r.id, leadId: r.leadId } : null;
       }
       case 'PRESENCE': {
-        const r = await tx.leadDigitalPresence.findFirst({ where: { id, tenantId } });
+        const r = await tx.leadDigitalPresence.findFirst({ where: { id, tenantId, lead: LEAD_ATIVO(tenantId) } });
         return r ? { kind, id: r.id, leadId: r.leadId, row: this.linhaPresenca(r) } : null;
       }
       case 'AUDIT': {
-        const r = await tx.digitalPresenceAudit.findFirst({ where: { id, tenantId }, select: { id: true, leadId: true } });
+        const r = await tx.digitalPresenceAudit.findFirst({
+          where: { id, tenantId, lead: LEAD_ATIVO(tenantId) },
+          select: { id: true, leadId: true },
+        });
         return r ? { kind, id: r.id, leadId: r.leadId } : null;
       }
       case 'PIPELINE_CARD': {
         const r = await tx.pipelineCard.findFirst({
-          where: { id, tenantId },
+          where: { id, tenantId, lead: LEAD_ATIVO(tenantId) },
           select: { id: true, leadId: true, stageId: true },
         });
         return r ? { kind, id: r.id, leadId: r.leadId, stageId: r.stageId } : null;

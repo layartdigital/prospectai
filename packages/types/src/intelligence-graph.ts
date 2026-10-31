@@ -170,6 +170,12 @@ export interface GraphNode {
   state: SignalState | null;
   /** Distancia da raiz no grafo montado (raiz = 0). */
   depth: number;
+  /**
+   * Prova assinada pelo servidor de que este no esta nesta profundidade, neste
+   * tenant. O cliente a devolve em `GET /intelligence/expand`; o servidor nao
+   * confia no `depth` declarado pelo navegador. Opaca: nao interpretar.
+   */
+  depthProof?: string;
   properties: GraphProperty[];
   /** Rota da aplicacao que abre o recurso original, quando existe. */
   detailHref: string | null;

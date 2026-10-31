@@ -143,6 +143,10 @@ export function NodeDetailsPanel({ no, porRef, arestas, carregando, erro, onExpa
           <h3 className="mb-2 text-label uppercase tracking-wide text-muted">
             Conexões ({ligacoes.length})
           </h3>
+          <p className="mb-2 text-[11px] leading-snug text-muted">
+            “Vínculo no cadastro” mostra que a ligação existe no banco do ProspectAI. Não quer dizer que o dado foi conferido
+            fora do sistema.
+          </p>
           {ligacoes.length === 0 ? (
             <p className="text-xs text-muted">Nenhuma conexão carregada para esta entidade.</p>
           ) : (
@@ -169,6 +173,11 @@ export function NodeDetailsPanel({ no, porRef, arestas, carregando, erro, onExpa
                         </button>
                       </p>
                       <span
+                        title={
+                          verificada
+                            ? 'A ligação existe no cadastro. Isso não significa que o conteúdo foi validado fora do sistema.'
+                            : 'Relação sugerida por regra, ainda não comprovada no cadastro.'
+                        }
                         className={cn(
                           'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold',
                           verificada ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning',
@@ -179,7 +188,7 @@ export function NodeDetailsPanel({ no, porRef, arestas, carregando, erro, onExpa
                         ) : (
                           <ShieldQuestion className="h-3 w-3" aria-hidden="true" />
                         )}
-                        {verificada ? 'Verificada' : 'Inferida'}
+                        {verificada ? 'Vínculo no cadastro' : 'Inferência (não comprovada)'}
                       </span>
                     </div>
                     <p className="mt-1 text-muted">{e.provenance.description}</p>

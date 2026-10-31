@@ -49,10 +49,15 @@ export class IntelligenceController {
       'de um lead ou os leads de uma pesquisa). Somente combinações permitidas por ' +
       '`EXPANDABLE_KINDS`; qualquer outra responde 400. O nó pai precisa pertencer ao ' +
       'workspace ativo, senão 404. Paginação por `offset` e `pageSize` (máximo 25); o ' +
-      'campo `omitted` informa o que o teto de nós cortou.',
+      'campo `omitted` informa o que o teto de nós cortou. A profundidade do pai ' +
+      'é conferida no servidor: `parentDepth` só vale com a `parentDepthProof` que o ' +
+      'servidor devolveu junto do nó; valor adulterado responde 400.',
   })
   @ApiResponse({ status: 200, description: 'Nós e arestas novos, mais a próxima posição' })
-  @ApiResponse({ status: 400, description: 'Referência, relação ou profundidade inválida' })
+  @ApiResponse({
+    status: 400,
+    description: 'Referência, relação, profundidade ou prova de profundidade inválida (ou profundidade máxima atingida)',
+  })
   @ApiResponse({ status: 404, description: 'Nó não encontrado neste workspace' })
   async expand(
     @CurrentTenant() tenant: ActiveTenant,
@@ -63,7 +68,8 @@ export class IntelligenceController {
       kind: query.kind,
       offset: query.offset ?? 0,
       pageSize: query.pageSize ?? 8,
-      parentDepth: query.parentDepth ?? 0,
+      parentDepth: query.parentDepth,
+      parentDepthProof: query.parentDepthProof,
     });
   }
 }

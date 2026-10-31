@@ -1,0 +1,123 @@
+== contagem de leads da pesquisa
+tnt_alfa_0000000001
+Aggregate (actual rows=1 loops=1)
+  Buffers: shared hit=70
+  ->  Result (actual rows=3000 loops=1)
+        One-Time Filter: (current_setting('app.tenant_id'::text, true) = 'tnt_alfa_0000000001'::text)
+        Buffers: shared hit=70
+        ->  Seq Scan on leads t (actual rows=3000 loops=1)
+              Filter: (("deletedAt" IS NULL) AND ("tenantId" = 'tnt_alfa_0000000001'::text) AND ("searchId" = 'srch_vol_0000000001'::text))
+              Rows Removed by Filter: 8
+              Buffers: shared hit=70
+Planning:
+  Buffers: shared hit=196
+Planning Time: 1.011 ms
+Execution Time: 1.180 ms
+
+== pagina de ids (ORDER BY createdAt DESC)
+tnt_alfa_0000000001
+Aggregate (actual rows=1 loops=1)
+  Buffers: shared hit=15
+  ->  Subquery Scan on r (actual rows=25 loops=1)
+        Buffers: shared hit=15
+        ->  Limit (actual rows=25 loops=1)
+              Buffers: shared hit=15
+              ->  Incremental Sort (actual rows=25 loops=1)
+                    Sort Key: t."createdAt" DESC, t.id
+                    Presorted Key: t."createdAt"
+                    Full-sort Groups: 1  Sort Method: quicksort  Average Memory: 26kB  Peak Memory: 26kB
+                    Buffers: shared hit=15
+                    ->  Result (actual rows=26 loops=1)
+                          One-Time Filter: (current_setting('app.tenant_id'::text, true) = 'tnt_alfa_0000000001'::text)
+                          Buffers: shared hit=6
+                          ->  Index Scan Backward using "leads_tenantId_createdAt_idx" on leads t (actual rows=26 loops=1)
+                                Index Cond: ("tenantId" = 'tnt_alfa_0000000001'::text)
+                                Filter: (("deletedAt" IS NULL) AND ("searchId" = 'srch_vol_0000000001'::text))
+                                Buffers: shared hit=6
+Planning:
+  Buffers: shared hit=223
+Planning Time: 0.682 ms
+Execution Time: 0.229 ms
+
+== groupBy notas
+tnt_alfa_0000000001
+Aggregate (actual rows=1 loops=1)
+  Buffers: shared hit=1
+  ->  HashAggregate (actual rows=0 loops=1)
+        Group Key: t."leadId"
+        Batches: 1  Memory Usage: 24kB
+        Buffers: shared hit=1
+        ->  Result (actual rows=0 loops=1)
+              One-Time Filter: (current_setting('app.tenant_id'::text, true) = 'tnt_alfa_0000000001'::text)
+              Buffers: shared hit=1
+              ->  Seq Scan on lead_activities t (actual rows=0 loops=1)
+                    Filter: (("tenantId" = 'tnt_alfa_0000000001'::text) AND ("leadId" = ANY ('{lead_vol_00000001,lead_vol_00000002,lead_vol_00000003,lead_vol_00000004,lead_vol_00000005,lead_vol_00000006,lead_vol_00000007,lead_vol_00000008,lead_vol_00000009,lead_vol_00000010,lead_vol_00000011,lead_vol_00000012,lead_vol_00000013,lead_vol_00000014,lead_vol_00000015,lead_vol_00000016,lead_vol_00000017,lead_vol_00000018,lead_vol_00000019,lead_vol_00000020,lead_vol_00000021,lead_vol_00000022,lead_vol_00000023,lead_vol_00000024,lead_vol_00000025}'::text[])))
+                    Rows Removed by Filter: 3
+                    Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=120
+Planning Time: 0.601 ms
+Execution Time: 0.133 ms
+
+== groupBy scores
+tnt_alfa_0000000001
+Aggregate (actual rows=1 loops=1)
+  Buffers: shared hit=54
+  ->  GroupAggregate (actual rows=25 loops=1)
+        Group Key: t."leadId"
+        Buffers: shared hit=54
+        ->  Result (actual rows=25 loops=1)
+              One-Time Filter: (current_setting('app.tenant_id'::text, true) = 'tnt_alfa_0000000001'::text)
+              Buffers: shared hit=54
+              ->  Index Scan using "lead_scores_leadId_key" on lead_scores t (actual rows=25 loops=1)
+                    Index Cond: ("leadId" = ANY ('{lead_vol_00000001,lead_vol_00000002,lead_vol_00000003,lead_vol_00000004,lead_vol_00000005,lead_vol_00000006,lead_vol_00000007,lead_vol_00000008,lead_vol_00000009,lead_vol_00000010,lead_vol_00000011,lead_vol_00000012,lead_vol_00000013,lead_vol_00000014,lead_vol_00000015,lead_vol_00000016,lead_vol_00000017,lead_vol_00000018,lead_vol_00000019,lead_vol_00000020,lead_vol_00000021,lead_vol_00000022,lead_vol_00000023,lead_vol_00000024,lead_vol_00000025}'::text[]))
+                    Filter: ("tenantId" = 'tnt_alfa_0000000001'::text)
+                    Buffers: shared hit=54
+Planning:
+  Buffers: shared hit=158
+Planning Time: 0.608 ms
+Execution Time: 0.268 ms
+
+== groupBy atividades
+tnt_alfa_0000000001
+Aggregate (actual rows=1 loops=1)
+  Buffers: shared hit=1
+  ->  HashAggregate (actual rows=0 loops=1)
+        Group Key: t."leadId"
+        Batches: 1  Memory Usage: 24kB
+        Buffers: shared hit=1
+        ->  Result (actual rows=0 loops=1)
+              One-Time Filter: (current_setting('app.tenant_id'::text, true) = 'tnt_alfa_0000000001'::text)
+              Buffers: shared hit=1
+              ->  Seq Scan on digital_presence_audits t (actual rows=0 loops=1)
+                    Filter: (("tenantId" = 'tnt_alfa_0000000001'::text) AND ("leadId" = ANY ('{lead_vol_00000001,lead_vol_00000002,lead_vol_00000003,lead_vol_00000004,lead_vol_00000005,lead_vol_00000006,lead_vol_00000007,lead_vol_00000008,lead_vol_00000009,lead_vol_00000010,lead_vol_00000011,lead_vol_00000012,lead_vol_00000013,lead_vol_00000014,lead_vol_00000015,lead_vol_00000016,lead_vol_00000017,lead_vol_00000018,lead_vol_00000019,lead_vol_00000020,lead_vol_00000021,lead_vol_00000022,lead_vol_00000023,lead_vol_00000024,lead_vol_00000025}'::text[])))
+                    Rows Removed by Filter: 2
+                    Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=178
+Planning Time: 0.588 ms
+Execution Time: 0.167 ms
+
+== groupBy notas (35.031 notas na tabela, 25 leads)
+tnt_alfa_0000000001
+Aggregate (actual rows=1 loops=1)
+  Buffers: shared hit=148
+  ->  HashAggregate (actual rows=25 loops=1)
+        Group Key: t."leadId"
+        Batches: 1  Memory Usage: 121kB
+        Buffers: shared hit=148
+        ->  Result (actual rows=5250 loops=1)
+              One-Time Filter: (current_setting('app.tenant_id'::text, true) = 'tnt_alfa_0000000001'::text)
+              Buffers: shared hit=148
+              ->  Bitmap Heap Scan on lead_notes t (actual rows=5250 loops=1)
+                    Recheck Cond: (("tenantId" = 'tnt_alfa_0000000001'::text) AND ("leadId" = ANY ('{<25 ids>}'::text[])))
+                    Filter: ("deletedAt" IS NULL)
+                    Heap Blocks: exact=94
+                    Buffers: shared hit=148
+                    ->  Bitmap Index Scan on "lead_notes_tenantId_leadId_createdAt_idx" (actual rows=5250 loops=1)
+                          Index Cond: (("tenantId" = 'tnt_alfa_0000000001'::text) AND ("leadId" = ANY ('{<25 ids>}'::text[])))
+                          Buffers: shared hit=54
+Planning:
+  Buffers: shared hit=123
+Planning Time: 0.688 ms
+Execution Time: 3.716 ms

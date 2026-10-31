@@ -1,35 +1,54 @@
-# P04 — Índice de evidências
+# P04 — Índice de evidências (atualizado em P04-QA-01)
 
-**`F:\drmind` (Bellvia) não foi modificado.** Todas as evidências abaixo são de **bancada local** (PostgreSQL 16 local descartável, Prisma falso sobre `psql`, esbuild + Chromium/Playwright). **Nenhuma** foi produzida contra produção, e nenhuma substitui o CI do monorepo.
+**`F:\drmind` (Bellvia) não foi modificado.** Todas as evidências abaixo são de **bancada local** (PostgreSQL 16 local descartável com o schema real migrado e os papéis reais `propectai_app` sem BYPASSRLS; Prisma simulado sobre `psql`; esbuild + Chromium/Playwright). **Nenhuma** foi produzida contra produção e **nenhuma substitui o CI do monorepo**.
 
-| Evidência | Arquivo | O que prova |
-|---|---|---|
-| Isolamento em SQL puro como `propectai_app` sob RLS | `evidencias/bancada/iso-check.sql` / `.out` | Beta, com ids do Alfa, lê 0 linhas; sem `tenantId` no where só a RLS já segura |
-| Serviço **real** (`IntelligenceService`) sobre PG local | `evidencias/bancada/service-isolation.out` | 19/19: dono vê o seu, Beta recebe 404 idêntico a inexistente, 12 combinações de expansão negadas, sem JSON livre/URL, DESCONHECIDO preservado, limites |
-| UI em Chromium | `evidencias/bancada/ui-run.out` | 28/28 (grafo, expansão, paginação, zoom/pan/teclado, Beta×Alfa, 390 px/820 px, sem modal, sem erro de console) |
-| Seed da bancada | `evidencias/bancada/seed-p04.sql` | Dados fictícios **apenas no PG local da bancada**; a UI do produto não contém dado fictício |
-| Capturas de tela | `evidencias/capturas/01…11.png` | Estados vazio, inicial, expandido, sinal desconhecido, pesquisa expandida, outro lead, erro, Beta×Alfa, mobile, tablet |
-| Tipos | `packages/types/src/intelligence-*.test.ts` | 35 testes (22 grafo + 9 layout + 4 contrato de IA) e `tsc --strict` limpo nos 3 módulos |
+| Evidência | Arquivo | O que prova | Resultado |
+|---|---|---|---|
+| Isolamento em SQL puro sob RLS | `bancada/iso-check.*` (entrega anterior) | Beta, com ids do Alfa, lê 0 linhas | OK |
+| Serviço **real** sobre PG local | `bancada/service-isolation.out` | Isolamento, soft delete, limites, **profundidade com prova**, **entidades de lead excluído**, cartão órfão | 37/37 |
+| Mutações (provas de que os testes não são vazios) | descritas em `P04-QA-RELATORIO.md` | remover o filtro de lead ativo → 5 falhas; remover a verificação de prova → 4 falhas | confirmado na execução |
+| UI em Chromium | `bancada/ui-run.out` | grafo, expansão, zoom/pan/teclado, Beta×Alfa, 390/820 px, sem modal, sem erro de console | 28/28 |
+| Concorrência na UI | `bancada/ui-concorrencia.out`, `ui-concorrencia.cjs` | 7 cenários de resposta fora de ordem, repetição, reinício, troca de sessão | 16/16 (sem os controles: 7 falhas) |
+| Volume e desempenho | `bancada/volume.out`, `volume-metricas.tsv`, `volume-explain.txt`, `volume-seed.sql` | 3.000 leads, 35 mil notas: nº de consultas constante (13/16), tetos de página, groupBy de notas usa índice composto (3,7 ms) | 6/6 |
+| Integridade relacional | `bancada/integridade-check.sql` / `.out` | 6 FKs simples aceitam referência entre tenants; 3 FKs compostas recusam | achado documentado |
+| Capturas de tela da UI (bancada) | `capturas/01…11.png` | estados vazio, inicial, expandido, sinal desconhecido, pesquisa, erro, Beta×Alfa, mobile, tablet | **bancada, não o app completo** |
+| Tipos | `packages/types/src/intelligence-*.test.ts` | 35 testes e `tsc --strict` | OK |
 
-**Limite das capturas:** não há captura da ficha do lead com o botão "Explorar relações" (a ficha exige o app completo, não a bancada).
+## O que NÃO existe (não foi executado)
+
+typecheck real do monorepo, `prisma generate`, ESLint, `nest build`, `next build`, jest da API (inclui `intelligence-tenant.spec.ts`), suíte completa, regressão do produto, captura da ficha do lead no aplicativo completo, captura de UI no aplicativo completo. Rotas para obtê-los: `qa/COMO-RODAR.md`.
 
 ## Hashes SHA-256
 
 ```
+d3ae921bdca5e7aea06f2469175ad568fb0551149a41c0a4318d395b9fc2b235 | bancada/fake-prisma.ts
+673210d9389a90caee379ffb040d86f6261dba17f308e0f03af3808ae61ca891 | bancada/integridade-check.out
+7690e3faa65a11450b3f7f8429eadb20195d5efb9c8fb1827e2b565e0b8c7483 | bancada/integridade-check.sql
 9b43998a588934d44da2be93c818bed76e148d9527af4bf38150f7166334829d | bancada/iso-check.out
 7c26b83e7490b5cf0f5a8689d5cd97841edac1fbae45da23b66b62963a6fbc44 | bancada/iso-check.sql
-70d2cde4bbee0cc347be60a9d51cb330220e65d7cc01658279b7b49211002994 | bancada/seed-p04.sql
-74ad9e17339ed98233af7f69ef52282c8bc4125d1362d718cc0ec28b98f3f021 | bancada/service-isolation.out
-9f3bd55d4fcc2d52130715be87c7c41432deacff7e334ad216802db9ffaa57c1 | bancada/ui-run.out
-7369c03fcafa624024be190d349b20ab2d82b7566737b32ee50fb996dc5b385c | capturas/01-estado-vazio.png
+f1b9fbd732b136b4693a965eefe540b3efe4755502a6167d6d87890a54ee4de5 | bancada/run-service.ts
+3602ad7c25bb235a5cbc9fffaa5255a015c06e1b7755d29f6e1e5859a6469cd0 | bancada/seed-p04.sql
+5f779fd3ca07777393f04cb461365d0acd5a2d2e49d72f613d64c0e83d4729d5 | bancada/server.ts
+810be779a7a0d83597707c386549c0067ff9eaa905d4b2225f2a9af7612c9124 | bancada/service-isolation.out
+e1edf5962fb0a47dacad74ee8f567b3fd2cea54de94db8f706775b08846e7b00 | bancada/service-isolation.test.ts
+d5a425c2d5618bae675e31f2f0d177917de2ecd6826981117959d55b5cccd895 | bancada/ui-concorrencia.cjs
+0b56d140120be693ea76f95abe2c70d12a011c7cdd6234fd4644a0733c553000 | bancada/ui-concorrencia.out
+154479242bbb4f1d9f0924f45029e2a06523a43ad33465f552109f925531039f | bancada/ui-run.cjs
+f1aa6ca0dc929f718484d538dd3b06dad9c737ecb8e11473635c007e532a3430 | bancada/ui-run.out
+8490e329448e092d03f89427add72c09f6869323ff2f4ce5920e8ca73f2af0d9 | bancada/volume-explain.txt
+99eb48eef7a8d7886443ebbd08d6a82f0068c15e97d18a7913b58901d6590093 | bancada/volume-metricas.tsv
+a19a791ab9a4a8970d8ffa3192eb383471a8f173e1f75c11a292d640db309c22 | bancada/volume-seed.sql
+987b2c8923941234241587fdffeaaa972777c4dae5d842b66b27f07d4463a035 | bancada/volume.out
+cde3a02b3f4128a1434530b62a3dfd35cfa294153f711ed5beb180fd0db50efe | bancada/volume.test.ts
+907c30dfa4534ccebfc6fe716daeee11012fe20172f897bfc5689654838a4a0e | capturas/01-estado-vazio.png
 3fcd252ea93729e35d74d5416fdb3a7b4c0e21e0fd5534f14309936d49feeb67 | capturas/02-grafo-inicial.png
-3cf9773c8591cd8514a023873fa7e43fcd800c80f4ce4f89a5babcea28aafa2b | capturas/03-grafo-expandido.png
-a077f4513e5288bdc3d947ffa802263baeec6caf8446986ea8ce238fdfa66b41 | capturas/04-sinal-desconhecido.png
-2cf12546732b4da3b2da04d7ea23ec948ad29c3ff92825677e65db4581bffc01 | capturas/05-pesquisa-expandida.png
-366619e7dea23983cedad963b953279411e875060504039f74294f4395c6e80a | capturas/06-outro-lead.png
-481a61ee68a3ff442ff2a74d608f0b665dabcc46d296af9cdc53b4b30e1b7438 | capturas/07-erro-nao-encontrado.png
-9fc51c2918ebe30a244e40608e07eb7d167df391706e19716a9d15203b57d10d | capturas/08-beta-lead-do-alfa.png
-823c600d6df589322ab556270d9d483fcb2d113edd44ea25a38d100426867976 | capturas/09-beta-proprio-grafo.png
-7ef5a5504ad55f00a96ce7b14b19c435579ee9cce4339ea16e83b608cd6c764d | capturas/10-mobile-390.png
-17701df081342659151d09b8785cc63d5b645e4f1f1766fe6483db3842ba66e6 | capturas/11-tablet-820.png
+b5b78cae48da2162e7a94e33b32ff4a90d709e192befd2ecebcd610a6d93547e | capturas/03-grafo-expandido.png
+35f1cec85ae512fbd652ff64190abae4e1fba21ade7146f9655f35dc04d402e2 | capturas/04-sinal-desconhecido.png
+abf3c3c4ce88b2db9290ed9717094b0e54bc59f4ecaca5f31ad4fc805cd2a646 | capturas/05-pesquisa-expandida.png
+34073e0ab224bea106182c2f8d9c9235e53f6f9b8509f3c5048f5985923f3ec1 | capturas/06-outro-lead.png
+1230492a4fc53b736637937ef012a48493442da8d452570e1323ef966aafef0c | capturas/07-erro-nao-encontrado.png
+28afc771fd299c618287f7bd2e83cf5054a9028f9ebeb3254779149ee9b37c9c | capturas/08-beta-lead-do-alfa.png
+0b1bdf3f9b490f43e1d94b8b12a4658fa09df7b3b43dcf6fa548444234fa9e3b | capturas/09-beta-proprio-grafo.png
+3800003bed2515f4cb3a18bb1144d82cb20b1d7ce550b1525c52f04e16a3e81d | capturas/10-mobile-390.png
+f204d33f00ea0819377f30c2ad235458bccd5a477279be2f42e79da97cfcea84 | capturas/11-tablet-820.png
 ```

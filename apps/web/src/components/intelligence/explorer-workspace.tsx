@@ -100,36 +100,86 @@ export function ExplorerWorkspace() {
   const [erroExpansao, setErroExpansao] = useState<string | null>(null);
   const [cortados, setCortados] = useState<Partial<Record<GraphNodeKind, number>>>({});
 
-  const carregar = useCallback(async (leadId: string): Promise<void> => {
-    setCarregandoGrafo(true);
-    setErroGrafo(null);
-    setErroExpansao(null);
-    try {
-      const r = await buscarGrafo(leadId);
-      cursores.current = new Map();
-      setGrafo({ nodes: r.nodes, edges: r.edges });
-      setPosicoes(calcularLayout(r.nodes, r.edges));
-      setCortados(r.omitted);
-      setSelecionado(r.rootRef);
-      setOcultos(new Set());
-    } catch (e) {
-      setGrafo({ nodes: [], edges: [] });
-      setPosicoes(new Map());
-      setErroGrafo(mensagem(e, 'Não foi possível carregar o grafo deste lead.'));
-    } finally {
-      setCarregandoGrafo(false);
-    }
+  // Controle de concorrencia. Toda operacao que muda o grafo pertence a uma
+  // "geracao": trocar de lead, recomecar, desmontar a tela ou mudar a sessao a
+  // encerra. Resposta que chega depois de a geracao mudar e descartada — nunca
+  // entra no grafo de outro contexto. As requisicoes tambem sao abortadas, mas o
+  // descarte por geracao e o que garante a correcao (o abort e so economia).
+  //
+  // O estado so existe em memoria desta tela: nao ha cache entre leads nem entre
+  // workspaces.
+  const geracao = useRef(0);
+  const abortador = useRef<AbortController | null>(null);
+  const emVoo = useRef(new Set<string>());
+  const grafoRef = useRef(grafo);
+  const posicoesRef = useRef(posicoes);
+
+  const aplicarGrafo = useCallback((g: { nodes: GraphNode[]; edges: GraphEdge[] }, pos: ReadonlyMap<string, Ponto>): void => {
+    grafoRef.current = g;
+    posicoesRef.current = pos;
+    setGrafo(g);
+    setPosicoes(pos);
   }, []);
+
+  /** Encerra a geracao atual e devolve a nova (cancela o que estava em andamento). */
+  const novaGeracao = useCallback((): { id: number; sinal: AbortSignal } => {
+    abortador.current?.abort();
+    abortador.current = new AbortController();
+    emVoo.current = new Set();
+    geracao.current += 1;
+    return { id: geracao.current, sinal: abortador.current.signal };
+  }, []);
+
+  useEffect(
+    () => () => {
+      abortador.current?.abort();
+      geracao.current += 1;
+    },
+    [],
+  );
+
+  const carregar = useCallback(
+    async (leadId: string): Promise<void> => {
+      const { id, sinal } = novaGeracao();
+      setCarregandoGrafo(true);
+      setExpandindo(null);
+      setErroGrafo(null);
+      setErroExpansao(null);
+      // Limpa antes de pedir: enquanto o novo lead carrega, nenhum dado do anterior fica na tela.
+      cursores.current = new Map();
+      aplicarGrafo({ nodes: [], edges: [] }, new Map());
+      setSelecionado(null);
+      setCortados({});
+      try {
+        const r = await buscarGrafo(leadId, sinal);
+        if (id !== geracao.current) return;
+        aplicarGrafo({ nodes: r.nodes, edges: r.edges }, calcularLayout(r.nodes, r.edges));
+        setCortados(r.omitted);
+        setSelecionado(r.rootRef);
+        setOcultos(new Set());
+      } catch (e) {
+        if (id !== geracao.current) return;
+        aplicarGrafo({ nodes: [], edges: [] }, new Map());
+        setErroGrafo(mensagem(e, 'Não foi possível carregar o grafo deste lead.'));
+      } finally {
+        if (id === geracao.current) setCarregandoGrafo(false);
+      }
+    },
+    [aplicarGrafo, novaGeracao],
+  );
 
   useEffect(() => {
     if (leadParam) void carregar(leadParam);
     else {
-      setGrafo({ nodes: [], edges: [] });
-      setPosicoes(new Map());
+      novaGeracao();
+      aplicarGrafo({ nodes: [], edges: [] }, new Map());
       setSelecionado(null);
       setErroGrafo(null);
+      setErroExpansao(null);
+      setExpandindo(null);
+      setCarregandoGrafo(false);
     }
-  }, [leadParam, carregar]);
+  }, [leadParam, carregar, novaGeracao, aplicarGrafo]);
 
   const escolherLead = useCallback(
     (leadId: string): void => {
@@ -141,41 +191,57 @@ export function ExplorerWorkspace() {
   const expandir = useCallback(
     async (no: GraphNode, kind: GraphNodeKind): Promise<void> => {
       const chave = `${no.ref}|${kind}`;
+      // Mesma expansao ja em andamento: ignora o clique repetido (nao busca a mesma pagina duas vezes).
+      if (emVoo.current.has(chave)) return;
+      emVoo.current.add(chave);
+
+      const id = geracao.current;
+      const sinal = abortador.current?.signal;
       setExpandindo(chave);
       setErroExpansao(null);
       try {
         const offset = cursores.current.get(chave) ?? 0;
-        const r = await expandirNo({
-          ref: no.ref,
-          kind,
-          offset,
-          pageSize: GRAPH_LIMITS.defaultPageSize,
-          parentDepth: no.depth,
-        });
+        const r = await expandirNo(
+          {
+            ref: no.ref,
+            kind,
+            offset,
+            pageSize: GRAPH_LIMITS.defaultPageSize,
+            parentDepth: no.depth,
+            parentDepthProof: no.depthProof ?? '',
+          },
+          sinal,
+        );
+        // O lead mudou (ou a tela foi reiniciada) enquanto esta resposta viajava: descarta.
+        if (id !== geracao.current) return;
 
-        const novosRefs = new Set(r.nodes.map((n) => n.ref));
-        const jaTem = new Set(grafo.nodes.map((n) => n.ref));
-        const realmenteNovos = [...novosRefs].filter((x) => !jaTem.has(x)).length;
-        if (grafo.nodes.length + realmenteNovos > GRAPH_LIMITS.maxNodesOnCanvas) {
+        // Sempre sobre o grafo MAIS RECENTE (ref), e nao sobre o do momento do clique:
+        // duas expansoes sobrepostas nao podem apagar o resultado uma da outra.
+        const atual = grafoRef.current;
+        const jaTem = new Set(atual.nodes.map((n) => n.ref));
+        const realmenteNovos = r.nodes.filter((n) => !jaTem.has(n.ref)).length;
+        if (atual.nodes.length + realmenteNovos > GRAPH_LIMITS.maxNodesOnCanvas) {
           setErroExpansao(
             `O grafo chegou ao limite de ${GRAPH_LIMITS.maxNodesOnCanvas} entidades. Recomece a partir de um lead para continuar.`,
           );
           return;
         }
 
-        const fundido = fundirGrafo(grafo, { nodes: r.nodes, edges: r.edges });
-        setGrafo(fundido);
-        setPosicoes(calcularLayout(fundido.nodes, fundido.edges, { fixos: posicoes, iteracoes: 160 }));
-        if (r.expanded.nextOffset !== null) cursores.current.set(chave, r.expanded.nextOffset);
-        else cursores.current.set(chave, Number.MAX_SAFE_INTEGER);
+        const fundido = fundirGrafo(atual, { nodes: r.nodes, edges: r.edges });
+        aplicarGrafo(fundido, calcularLayout(fundido.nodes, fundido.edges, { fixos: posicoesRef.current, iteracoes: 160 }));
+        cursores.current.set(chave, r.expanded.nextOffset ?? Number.MAX_SAFE_INTEGER);
         setCortados((c) => ({ ...c, ...r.omitted }));
       } catch (e) {
+        if (id !== geracao.current) return;
         setErroExpansao(mensagem(e, 'Não foi possível carregar estas relações.'));
       } finally {
-        setExpandindo(null);
+        if (id === geracao.current) {
+          emVoo.current.delete(chave);
+          setExpandindo((atual) => (atual === chave ? null : atual));
+        }
       }
     },
-    [grafo, posicoes],
+    [aplicarGrafo],
   );
 
   // ---- derivados ---------------------------------------------------------
@@ -256,8 +322,8 @@ export function ExplorerWorkspace() {
             número escuro em cada círculo é quanto ainda falta carregar.
           </p>
           <p>
-            <strong className="text-navy-900">3. Interprete.</strong> Linha cheia e selo “Verificada” = a ligação existe no
-            cadastro. Sinal cinza “Desconhecido” = não foi verificado, o que não significa que não exista. A análise por IA
+            <strong className="text-navy-900">3. Interprete.</strong> Linha cheia e selo “Vínculo no cadastro” = a ligação
+            existe no cadastro, sem conferência externa. Sinal cinza “Desconhecido” = não foi verificado, o que não significa que não exista. A análise por IA
             ainda não está disponível nesta versão.
           </p>
         </div>
