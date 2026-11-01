@@ -183,6 +183,108 @@ const limpo = (r) => r.nomes.length === 0 && r.ids === 0;
     await sessao('alfa'); await p.close();
   }
 
+  // W9 — mudanca de contexto CONHECIDA pela aplicacao: logout em OUTRA aba. Sem foco, sem esperar os 20 s.
+  {
+    await limpar(req);
+    const p = await nova();
+    await abrirAlfa(p);
+    const outra = await nova();
+    await outra.goto(BASE + '/?lead=lead_alfa_0000002'); // segunda aba do mesmo navegador (mesmos cookies)
+    await outra.waitForSelector('[data-no="LEAD:lead_alfa_0000002"]');
+    await sessao('fora'); // o logout apagou os cookies
+    const t0 = Date.now();
+    await outra.evaluate(() => window.__anunciar('logout')); // o que o LogoutButton faz apos a API responder
+    await p.getByTestId('bench-login').waitFor({ timeout: 5000 });
+    const dt = Date.now() - t0;
+    const r = await rastrosAlfa(p);
+    ok('W9 logout em outra aba: a aba do Explorer descarta TUDO em < 3 s, sem foco e sem esperar 20 s', limpo(r) && r.nos === 0 && dt < 3000, `${dt} ms`);
+    await sessao('alfa'); await outra.close(); await p.close();
+  }
+
+  // W10 — login de OUTRA conta em outra aba (Beta): a aba do Explorer, ainda do Alfa, descarta na hora
+  {
+    await limpar(req);
+    const p = await nova();
+    await abrirAlfa(p);
+    const outra = await nova();
+    await outra.goto(BASE + '/');
+    await sessao('beta'); // login do Beta nesta aba troca os cookies do navegador inteiro
+    const t0 = Date.now();
+    await outra.evaluate(() => window.__anunciar('login'));
+    await p.getByText('Nenhum lead selecionado').waitFor({ timeout: 5000 });
+    const dt = Date.now() - t0;
+    const r = await rastrosAlfa(p);
+    ok('W10 login de outra conta em outra aba: Explorer descarta em < 3 s, sem foco', limpo(r) && r.nos === 0 && dt < 3000 && (await p.getByTestId('bench-sessao').innerText()).startsWith('beta/'), `${dt} ms`);
+    await sessao('alfa'); await outra.close(); await p.close();
+  }
+
+  // W11 — logout NESTA aba (LogoutButton): descarte imediato, antes de qualquer resposta da rede
+  {
+    await limpar(req);
+    const p = await nova();
+    await abrirAlfa(p);
+    await p.route('**/api/v1/auth/me', (rota) => new Promise((r) => setTimeout(() => rota.continue().then(r), 4000))); // /auth/me lento: o descarte NAO pode depender dele
+    await sessao('fora');
+    const t0 = Date.now();
+    await p.evaluate(() => window.__anunciar('logout'));
+    await p.getByTestId('explorer-sessao-mudou').waitFor({ timeout: 1500 });
+    const dt = Date.now() - t0;
+    const r = await rastrosAlfa(p);
+    ok('W11 logout na mesma aba: descarte imediato, sem esperar /auth/me (que levava 4 s)', limpo(r) && r.nos === 0 && dt < 1500, `${dt} ms`);
+    await p.unroute('**/api/v1/auth/me'); await sessao('alfa'); await p.close();
+  }
+
+  // W12 — anuncio sem mudanca real, e mensagens invalidas, NAO apagam o trabalho
+  {
+    await limpar(req);
+    const p = await nova();
+    await abrirAlfa(p);
+    const nosAntes = await p.locator('svg [data-no]').count();
+    await p.evaluate(() => window.__anunciar('login')); // anuncio, mas a identidade e a mesma
+    await p.evaluate(() => { const c = new BroadcastChannel('propectai-sessao'); c.postMessage({ tipo: 'apagar-tudo' }); c.postMessage('logout'); c.postMessage(null); c.close(); });
+    await p.waitForTimeout(1200);
+    ok('W12 login anunciado com a mesma identidade + mensagens invalidas: nada e descartado', (await p.locator('svg [data-no]').count()) === nosAntes && (await p.getByTestId('explorer-sessao-mudou').count()) === 0);
+    await p.close();
+  }
+
+  // W13 — componentes REAIS de login e logout anunciam a mudanca (e so quando a API confirma)
+  {
+    await limpar(req);
+    const p = await nova();
+    await abrirAlfa(p);
+    const nosAntes = await p.locator('svg [data-no]').count();
+    const aut = await nova();
+    // (a) login com senha ERRADA: a API recusa -> nenhum anuncio -> o Explorer segue intacto, mesmo com cookie diferente
+    await aut.goto(BASE + '/?auth=1');
+    await aut.getByLabel('E-mail').or(aut.locator('#email')).fill('beta@exemplo.test');
+    await aut.locator('#password').fill('errada');
+    await sessao('beta');
+    await aut.locator('form button[type="submit"], form button:has-text("Entrar")').first().click();
+    await aut.waitForTimeout(1500);
+    ok('W13a login recusado pela API nao anuncia nada: Explorer intacto', (await p.locator('svg [data-no]').count()) === nosAntes && (await p.getByTestId('explorer-sessao-mudou').count()) === 0);
+    // (b) login CORRETO como Beta: o LoginForm real anuncia -> o Explorer do Alfa descarta
+    await aut.locator('#password').fill('senha-correta');
+    const t0 = Date.now();
+    await aut.locator('form button[type="submit"], form button:has-text("Entrar")').first().click();
+    await p.getByText('Nenhum lead selecionado').waitFor({ timeout: 5000 });
+    const dt = Date.now() - t0;
+    ok('W13b LoginForm real: login bem-sucedido em outra aba descarta o Explorer do workspace anterior', limpo(await rastrosAlfa(p)) && dt < 3000, `${dt} ms`);
+    await sessao('alfa'); await aut.close(); await p.close();
+  }
+  {
+    await limpar(req);
+    const p = await nova();
+    await abrirAlfa(p);
+    const aut = await nova();
+    await aut.route('**/api/v1/auth/logout', async (rota) => { await sessao('fora'); await rota.continue(); }); // a API apaga os cookies
+    await aut.goto(BASE + '/?auth=1');
+    const t0 = Date.now();
+    await aut.getByRole('button', { name: 'Sair' }).click();
+    await p.getByTestId('bench-login').waitFor({ timeout: 5000 });
+    ok('W13c LogoutButton real: logout em outra aba tira o Explorer da tela em < 3 s', limpo(await rastrosAlfa(p)) && Date.now() - t0 < 3000, `${Date.now() - t0} ms`);
+    await sessao('alfa'); await aut.close(); await p.close();
+  }
+
   await limpar(req);
   const relevantes = erros.filter((e) => !/favicon|Failed to load resource|net::ERR_/.test(e));
   ok('sem erro de JavaScript no console durante as trocas', relevantes.length === 0, relevantes.join(' | ').slice(0, 300));

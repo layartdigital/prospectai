@@ -1,7 +1,11 @@
 import { chaveDeIdentidade, type SessionResponse } from '@propectai/types';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { anunciarMudancaDeSessao } from '@/lib/session-events';
+(window as unknown as { __anunciar: typeof anunciarMudancaDeSessao }).__anunciar = anunciarMudancaDeSessao; // mesma funcao que Login/Logout usam
 import { ExplorerWorkspace } from '@/components/intelligence/explorer-workspace';
+import { LoginForm } from '@/components/auth/login-form';
+import { LogoutButton } from '@/components/auth/logout-button';
 
 /**
  * Emulacao BANCADA de `app/(app)/layout.tsx` + `app/(app)/intelligence/page.tsx`:
@@ -34,6 +38,10 @@ function Pagina() {
     </>
   );
 }
+// `?auth=1`: renderiza os componentes REAIS de login e logout (bancada de anuncio de sessao entre abas).
+const soAuth = new URLSearchParams(window.location.search).get('auth') === '1';
 createRoot(document.getElementById('root')!).render(
-  <main style={{ padding: '24px 20px', maxWidth: 1700, margin: '0 auto' }}><Pagina /></main>,
+  <main style={{ padding: '24px 20px', maxWidth: 1700, margin: '0 auto' }}>
+    {soAuth ? <><LoginForm /><LogoutButton /></> : <Pagina />}
+  </main>,
 );

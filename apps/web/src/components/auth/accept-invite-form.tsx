@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 
 import { clientApiUrl } from '@/lib/client-api-url';
+import { anunciarMudancaDeSessao } from '@/lib/session-events';
 
 const MIN_PASSWORD_LENGTH = 10;
 
@@ -62,6 +63,7 @@ export function AcceptInviteForm({
         return;
       }
 
+      anunciarMudancaDeSessao('login');
       router.push('/dashboard');
       router.refresh();
     } catch {

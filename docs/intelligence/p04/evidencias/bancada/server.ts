@@ -64,6 +64,14 @@ createServer(async (req, res) => {
       chamadas.length = 0;
       return json(res, 200, { ok: true });
     }
+    // Bancada: login/logout simplificados (o componente REAL e que esta sob teste, nao a API de auth).
+    if (p === '/api/v1/auth/login' && req.method === 'POST') {
+      let corpo = '';
+      for await (const c of req) corpo += c;
+      const { password } = JSON.parse(corpo || '{}') as { password?: string };
+      return password === 'senha-correta' ? json(res, 200, { ok: true }) : json(res, 401, { message: 'Credenciais inválidas' });
+    }
+    if (p === '/api/v1/auth/logout' && req.method === 'POST') return json(res, 200, { ok: true });
     const ck = req.headers.cookie ?? '';
     const sessaoCk = /(?:^|;\s*)as=(\w+)/.exec(ck)?.[1] ?? 'alfa';
     const usuarioCk = /(?:^|;\s*)usr=(\w+)/.exec(ck)?.[1] ?? 'u1';

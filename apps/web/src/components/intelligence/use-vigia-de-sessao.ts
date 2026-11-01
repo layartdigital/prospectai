@@ -4,6 +4,7 @@ import { chaveDeIdentidade, compararIdentidade, type SessionResponse } from '@pr
 import { useCallback, useEffect, useRef } from 'react';
 
 import { ClientApiError, clientApi } from '@/lib/client-api';
+import { ouvirMudancaDeSessao } from '@/lib/session-events';
 
 /** Intervalo da checagem periódica enquanto a aba está visível. */
 export const INTERVALO_VIGIA_MS = 20_000;
@@ -21,7 +22,12 @@ export type MotivoDeMudanca = 'IDENTIDADE_DIFERENTE' | 'SESSAO_ENCERRADA';
  * Por que não basta a API recusar: a recusa (prova de profundidade, RLS) protege o
  * dado no servidor, mas o grafo do workspace anterior continuaria desenhado na tela.
  *
- * Gatilhos: foco da janela, aba voltando a ficar visível, restauração do bfcache
+ * Gatilho IMEDIATO para mudança de contexto que a própria aplicação conhece (P04-QA-03): login,
+ * logout ou troca anunciados por outra aba (`lib/session-events`). `logout` descarta na hora, sem
+ * esperar rede; `login`/`troca` consultam `/auth/me` já. A checagem periódica de 20 s é só a rede de
+ * segurança para mudanças que a aplicação não viu (cookie trocado por fora, sessão expirada).
+ *
+ * Gatilhos de reserva: foco da janela, aba voltando a ficar visível, restauração do bfcache
  * (`pageshow`), volta da rede, intervalo enquanto visível, e `verificarAgora()`, que a
  * tela chama quando uma de suas requisições volta 401/403.
  *
@@ -74,7 +80,17 @@ export function useVigiaDeSessao(opcoes: {
     window.addEventListener('pageshow', aoVoltar);
     window.addEventListener('online', aoVoltar);
     document.addEventListener('visibilitychange', aoVoltar);
+    const parar = ouvirMudancaDeSessao((motivo) => {
+      if (disparou.current) return;
+      if (motivo === 'logout') {
+        disparou.current = true;
+        aoMudar.current('SESSAO_ENCERRADA');
+      } else {
+        void verificarAgora();
+      }
+    });
     return () => {
+      parar();
       vivo.current = false;
       window.clearInterval(timer);
       window.removeEventListener('focus', aoVoltar);

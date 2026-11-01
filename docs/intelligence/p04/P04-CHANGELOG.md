@@ -32,3 +32,11 @@ Rota `/intelligence`, 2 endpoints, grafo de relações verificáveis do próprio
 
 **Sem mudança** de contrato de API, de schema, de migration ou de produção.
 
+## 0.1.0 + QA-03 (P04-QA-03) — homologação funcional, 01/11/2026 (versão do módulo inalterada: 0.1.0)
+
+**Interface / segurança**
+- **Mudança de sessão conhecida pela aplicação descarta o Explorer na hora**, sem depender da checagem de 20 s: login, logout, cadastro e aceite de convite anunciam a mudança às demais abas do navegador (`lib/session-events.ts`, `BroadcastChannel` com `storage` de reserva), **só depois de a API confirmar**. O vigia do Explorer reage: `logout` descarta sem esperar rede; `login`/`troca` consultam `/auth/me` na hora. O aviso é só um gatilho (sem identidade nem dado) e mensagens inválidas são ignoradas. A checagem periódica permanece como rede de segurança.
+- Arquivos de outros módulos tocados (uma chamada cada, após a confirmação da API): `login-form.tsx`, `register-form.tsx`, `accept-invite-form.tsx`, `logout-button.tsx`.
+
+**Sem mudança** de contrato de API, schema, migration, CI ou produção.
+
