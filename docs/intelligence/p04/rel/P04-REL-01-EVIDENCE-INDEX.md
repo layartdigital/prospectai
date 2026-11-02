@@ -1,6 +1,6 @@
 # P04-REL-01 — H. Índice de evidências
 
-**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (Documentação) · **Versão:** 1.0.0 · **Data:** 02/11/2026
+**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (Documentação) · **Versão:** 1.1.0 · **Data:** 02/11/2026
 **Relação com a homologação:** registra de onde veio cada afirmação dos documentos P04-REL-01. Tudo abaixo é **sanitizado**: nenhuma credencial, cookie, token ou valor de variável. `F:\drmind` (Bellvia) não foi modificado.
 
 ## 1. Comandos executados nesta rodada (todos somente leitura)
@@ -14,6 +14,32 @@
 | E05 | computador do proprietário | `get_device_info` | dispositivo respondeu; pasta conectada: `C:\ResgateProjetos\prospectai` |
 | E06 | computador do proprietário | `device_bash` (DNS/HTTP/SSH) | **falhou ao iniciar a VM:** "too little free disk space … needs up to 17 GB" |
 | E07 | sessão da Executora | execução de teste do roteiro `P04-REL-01-preflight-somente-leitura.sh` **no container da própria sessão** | **Não é evidência do servidor.** Provou só: sintaxe válida (`bash -n`), não grava em disco e **degrada sem falhar** quando não há Docker nem as pastas do projeto |
+
+### 1.1 Observação do servidor feita pelo proprietário (E08)
+
+| ID | Onde | O que | Resultado |
+|---|---|---|---|
+| **E08** | servidor (`/opt/apps/prospectai`), como `root`, via `scp` + `ssh` a partir do computador do proprietário | execução **uma única vez**, em **2026-11-02T15:52:26Z**, do roteiro `P04-REL-01-preflight-somente-leitura.sh` **v1.0.0** (somente leitura; sem bloco 13) | saída em UTF-8 com BOM e CRLF, **319 linhas, 21.605 bytes**, **SHA-256 `b39e573ac6cc0b06a36afaec20b28984f0101e47f5fbd9bccbc5d1a23af864e5`** |
+
+**Guarda da saída bruta.** O arquivo está com o proprietário em `C:\ResgateProjetos\prospectai\Claude outputs\preflight.txt` e **não é versionado**: o repositório é público e a saída traz caminhos, tamanhos, endereços e pastas do servidor — e, na seção 12, **nomes de pastas de outras aplicações** (defeito do roteiro v1.0, corrigido na v1.1; esses nomes **não** foram copiados para nenhum documento). Revisão da Executora: **sem segredo** (somente nomes de variável, sem valores).
+(Uma primeira tentativa do proprietário, no computador pessoal, falhou por o roteiro não existir no caminho; não é evidência do servidor e não foi usada. Seu arquivo, de 7.820 bytes, **não** é E08.)
+
+**Excertos sanitizados, por seção do roteiro** (cada fato dos documentos aponta para uma destas linhas):
+
+| Seção | Fato observado | Gate |
+|---|---|---|
+| §1–§3 | host `hal-server-848101`; Ubuntu 24.04.4; kernel 6.8.0-136; uptime 2 d 21 h, carga 0,83; 6 CPUs; RAM 15.991 MB (disponível 8.259); swap 2.047 MB; `/dev/sda3` 393 GB, 193 GB livres, único sistema de arquivos de `/`, `/opt` e `/var/lib/docker`; imagens 33,07 GB, cache de build 52,74 GB (38,17 GB recuperáveis); Docker 29.7.1, Compose v5.3.1 | REL-07 |
+| §4 | projeto `prospectai-prod` `running(7)`: `web`, `worker`, `postgres` (healthy), `redis` (healthy), `api`, `gateway` (`127.0.0.1:3102->80`), `gmaps-scraper`; todos com `StartedAt` 2026-10-30T18:38:22Z e 0 reinícios; projeto `propectai` (dev) `exited(3)`, 3 containers parados há ~3 semanas | REL-02, REL-06 |
+| §4 | imagem em execução da `api` = `sha256:64b25a48…`; `web` = `sha256:dd9dd874…`; `worker` = `sha256:dddc34b6…` | REL-03 |
+| §5 | redes `prospectai-prod_internal` (172.21.0.0/16) e `…_proxy_api` (172.30.250.0/29) só com containers do projeto; volumes `prospectai-prod_prospectai_{postgres,redis}_data`; bind do scraper `/opt/data/prospectai/gmapsdata`; bind do gateway `/opt/apps/prospectai/infra/nginx/default.conf` | REL-02, REL-06 |
+| §6 | todos `mem=0`, `cpus=0`, `restart=unless-stopped`, `json-file` sem rotação; tamanhos de log `api` 72.823 B, `worker` 3.541 B, `postgres` 10.429 B, `web` 5.124 B, `gateway` 597.842 B, `redis` 2.947.718 B, `scraper` 4.957 B (só metadados) | REL-10 |
+| §7 | `HEAD` `2c4b1b25fac8e4266b3505270bb43e05127c60a7`, ramo `main`, merge do PR #6 (30/10/2026 15:17 -0300), **árvore sem alterações**; remoto SSH; objeto `cebbfa6` ausente (esperado) | REL-03 |
+| §8 | `compose.prod.yml`, `.env.production`, `.env.banco`, `.env.dono` `600 root:root`; só nomes de chave; sem `GIT_COMMIT`/`BUILT_AT`; imagens `prospectai-prod-api:latest` (`408bd870aa0a`, 2 d), `…api:pre-dbrem06` (`64b25a48f647`, 3 d), `…worker:latest` (4 d), `…web:latest` (3 semanas), `…web:pre-net-2b1-20261007` (4 semanas) | REL-03 |
+| §9 | vhost `prospectai-stage.layart.com.br.conf`: `server_name` do domínio; `proxy_pass http://127.0.0.1:3102`; `location = /api/v1/auth/register` (conteúdo não impresso); portas `0.0.0.0:3101` e `[::]:3101` escutando, `127.0.0.1:3102` | REL-01, REL-02, REL-06 |
+| §10 | pela porta local: `/login` HTML (build ID `KFVH0MaXXOVeIbqOoZ9NV`); `/api/v1/health` 200 `ok`; `/api/v1/system/version` 200 `0.1.1`, `production`, `commit: null`; `/intelligence` sem sessão 307 → `/login?next=%2Fintelligence` | REL-01, REL-03 |
+| §11 | DNS → `108.174.144.216`; TLS Let's Encrypt, CN e SAN = o domínio, 2026-10-08 → 2027-01-06; HTTPS: `/` 307 `/login`; `/login` 200; `/api/v1/health` 200; `/api/v1/system/version` 200 | REL-01 |
+| §12 | só entradas do projeto: `propectai-20260917.sql.gz` e `propectai-20260921-1336.sql.gz` (42.560 B, `gzip -t` íntegro), `prospectai-arvore-20260921-1726.tgz`, dois `env.production-*.bak`, pastas `prospectai-dbrem04-20261030-1230` e `prospectai-dbrem06-20261030-1523` (conteúdo não inspecionado); nenhuma rotina agendada cita o projeto | REL-08 |
+| §13 | **pulado** (catálogo desligado) | REL-05 |
 
 ## 2. Evidências do repositório (commit `cebbfa6`)
 
@@ -43,33 +69,35 @@
 | O03 | CI #78: https://github.com/layartdigital/prospectai/actions/runs/41465972020 — PASS; 5/5 jobs | informado na ordem; não inspecionado |
 | O04 | Artefato `e2e-evidencias` do CI #77: **ID `13143194553`**, **expiração `2026-12-02T13:15:34Z`**, **SHA-256 `7dc407ef63f8c7cf940228ebce435c326ac6bd26f4e18035bae792742fbccac6`** | consistente com `retention-days: 30` do workflow (upload em 02/11/2026). Conteúdo não inspecionado pela Executora. Entra no índice do release, **sem commit só para isso**, como a ordem determina |
 
-## 4. O que **não** tem evidência (e por quê)
+## 4. O que **ainda não** tem evidência
 
-| Tema | Estado | Motivo |
+| Tema | Estado | Como fechar |
 |---|---|---|
-| Domínio, DNS, certificado, vhost | NOT_VERIFIED | proxy da sessão recusa o domínio |
-| Topologia real, banco/containers/volumes compartilhados | NOT_VERIFIED | sem acesso ao servidor |
-| Commit implantado | NOT_VERIFIED | sem acesso; endpoint não informa |
-| Capacidade (CPU, memória, disco) | NOT_VERIFIED | sem acesso |
-| Backup (existência, data, integridade, restauração) | NOT_VERIFIED | sem acesso |
-| Estado do banco (migrations aplicadas, papéis) | NOT_VERIFIED | consulta ao catálogo exige autorização |
-| Estado do GATE-DB-42501 (T1) | NOT_VERIFIED | não documentado no repositório |
+| Natureza da stack (teste sem cliente × operacional) | NOT_VERIFIED | **declaração escrita do proprietário** |
+| Origem e data de criação das imagens em execução; por que a `api` roda `pre-dbrem06` | NOT_VERIFIED | roteiro v1.1, seção 8b; resposta do proprietário |
+| Processo na porta `3101` | NOT_VERIFIED | roteiro v1.1, seção 9b |
+| Conteúdo do bloco `/api/v1/auth/register` do vhost | NOT_VERIFIED | roteiro v1.1, seção 9b |
+| Conteúdo das pastas `dbrem04/06` (existe dump de 30/10?) | NOT_VERIFIED | roteiro v1.1, seção 12b (só nomes e tamanhos) |
+| Restauração de backup | NOT_VERIFIED | teste em container descartável (execução futura, com autorização) |
+| Estado do banco (migrations aplicadas, papéis) | NOT_VERIFIED | bloco 13 do roteiro, sob autorização |
+| Estado do GATE-DB-42501 (T1) | NOT_VERIFIED | informação do proprietário |
+| `git fetch` por SSH no servidor | NOT_VERIFIED | decisão: tentar sob autorização, ou `git bundle` + `scp` |
 
-## 5. Como fechar as lacunas
+## 5. Mapa das seções do roteiro para os gates
 
-Executar `P04-REL-01-preflight-somente-leitura.sh` no servidor (ou liberar um canal somente leitura) e anexar a saída conferida a este índice como **E08…**. Cada seção da saída corresponde a um gate: seções 1–3 → REL-07; 4–6 → REL-02/06/10; 7–8 → REL-03; 9–11 → REL-01; 12 → REL-08; 13 (opcional) → REL-05/estado do banco.
+Seções 1–3 → REL-07; 4–6 → REL-02/06/10; 7–8 → REL-03; 9–11 → REL-01; 12 → REL-08; 13 (opcional) → REL-05/estado do banco. Em E08, 1–12 foram executadas; a 13 foi pulada de propósito. O roteiro **v1.1.0** acrescenta as seções 8b, 9b e 12b (E09 será a saída dele, se for executado).
 
 ## 6. Hashes SHA-256 dos arquivos desta rodada
 
-(calculados sobre o conteúdo dos arquivos no commit; este índice não se auto-referencia)
+(v1.1.0; calculados sobre o conteúdo dos arquivos no commit; este índice não se auto-referencia. O roteiro está na **v1.1.0**; a v1.0.0, executada em E08, está no commit `1da1936`, SHA-256 `b60e70a955a1a8cedfaa4ab23e57995047d8a0012478919c3eea29e064372020`.)
 
 ```text
-0f76675483f3e00acc74494cb794586e6e29505eb1f124e349792a28469cfbe2  P04-REL-01-INFRASTRUCTURE-PREFLIGHT.md
-b62a610c6b92f04f2cb906aec9ddd3790d7ab2a14b8b6be48229be9c67cacf12  P04-REL-01-DEPLOYMENT-PLAN.md
-bd2716513c1a058972ff07a08e8d83bda17dc1e75c73a8bf35b400a1cec6b4cf  P04-REL-01-ROLLBACK-PLAN.md
-d64af99b37489a32a2bda3b56381f7ee2a7622a8557c3c986856caa0e45930ec  P04-REL-01-RISK-REGISTER.md
-8261e6c7e96b9d9c9b5ea2d7b1d0baa83109459be3a3bafbb66ee8bf7214b9f6  P04-REL-01-SMOKE-TEST-PLAN.md
-e7d1d05b9abe4ac24f7037a723799f03db3798de72b990c3b8ac4fde3e7a38c3  P04-REL-01-RELEASE-CHECKLIST.md
-9e819803afc26f54e5ff75263272a8fcf3856161f6b8a4d160c0f83090e7a718  P04-REL-01-EXECUTIVE-SUMMARY.md
-b60e70a955a1a8cedfaa4ab23e57995047d8a0012478919c3eea29e064372020  P04-REL-01-preflight-somente-leitura.sh
+f0289799f04ee2bede4f6525ee0596cbe3f061240af66c58a48db9ff03bb80a9  P04-REL-01-INFRASTRUCTURE-PREFLIGHT.md
+096662e8344ac8a46044d85ac9ab9af6ccd536353fc38767461e6fe81e36895a  P04-REL-01-DEPLOYMENT-PLAN.md
+db29dfa76d59e1d580c5f505dc5045783897c2f364fe85fcd938c8a1d2c6005a  P04-REL-01-ROLLBACK-PLAN.md
+90a043226550a1d5ffc2b596bea6b4070f04e981cab8b02b051cda7386467403  P04-REL-01-RISK-REGISTER.md
+e629e1b7fc56c38c36ea72dae6a89cf194a7540a738ee9cd2ca93fc3fca672b8  P04-REL-01-SMOKE-TEST-PLAN.md
+a94c7a21ad52793d346913dc8215dfd88715c5d4ee3ae7cdf5ac77b051c3ab89  P04-REL-01-RELEASE-CHECKLIST.md
+c715612db58fcc067c81e97f6da0bd57510d6d4fdc33f5d78921e7457bc6b949  P04-REL-01-EXECUTIVE-SUMMARY.md
+1cde721946530ae77480e5e14df895f0c8602612c8d4c9e9604b5554d313388e  P04-REL-01-preflight-somente-leitura.sh
 ```

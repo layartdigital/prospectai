@@ -1,6 +1,6 @@
 # P04-REL-01 — E. Plano de smoke tests (pós-publicação)
 
-**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (QA Automation e Frontend/UX; AppSec no isolamento) · **Versão:** 1.0.0 · **Data:** 02/11/2026
+**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (QA Automation e Frontend/UX; AppSec no isolamento) · **Versão:** 1.1.0 · **Data:** 02/11/2026
 **Relação com a homologação:** valida **no destino** o que o CI #77/#78 provou no runner (56 testes: 27 Explorer + 29 regressão). **Nada deste plano foi executado.** `F:\drmind` (Bellvia) não foi modificado.
 
 ## 1. Regras
@@ -11,6 +11,9 @@
 - Capturas de tela só de telas autenticadas **sem senha visível** e, de preferência, com dados do tenant de demonstração.
 - Os testes do CI **não rodam como estão no destino**: as fixtures (`prisma/e2e-explorer-fixtures.ts`) **recusam** banco de host não local, de propósito. Este plano é, portanto, manual (e, se o proprietário quiser, automatizável depois com uma ordem própria).
 - Qualquer `FAIL` em S2 (isolamento) aciona **G6: rollback imediato**.
+- **Stack compartilhada (Cenário C, observado):** o smoke roda na stack que o domínio de homologação serve; **nenhum teste cria, altera ou apaga dado** sem autorização (`REQUIRES_AUTHORIZATION`). Cadastro de nova conta pode estar sujeito ao bloco próprio do vhost em `/api/v1/auth/register` (conteúdo **ainda não lido**, R30).
+- **Linha de base:** o estado anterior é `/api/v1/health` = `ok` (`database`, `redis`, `scraper` = `ok`) e `/api/v1/system/version` = `{"version":"0.1.1","environment":"production","commit":null,"builtAt":null}`; comparar após a publicação.
+- **Regressão (S3) pode ser mais que opcional:** se a data de criação das imagens em execução for anterior a commits de runtime da `main` (plano §7.1), S3 deve ser completa.
 
 ## 2. Camadas
 
@@ -29,10 +32,11 @@
 | S0-1 | `GET /login` | 200; rodapé `PropectAI v0.1.1` |
 | S0-2 | `GET /api/v1/health` | 200; `checks.database=ok`, `checks.redis=ok`; `status` = `ok` (ou `degraded` **só** se o scraper estiver fora, **igual ao estado de D0**) |
 | S0-3 | `GET /api/v1/system/version` | 200; `version` = `0.1.1`; `environment` coerente; `commit` = SHA **se** a opção D8 foi feita, senão `null` (documentado) |
-| S0-4 | `GET /intelligence` sem sessão | redirecionamento ao login (não 200) |
-| S0-5 | `GET /api/v1/intelligence/graph?leadId=<qualquer>` sem sessão | **401** (rota existe e está protegida; 404 = módulo não carregou) |
+| S0-4 | `GET /intelligence` sem sessão | **307 → `/login?next=%2Fintelligence`** (**não discrimina versão**: o `middleware` da web já faz isso hoje, observado em E08 §10; serve só para provar que a rota não ficou pública) |
+| S0-4b | **Build ID do Next** no comentário HTML de `GET /login` | **muda** em relação à linha de base de D0 (hoje `KFVH0MaXXOVeIbqOoZ9NV`); igual = a web antiga ainda está no ar |
+| S0-5 | `GET /api/v1/intelligence/graph?leadId=<qualquer>` sem sessão | **401** (rota existe e está protegida; **404 = API antiga ou módulo não carregou**). É o discriminador de versão da API: a linha de base de D0 deve ter sido **404** |
 | S0-6 | `GET /api/v1/intelligence/expand` sem sessão | **401** |
-| S0-7 | HTTPS do domínio de homologação | certificado válido, host correto, `/` e `/api` roteados para a stack **identificada no preflight** |
+| S0-7 | HTTPS do domínio de homologação | certificado válido (**observado em 02/11:** Let's Encrypt, validade até 06/01/2027), host correto, `/` → 307 `/login`, `/api` roteado para a stack `prospectai-prod` (**Cenário C confirmado**) |
 
 ### S1 — Explorer com 1 conta autorizada
 

@@ -1,13 +1,13 @@
 # P04-REL-01 — C. Plano de rollback
 
-**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (DevOps/SRE; Database e AppSec como apoio) · **Versão:** 1.0.0 · **Data:** 02/11/2026
+**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (DevOps/SRE; Database e AppSec como apoio) · **Versão:** 1.1.0 · **Data:** 02/11/2026
 **Relação com a homologação:** acompanha `P04-REL-01-DEPLOYMENT-PLAN.md`. **Comandos preparados, nenhum executado.** `F:\drmind` (Bellvia) não foi modificado.
 
 ## 1. Princípio
 
 O release **não altera banco, variáveis nem infraestrutura** e o Explorer **só lê** (2 endpoints GET). Portanto, voltar é **trocar duas imagens e a árvore de código**; não há dado novo a desfazer nem dado a destruir. Isso só vale **se** o plano de publicação for seguido sem os passos opcionais; qualquer desvio (por exemplo D8, que edita `.env.production`) acrescenta um item de rollback, listado na §6.
 
-**Pré-requisito de existência do rollback:** o snapshot de imagens do passo D1.2 (`docker tag … :pre-p04-<STAMP>`). **Sem ele não há caminho de volta por tag**; por isso `ROLLBACK_GATE = BLOCKED` até D1.2 existir (não é verificável antes de executar a fase D).
+**Pré-requisito de existência do rollback:** o snapshot de imagens do passo D1.2 (`docker tag <ID da imagem em execução> …:pre-p04-<STAMP>`). **Correção 1.1.0 (E08 §8):** o snapshot é feito pelo **ID da imagem do container** (`docker inspect -f '{{.Image}}' …`), porque a `api` em execução é a `pre-dbrem06`, **não** a `:latest`; etiquetar `:latest` voltaria a uma versão que não estava no ar. **Sem ele não há caminho de volta por tag**; por isso `ROLLBACK_GATE = BLOCKED` até D1.2 existir (não é verificável antes de executar a fase D).
 
 ## 2. Gatilhos (objetivos)
 
@@ -39,7 +39,7 @@ REG=/opt/backups/p04-rel
 ### 3.1 Rollback da web (frontend)
 
 ```bash
-docker tag prospectai-prod-web:pre-p04-$STAMP prospectai-prod-web:latest   # a imagem anterior volta a ser a "latest"
+docker tag prospectai-prod-web:pre-p04-$STAMP prospectai-prod-web:latest   # a imagem anterior (a que estava NO AR) volta a ser a "latest"
 $C up -d --no-build --no-deps --force-recreate web
 curl -s -o /dev/null -w '/login -> %{http_code}\n' http://127.0.0.1:3102/login   # esperado 200
 ```
@@ -49,7 +49,7 @@ Roteamento: o gateway **não muda** (resolve `web` a cada 10 s); não há config
 Compatibilidade de contrato: a API anterior **não conhece** `/intelligence/*`; a web anterior também não — voltando a web **antes**, nenhuma tela chama endpoint inexistente.
 
 ```bash
-docker tag prospectai-prod-api:pre-p04-$STAMP prospectai-prod-api:latest
+docker tag prospectai-prod-api:pre-p04-$STAMP prospectai-prod-api:latest   # = a imagem `pre-dbrem06` se ela era a em execução (conferir com imagens-anteriores-$STAMP.txt)
 $C up -d --no-build --no-deps --force-recreate api
 curl -s http://127.0.0.1:3102/api/v1/health                                   # esperado o estado anterior (D0)
 $C exec -T api printenv DATABASE_URL_APP | sed -E 's#:[0-9a-f]{48}@#:***@#'   # propectai_app
@@ -61,6 +61,7 @@ O IP fixo `172.30.250.3` é preservado (mesma definição de rede).
 ```bash
 git checkout --detach "$(head -1 $REG/sha-anterior-$STAMP.txt | awk '{print $1}')"
 git rev-parse HEAD                                                            # confere com o SHA anterior
+git switch main                                                               # o SHA anterior era o da `main` (2c4b1b2): volta ao ramo, sem alterar arquivos
 ```
 Alternativa registrada no runbook de 21/09 (se a árvore anterior foi salva): restaurar o `tar` de `/opt/backups/prospectai-arvore-*.tgz`, que exclui `node_modules` e o clone do scraper.
 
@@ -75,7 +76,7 @@ Só `api` e `web` mudam. **Preservar**: volumes `prospectai_postgres_data`, `pro
 
 ## 4. Consequências para usuários (indicar, não esconder)
 
-- **Se a homologação compartilha a stack da operação** (hipótese C, não verificada), o rollback tem o mesmo efeito que a publicação: **segundos de indisponibilidade** de web e API, com falha pontual nas requisições em curso. As **sessões continuam válidas** (o segredo de acesso não muda). O Explorer deixa de existir na interface; nenhum dado de lead é perdido.
+- **A homologação compartilha a stack da operação** (Cenário C, **observado**), então o rollback tem o mesmo efeito que a publicação: **segundos de indisponibilidade** de web e API, com falha pontual nas requisições em curso. As **sessões continuam válidas** (o segredo de acesso não muda). O Explorer deixa de existir na interface; nenhum dado de lead é perdido.
 - **Dados "novos"**: o Explorer não cria dados. Qualquer dado criado por usuários **durante** a janela (leads, notas, pipeline) permanece, porque o banco não é revertido.
 - O rollback **não é destrutivo**: nada é apagado, só substituídas as imagens em uso.
 
@@ -95,6 +96,11 @@ Só `api` e `web` mudam. **Preservar**: volumes `prospectai_postgres_data`, `pro
 | Exportação de logs (D1.4) | nada a reverter (só arquivos em `/opt/backups`); manter como evidência |
 | Teste de restauração em container descartável | remover o container `propectai-restoretest*` |
 
+## 6.1 Dois pontos próprios deste servidor
+
+1. **Logs não voltam.** Recriar `api` ou `web` (na publicação **ou** no rollback) descarta o log do container recriado (E08: `json-file` sem rotação). Por isso a exportação de logs (D1.4) tem de ocorrer **antes de qualquer recriação**, inclusive antes de um rollback que ainda não foi precedido por ela.
+2. **`pre-dbrem06` é uma etiqueta existente e deve ser preservada.** O snapshot `pre-p04-<STAMP>` aponta para o mesmo ID; **não remover nenhuma das duas** (sem `docker rmi`, sem `prune`).
+
 ## 7. Testar o rollback antes de precisar dele
 
-Antes da janela, no passo D1.2, conferir que a etiqueta existe: `docker image inspect prospectai-prod-api:pre-p04-<STAMP> prospectai-prod-web:pre-p04-<STAMP>` retorna dois IDs **iguais** aos registrados em `imagens-anteriores-<STAMP>.txt`. É a única verificação do rollback que não custa uma interrupção.
+Antes da janela, no passo D1.2, conferir que a etiqueta existe: `docker image inspect -f '{{.Id}}' prospectai-prod-api:pre-p04-<STAMP> prospectai-prod-web:pre-p04-<STAMP>` retorna dois IDs **iguais** aos registrados em `imagens-anteriores-<STAMP>.txt` **e** aos de `docker inspect -f '{{.Image}}'` dos containers em execução. É a única verificação do rollback que não custa uma interrupção.

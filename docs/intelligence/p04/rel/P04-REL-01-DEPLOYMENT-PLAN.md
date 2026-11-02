@@ -1,10 +1,10 @@
 # P04-REL-01 — B. Plano de publicação (REL-B a REL-G)
 
-**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (Squad DevOps/SRE; Backend/API, Database, AppSec, QA e Documentação como apoio) · **Versão:** 1.0.0 · **Data:** 02/11/2026
+**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (Squad DevOps/SRE; Backend/API, Database, AppSec, QA e Documentação como apoio) · **Versão:** 1.1.0 · **Data:** 02/11/2026
 **Relação com a homologação:** transforma o resultado do CI #77/#78 em procedimento de implantação. Commit de release: `cebbfa6e54b96c1e4e840eb1d631e3b0a94eba79`.
 **Nada deste documento foi executado. Os comandos de alteração estão apenas apresentados.** `F:\drmind` (Bellvia) não foi modificado.
 
-> **Condição de uso.** Este plano **não pode ser executado** enquanto os gates da §2 não estiverem `PASS`. Hoje só REL-04, REL-05 e REL-11 têm evidência; os demais dependem do roteiro somente leitura (`P04-REL-01-preflight-somente-leitura.sh`). O plano foi escrito para a topologia que o repositório documenta (uma stack, `prospectai-prod`); se o preflight mostrar outra, §3 diz qual estratégia muda.
+> **Condição de uso.** Este plano **não pode ser executado** enquanto os gates da §2 não estiverem `PASS` e enquanto a **regra de parada** abaixo não for resolvida pelo proprietário. **Versão 1.1.0:** o preflight real (E08, 02/11/2026) confirmou o **Cenário C**: o domínio `prospectai-stage.layart.com.br` é a própria stack `prospectai-prod`. Isso **aciona a regra de parada** "domínio de homologação associado diretamente à produção / isolamento insuficiente / banco compartilhado". O que segue é o plano **para quando o proprietário decidir** (Estratégia D, com declaração escrita, ou Estratégia C). **Correções da 1.0.0:** o snapshot de imagens passa a usar o **ID da imagem em execução** (a `api` roda `pre-dbrem06`, não `:latest`), o `pg_dump` usa o usuário de bootstrap do container sem imprimir valores, e há uma alternativa de `git bundle` caso o `git fetch` por SSH não funcione.
 
 ## 1. Estratégias avaliadas
 
@@ -22,7 +22,7 @@
 
 **Condições para D valer** (senão a recomendação muda):
 
-1. REL-02 mostrar que o domínio de homologação **aponta para a stack `prospectai-prod`** *e* o proprietário confirmar, por escrito, que essa stack é **ambiente de teste sem cliente** (como descrito em 17/09). Se houver **dados ou usuários reais** na stack, o domínio de homologação estaria "associado diretamente à produção": **regra de parada** (§16 da ordem). Nesse caso a alternativa recomendada passa a ser **C** (ou **B**, se o preflight revelar uma homologação independente).
+1. **Observado (E08):** o domínio de homologação **aponta para a stack `prospectai-prod`** (Cenário C). Falta o proprietário confirmar, **por escrito**, que essa stack é **ambiente de teste sem cliente nem dado real** (como descrito em 17/09). Se houver **dados ou usuários reais** na stack, publicar nela é "associado diretamente à produção": **regra de parada** (§16 da ordem), e a alternativa recomendada passa a ser **C**. A **B** foi descartada: o preflight **não encontrou** homologação independente.
 2. REL-08 (backup) e REL-09 (rollback) `PASS`.
 3. REL-10: decisão do proprietário sobre os logs do GATE-DB-42501 (§5, passo D1.4).
 
@@ -30,25 +30,23 @@ A Estratégia A fica como **evolução futura** (resolve a falta de SHA e de ima
 
 ## 2. Gates de entrada (resumo; detalhe no relatório final)
 
-| Gate | Hoje | Necessário para executar |
+| Gate | Hoje (v1.1.0) | Necessário para executar |
 |---|---|---|
-| REL-01 Domínio e destino | NOT_VERIFIED | `PASS` |
-| REL-02 Isolamento | NOT_VERIFIED | `PASS` **ou** decisão escrita do proprietário (stack = teste) |
-| REL-03 Commit implantado | NOT_VERIFIED | SHA lido no servidor |
+| REL-01 Domínio e destino | **PASS** (DNS, TLS e vhost → `127.0.0.1:3102` observados) | — |
+| REL-02 Isolamento | **FAIL** (domínio = stack `prospectai-prod`) | decisão escrita do proprietário (stack = teste sem cliente) **ou** Estratégia C |
+| REL-03 Commit implantado | PARTIAL (árvore `2c4b1b2` limpa; imagens não identificadas) | `image inspect` das imagens em execução |
 | REL-04 Compatibilidade API/web | PASS | — |
-| REL-05 Migrations | PASS (nenhuma) | — |
-| REL-06 Serviços compartilhados | NOT_VERIFIED | mapeados |
-| REL-07 Capacidade | BLOCKED | medida e suficiente |
-| REL-08 Backup | BLOCKED | verificado |
-| REL-09 Rollback | BLOCKED | snapshot de imagens existente (D1.2) |
-| REL-10 Pendências preservadas | BLOCKED | decisão sobre logs |
+| REL-05 Migrations | PASS (nenhuma para o delta); estado do banco NOT_VERIFIED | opcional: bloco 13 |
+| REL-06 Serviços compartilhados | PARTIAL (redes/volumes só do projeto; daemon, disco, nginx compartilhados; `:3101` não identificada) | identificar a `:3101` |
+| REL-07 Capacidade | **PASS** (193 GB livres; ~8 GB RAM disponíveis) | monitorar durante o build |
+| REL-08 Backup | **BLOCKED** (dumps de 6 semanas, sem teste de restauração) | dump novo + restauração em container descartável |
+| REL-09 Rollback | **BLOCKED** | snapshot **por ID da imagem em execução** (D1.2) |
+| REL-10 Pendências preservadas | **BLOCKED** | decisão sobre logs e T1 |
 | REL-11 Smoke tests | PASS | — |
-| REL-12 Sem risco a outras apps | NOT_VERIFIED | preflight limpo |
+| REL-12 Sem risco a outras apps | NOT_VERIFIED | `:3101` identificada; REL-02 resolvido |
 
-## 3. Fases
-
-### REL-A — Preflight (**única fase autorizável em seguida**, somente leitura)
-Rodar `P04-REL-01-preflight-somente-leitura.sh` (ou conceder canal somente leitura). Saída: preenche os gates acima. **Critério de saída:** gates REL-01/02/03/06/07/08 reclassificados e este plano confirmado ou ajustado (versão 1.1.0).
+### REL-A — Preflight (**executado em 02/11/2026 pelo proprietário**, somente leitura)
+Saída E08 incorporada; gates reclassificados (tabela acima); este plano ajustado (1.1.0). **Itens que ainda faltam e são somente leitura** (roteiro v1.1.0): `ss -ltnp` da porta `3101`, data de criação das imagens em execução e das etiquetas, linhas do vhost do bloco `/api/v1/auth/register`, nomes/tamanhos das pastas de backup `dbrem04/06`, e (sob autorização) o bloco 13 do catálogo.
 
 ### REL-B — Preparação (documental; nada construído agora)
 Artefatos serão construídos **no servidor** (Estratégia D) a partir do SHA exato, depois da autorização; por isso **nenhuma construção ocorre antes de REL-C**. Preparam-se agora: este plano, o rollback, o smoke, o checklist e o roteiro. Variáveis usadas nos comandos:
@@ -68,7 +66,7 @@ O proprietário recebe o relatório de prontidão, decide e autoriza **expressam
 
 Cada passo tem **verificação** e **critério de abort**. Abort = parar, não avançar, executar o rollback da fase correspondente (ver `P04-REL-01-ROLLBACK-PLAN.md`).
 
-**D0 — Pré-condições (somente leitura)**
+**D0 — Pré-condições (não toca serviço; só grava o registro em `/opt/backups/p04-rel`)**
 
 ```bash
 test "$(git rev-parse --show-toplevel)" = /opt/apps/prospectai          # estou no lugar certo
@@ -76,29 +74,42 @@ git status --porcelain | grep -v '^??' | head                           # vazio 
 ls -l .env.production .env.banco .env.dono                              # existem, 600 root:root
 $C ps                                                                   # todos running/healthy; guardar a saída
 df -h /var/lib/docker /opt; free -m                                     # espaço e memória conforme REL-07
+umask 077; mkdir -p "$REG" && chmod 700 "$REG"
 for c in worker gateway postgres redis gmaps-scraper api web; do
   docker inspect -f '{{.Name}} {{.State.StartedAt}}' prospectai-prod-$c-1
 done > "$REG/startedat-antes-$STAMP.txt"                                # linha de base dos NÃO tocados
+# NOVO (1.1.0): qual imagem cada serviço usa DE FATO (a api rodava `pre-dbrem06`, não `:latest`)
+for s in api web worker; do
+  echo "$s $(docker inspect -f '{{.Image}}' prospectai-prod-$s-1) criada=$(docker image inspect -f '{{.Created}}' "$(docker inspect -f '{{.Image}}' prospectai-prod-$s-1)")"
+done | tee "$REG/imagens-em-execucao-$STAMP.txt"
+# linha de base dos discriminadores de versão (GET; não grava):
+curl -s -o /dev/null -w 'graph sem sessao ANTES -> %{http_code}\n' 'http://127.0.0.1:3102/api/v1/intelligence/graph?leadId=00000000-0000-0000-0000-000000000000' | tee -a "$REG/baseline-http-$STAMP.txt"   # esperado 404 (módulo ainda não existe)
+curl -s http://127.0.0.1:3102/login | grep -o '<!--[A-Za-z0-9_-]\{15,\}-->' | head -1 | tee -a "$REG/baseline-http-$STAMP.txt"  # build ID atual
 ```
-*Abort:* qualquer serviço não saudável **antes** de começar (o problema seria atribuído ao release); `.env.banco`/`.env.dono` ausentes (a árvore nova traria um compose que os exige); árvore com alteração local rastreada inexplicada.
+*Abort:* qualquer serviço não saudável **antes** de começar (o problema seria atribuído ao release); `.env.banco`/`.env.dono` ausentes (a árvore nova traria um compose que os exige — **observado: presentes em 02/11**); árvore com alteração local rastreada inexplicada (**observado: limpa em 02/11**). *Alerta:* se `imagens-em-execucao` mostrar que `api` ≠ `:latest`, **registrar o porquê** (pergunta 1 do preflight) antes de seguir.
 
 **D1 — Salvaguardas (só escrevem em `/opt/backups`; não tocam serviço)**
 
 ```bash
-mkdir -p "$REG" && chmod 700 "$REG"
+umask 077; mkdir -p "$REG" && chmod 700 "$REG"          # dump e logs podem ter dado pessoal: só root
 
 # D1.1 SHA e estado anterior
 git rev-parse HEAD            > "$REG/sha-anterior-$STAMP.txt"
 git log -1 --format='%H %ci %s' >> "$REG/sha-anterior-$STAMP.txt"
 
-# D1.2 Snapshot das imagens atuais (caminho de volta do rollback). Etiquetar não altera container.
+# D1.2 Snapshot das imagens EM EXECUÇÃO (caminho de volta do rollback). Etiquetar não altera container.
+# CORREÇÃO 1.1.0: pelo ID da imagem do CONTAINER, não por `:latest` (a api roda `pre-dbrem06`; a `:latest` é outra).
 for s in api web; do
-  docker image inspect --format '{{.Id}}' prospectai-prod-$s:latest >> "$REG/imagens-anteriores-$STAMP.txt"
-  docker tag prospectai-prod-$s:latest prospectai-prod-$s:pre-p04-$STAMP
+  id=$(docker inspect -f '{{.Image}}' prospectai-prod-$s-1)
+  echo "$s $id" >> "$REG/imagens-anteriores-$STAMP.txt"
+  docker tag "$id" prospectai-prod-$s:pre-p04-$STAMP
 done
+cat "$REG/imagens-anteriores-$STAMP.txt"                                  # os IDs têm de bater com imagens-em-execucao
 
 # D1.3 Backup do banco (a publicação não altera o banco, mas é o gate REL-08) + integridade
-docker exec prospectai-prod-postgres-1 pg_dump -U propectai propectai | gzip > "$REG/propectai-$STAMP.sql.gz"
+# usuário e banco vêm do ambiente do próprio container (nada é impresso). Tem de ser o usuário de bootstrap: com RLS forçada,
+# um papel sem BYPASSRLS produziria dump incompleto ou com erro.
+docker exec prospectai-prod-postgres-1 sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > "$REG/propectai-$STAMP.sql.gz"
 test "${PIPESTATUS[0]}" = 0 && gzip -t "$REG/propectai-$STAMP.sql.gz" && sha256sum "$REG/propectai-$STAMP.sql.gz" | tee "$REG/propectai-$STAMP.sha256"
 
 # D1.4 Logs do GATE-DB-42501 — SÓ SE o proprietário decidir preservar (ver §5). Recriar `api` descarta o log do container.
@@ -106,20 +117,23 @@ mkdir -p "$REG/logs-$STAMP" && chmod 700 "$REG/logs-$STAMP"
 for c in api worker postgres; do docker logs --timestamps prospectai-prod-$c-1 > "$REG/logs-$STAMP/$c.log" 2>&1; done
 sha256sum "$REG/logs-$STAMP"/*.log > "$REG/logs-$STAMP/SHA256SUMS"
 ```
-*Nota:* o `pg_dump -U propectai` segue o runbook de 21/09 (socket local do container). Se o preflight mostrar que o superusuário `propectai` deixou de existir ou de aceitar o socket, **parar** e reavaliar — não usar outro superusuário como atalho. Os logs podem conter dados pessoais: arquivos `600`, só em `/opt/backups`, fora do repositório.
-*Teste de restauração (recomendado, fecha REL-08):* subir um Postgres descartável **sem volume** (`docker run --rm --name propectai-restoretest -e POSTGRES_PASSWORD=<gerada na hora> -d postgres:16-alpine`; prefixo `propectai-`), restaurar o dump nele, contar tabelas, remover o container. Não usa o banco real.
+*Nota:* o `pg_dump` segue o runbook de 21/09 (socket local do container), agora sem nome de usuário fixo. **Observado (E08 §8):** `.env.dono` tem `POSTGRES_USER`/`POSTGRES_DB`; **não observado:** que o container os receba nem que o usuário seja superusuário (bloco 13). Se o `pg_dump` falhar, **parar** e reavaliar — não usar outro superusuário como atalho. Antes de gravar um dump novo, **listar nomes e tamanhos** das pastas `prospectai-dbrem04/06-*` em `/opt/backups`: se já houver dump de 30/10, ele pode ser **complemento**, mas a restauração de teste continua obrigatória. Os logs podem conter dados pessoais: arquivos `600`, só em `/opt/backups`, fora do repositório.
+*Teste de restauração (recomendado, fecha REL-08):* subir um Postgres descartável **sem volume** (`docker run --rm --name propectai-restoretest -e POSTGRES_PASSWORD=<gerada na hora> -d postgres:16-alpine`; prefixo `propectai-`), restaurar o dump nele (erros de papéis inexistentes são esperados no banco descartável; o critério é o número de tabelas e de linhas de `_prisma_migrations`), remover o container. Não usa o banco real.
 *Abort:* dump com erro, `gzip -t` falhando, ou `/opt/backups` sem espaço.
 
 **D2 — Trazer o SHA exato (HEAD destacado; não mexe na branch `main` do servidor)**
 
 ```bash
+# Opção 1 (se o servidor autenticar por SSH no GitHub — NÃO verificado; o remoto é git@github.com):
 git fetch origin feat/prompt-04-intelligence-explorer      # autorização específica: proibido nesta ordem
+# Opção 2 (sem credencial no servidor): bundle incremental enviado por scp pelo proprietário
+#   git fetch /opt/backups/p04-rel/PROSPECTAI-P04-REL01.bundle feat/prompt-04-intelligence-explorer:refs/p04/candidato
 git cat-file -e "$SHA^{commit}"                            # o objeto existe
 git checkout --detach "$SHA"                               # falha sem sobrescrever se houver conflito local
 test "$(git rev-parse HEAD)" = "$SHA" && echo "SHA confirmado"
 git diff --stat "$(cat $REG/sha-anterior-$STAMP.txt | head -1)" HEAD -- compose.prod.yml infra/ prisma/migrations | tail -5
 ```
-*Verificação:* o último comando mostra **o que mudaria de configuração/infra/migration** em relação ao que estava no servidor. Esperado quando o servidor já está na `main`: **vazio**. Se aparecer `compose.prod.yml`, `infra/` ou migrations, o servidor está defasado: **abort** e voltar ao proprietário (isso é fora do escopo do Explorer).
+*Verificação:* o último comando mostra **o que mudaria de configuração/infra/migration** em relação ao que estava no servidor. Esperado quando o servidor já está na `main`: **vazio** (**confirmado no repositório:** `2c4b1b2` → `cebbfa6` não altera compose, infra nem migrations; **observado:** o servidor está em `2c4b1b2`). Se aparecer `compose.prod.yml`, `infra/` ou migrations, o servidor está defasado: **abort** e voltar ao proprietário (isso é fora do escopo do Explorer).
 *Por que `--detach` e não `checkout -B main`:* o runbook antigo usava `-f -B main origin/main` porque a árvore era cópia sem histórico; agora deve haver árvore limpa e nada justifica forçar. `--detach` preserva a branch local e deixa o SHA inequívoco.
 
 **D3 — Validações sem tocar serviço**
@@ -136,7 +150,7 @@ bash infra/scripts/checar-segredos-compose.sh             # a mesma regra que o 
 nice -n 10 $C build api web                               # NÃO construir o worker: nada nele mudou
 docker image ls --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.Size}}' | grep -E '^prospectai-prod-(api|web)'
 ```
-*Verificação:* exit 0 nos dois; imagem `:latest` com ID **diferente** do registrado em D1.2. `.dockerignore` exclui `.env*` e `.git`: nenhum segredo entra na imagem.
+*Verificação:* exit 0 nos dois; imagem `:latest` com ID **diferente** do registrado em D1.2; gravar `imagens-novas-$STAMP.txt` (IDs e `Created`). *Capacidade:* sem limites de recurso nos containers (E08 §6): acompanhar `free -m` e `uptime` em outra sessão durante o build; abortar se a memória disponível cair abaixo de ~2 GB. **Efeito colateral a saber:** o build desloca a etiqueta `:latest` das duas imagens; o snapshot de D1.2 já guardou as anteriores por ID. `.dockerignore` exclui `.env*` e `.git`: nenhum segredo entra na imagem.
 *Abort:* falha de build (nada foi alterado em runtime), falta de disco/memória, ou carga que afete outras aplicações (acompanhar `uptime`/`free`).
 
 **D5 — Recriar a API (primeiro: os endpoints novos são aditivos e a web antiga os ignora)**
@@ -152,14 +166,15 @@ $C exec -T api printenv DATABASE_URL_APP | sed -E 's#:[0-9a-f]{48}@#:***@#'   # 
 docker logs --since 3m prospectai-prod-api-1 2>&1 | grep -ciE 'CredencialDeBancoAusente|ECONNREFUSED|Nest application failed' # esperado 0
 docker inspect -f '{{.RestartCount}}' prospectai-prod-api-1                  # esperado 0
 ```
-*Critérios de sucesso:* `status` `ok` (ou `degraded` **só** pelo scraper, se for o estado anterior — comparar com `$C ps` de D0); `intelligence/graph` sem sessão **401**; usuário do banco `propectai_app`; sem erro no log; sem reinício. *Abort:* `status` ≠ `ok`/estado anterior após 90 s; 404 em `/intelligence` (módulo não carregou); `RestartCount` > 0; qualquer erro de credencial. → **Rollback da API** (§ do plano de rollback).
+*Critérios de sucesso:* `status` `ok` (**estado observado em 02/11: `ok`**, com `database`, `redis` e `scraper` `ok`; `degraded` só pelo scraper se for o estado de D0); `intelligence/graph` sem sessão **401**; usuário do banco `propectai_app`; sem erro no log; sem reinício. *Abort:* `status` ≠ `ok`/estado anterior após 90 s; 404 em `/intelligence` (módulo não carregou); `RestartCount` > 0; qualquer erro de credencial. → **Rollback da API** (§ do plano de rollback).
 
 **D6 — Recriar a web**
 
 ```bash
 $C up -d --no-build --no-deps web
 for p in /login /dashboard; do curl -s -o /dev/null -w "$p -> %{http_code}\n" "http://127.0.0.1:3102$p"; done
-curl -s -o /dev/null -w '/intelligence sem sessao -> %{http_code} %{redirect_url}\n' http://127.0.0.1:3102/intelligence   # esperado: redirecionamento ao login
+curl -s -o /dev/null -w '/intelligence sem sessao -> %{http_code} %{redirect_url}\n' http://127.0.0.1:3102/intelligence   # 307 -> /login?next=...  (NÃO discrimina versão: já é assim hoje)
+curl -s http://127.0.0.1:3102/login | grep -o '<!--[A-Za-z0-9_-]\{15,\}-->' | head -1   # build ID do Next: hoje <!--KFVH0MaXXOVeIbqOoZ9NV-->; tem de MUDAR
 docker inspect -f '{{.RestartCount}}' prospectai-prod-web-1
 ```
 *Abort:* `/login` ≠ 200; `RestartCount` > 0; erro de renderização. → **Rollback da web**, depois da API se necessário.
@@ -196,6 +211,8 @@ Preencher o registro de release, atualizar índice e changelog (commit só docum
 
 ## 5. GATE-DB-42501 e a recriação de containers
 
+**Observado (E08 §6):** todos os containers usam `json-file` **sem rotação**; os logs de `api` (72.823 B), `worker` (3.541 B) e `postgres` (10.429 B) somam menos de 90 KB, então exportá-los com hash é barato. Isso **não** decide o que o GATE-DB-42501 exige.
+
 O log de um container Docker pertence ao container: **recriar `api` descarta o log da instância anterior** (e o do `web`). O repositório registra que os contêineres de produção "preservam logs do GATE-DB-42501", sem dizer **de quais serviços** nem o estado do T1 (data planejada: 01/11/2026, já passada). Por isso:
 
 1. O proprietário precisa dizer **quais logs** precisam sobreviver e se o T1 já foi coletado.
@@ -220,6 +237,10 @@ Como o usuário consulta a versão: o rodapé mostra `PropectAI v0.1.1`; `/api/v
 ## 7. Comandos que **nunca** entram neste plano
 
 `docker system/volume/network prune`, `docker compose down`, `--remove-orphans`, `up -d` sem nome de serviço, `docker compose config` (imprimiria segredos), `docker restart` em massa, `git reset --hard`, `git pull`, qualquer comando em outro projeto Compose, qualquer `ALTER/GRANT/REVOKE` e qualquer uso de superusuário para "consertar" privilégio.
+
+## 7.1 Raio de impacto real (observado + hipótese)
+
+Recriar `api` e `web` a partir da árvore `cebbfa6` entrega **o Explorer mais tudo o que a `main` mudou desde a build das imagens em execução**. Pelo `git log`, os commits de runtime desde 01/10 são `1404989`, `077fc9c`, `aba2ee7`, `1e467fa`, `4052aa7` e `239ff0e`; as demais mudanças de 30/10 são migrations ou compose. **Hipótese (não provada):** as imagens atuais já os contêm (web ~3 semanas, `api` ~3 dias), e o delta efetivo é só o Explorer. **Prova:** comparar `Created` das imagens (D0) com as datas desses commits. Se a diferença for maior, o teste de regressão do smoke S3 deixa de ser opcional.
 
 ## 8. Evidências a coletar na execução
 

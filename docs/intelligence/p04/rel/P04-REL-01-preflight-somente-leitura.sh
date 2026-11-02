@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # =============================================================================
 # P04-REL-01 — Preflight SOMENTE LEITURA do servidor do ProspectAI
-# Responsavel: Executora (Squad DevOps/SRE) · versao 1.0.0 · 02/11/2026
+# Responsavel: Executora (Squad DevOps/SRE) · versao 1.1.0 · 02/11/2026
 #
 # FINALIDADE
 #   Responder, com evidencia observada, as perguntas da fase REL-A do P04-REL-01
 #   (topologia, isolamento, commit implantado, capacidade, backup, logs). O
 #   resultado alimenta os gates REL-01, 02, 03, 06, 07, 08 e 10.
 #
-# STATUS: PROPOSTO, NAO EXECUTADO. A Executora nao tem canal para o servidor
-#   (o proxy da sessao recusa o dominio de homologacao e nao ha SSH). Quem rodar
-#   e o proprietario, ou a Executora depois de uma autorizacao especifica.
+# STATUS: a v1.0.0 foi EXECUTADA pelo proprietario em 02/11/2026 15:52 UTC (saida E08).
+#   Esta v1.1.0 e PROPOSTA, NAO EXECUTADA. Mudancas em relacao a v1.0.0:
+#     - a secao 12 passa a listar so entradas do projeto (a v1.0.0 imprimiu tambem
+#       nomes de pastas de outras aplicacoes em /opt/backups: isolamento violado);
+#     - nova secao 8b: criacao das imagens em execucao e das etiquetas do projeto;
+#     - nova secao 9b: processo da porta 3101 e bloco do vhost de /auth/register;
+#     - nova secao 12b: nomes e tamanhos (so isso) das pastas dbrem04/dbrem06.
+#   Continua somente leitura. Quem rodar e o proprietario, ou a Executora depois de
+#   uma autorizacao especifica.
 #
 # O QUE ELE FAZ
 #   Somente comandos que leem: `docker ps/inspect/ls/version`, `docker compose
@@ -56,7 +62,7 @@ tente() { "$@" 2>&1 || echo "[aviso] comando falhou ou indisponivel: $1"; }
 
 secao "0. Carimbo"
 date -u +'UTC %Y-%m-%dT%H:%M:%SZ'
-echo "script: P04-REL-01-preflight-somente-leitura v1.0.0 (somente leitura)"
+echo "script: P04-REL-01-preflight-somente-leitura v1.1.0 (somente leitura)"
 
 secao "1. Host (HOST_ID)"
 hostname 2>&1
@@ -148,6 +154,18 @@ grep -cE '^(GIT_COMMIT|BUILT_AT)=' "$RAIZ/.env.production" 2>/dev/null || true
 echo "--- imagens do projeto ---"
 tem docker && docker image ls --format '{{.Repository}}:{{.Tag}} | {{.ID}} | {{.CreatedSince}} | {{.Size}}' 2>&1 | grep -iE "$FILTRO"
 
+secao "8b. Imagens em execucao x etiquetas: ID completo e data de criacao (so metadados)"
+if tem docker; then
+  for s in api web worker; do
+    c="${PROJETO}-${s}-1"
+    id="$(docker inspect -f '{{.Image}}' "$c" 2>/dev/null)"
+    [ -n "$id" ] && echo "em execucao: $s -> ${id#sha256:} criada=$(docker image inspect -f '{{.Created}}' "$id" 2>/dev/null)"
+  done
+  docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^prospectai-prod-(api|web|worker):' | while read -r t; do
+    echo "etiqueta: $t -> $(docker image inspect -f '{{.Id}} criada={{.Created}}' "$t" 2>/dev/null | sed 's/^sha256://')"
+  done
+fi
+
 secao "9. Proxy do host (so as linhas que importam, so dos arquivos do ProspectAI)"
 for d in /etc/nginx/sites-enabled /etc/nginx/conf.d; do
   [ -d "$d" ] || continue
@@ -158,6 +176,14 @@ for d in /etc/nginx/sites-enabled /etc/nginx/conf.d; do
 done
 echo "--- portas locais relevantes (so estas) ---"
 tem ss && ss -ltn 2>/dev/null | grep -E ':(3100|3101|3102|3103|5434|6381|8081)\b'
+
+secao "9b. Quem escuta a 3101 (so esta porta) e bloco do vhost de /auth/register"
+tem ss && ss -ltnp 2>/dev/null | grep -E ':3101\b' | sed -E 's/users:\(\(/processo: (/'
+VH="/etc/nginx/sites-enabled/${DOMINIO}.conf"
+if [ -r "$VH" ]; then
+  echo "--- bloco 'location = /api/v1/auth/register' em $VH (ate 20 linhas; sem diretivas de TLS) ---"
+  grep -n -A20 -E '^\s*location = /api/v1/auth/register' "$VH" 2>&1 | grep -viE 'ssl_|certificate|key' | head -22
+fi
 
 secao "10. HTTP local pela porta do gateway (GET/HEAD; nao cria nada)"
 if tem curl; then
@@ -187,13 +213,20 @@ fi
 
 secao "12. Backups (BACKUP_GATE) — existencia, data, integridade do gzip; NAO restaura"
 if [ -d /opt/backups ]; then
-  ls -l --time-style=long-iso /opt/backups 2>&1 | tail -25
+  # v1.1.0: SO entradas do projeto (a v1.0.0 listava tudo e expunha nomes de outras aplicacoes)
+  ls -l --time-style=long-iso /opt/backups 2>&1 | grep -iE "$FILTRO|^total"
   for f in $(ls -t /opt/backups/*.sql.gz 2>/dev/null | head -3); do
     if gzip -t "$f" 2>/dev/null; then echo "gzip integro: $f"; else echo "GZIP COM ERRO: $f"; fi
   done
 else
   echo "/opt/backups nao existe"
 fi
+secao "12b. Pastas de backup das janelas DB-REM (so nomes e tamanhos; conteudo NAO e lido)"
+for d in /opt/backups/prospectai-dbrem04-* /opt/backups/prospectai-dbrem06-*; do
+  [ -d "$d" ] || continue
+  echo "--- $d ---"
+  ls -l --time-style=long-iso "$d" 2>&1 | awk 'NR>1 {printf "%s %s %s %s\n", $5, $6, $7, $8}'
+done
 echo "--- rotinas agendadas que citam o projeto (so nomes de arquivo) ---"
 grep -rIl -iE "$FILTRO" /etc/cron.d /etc/cron.daily /etc/cron.weekly 2>/dev/null
 echo "(integridade do gzip NAO prova restauracao; o teste de restauracao esta no plano de rollback)"
