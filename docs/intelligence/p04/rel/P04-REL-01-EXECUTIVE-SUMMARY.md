@@ -1,7 +1,9 @@
 # P04-REL-01 — G. Resumo executivo para decisão do proprietário
 
-**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora · **Versão:** 1.1.0 · **Data:** 02/11/2026 · **Para:** Uilson Távora, Layart Agência Digital
+**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora · **Versão:** 1.1.1 · **Data:** 02/11/2026 · **Para:** Uilson Távora, Layart Agência Digital
 **Relação com a homologação:** continua o P04-CLOSE-01 (CI #77 e #78 aprovados; PR #7 em rascunho). Commit de release: `cebbfa6e54b96c1e4e840eb1d631e3b0a94eba79`.
+> **Errata 1.1.1 (P04-REL-01C, 02/11/2026).** A coleta complementar mostrou que **os containers não foram "recriados às 15:38" de 30/10**: foram **criados** entre 13:34 e 14:35 e **iniciados juntos** às 15:38:22 porque o **servidor reiniciou** (uptime de 2 d 21 h no preflight e `docker-proxy` iniciado no mesmo segundo). A hipótese de "reversão deliberada para `pre-dbrem06`" **foi descartada**: a `api` roda a `pre-dbrem06` porque foi criada quando essa era a `:latest`, e a `:latest` atual (build de 15:24) **nunca foi implantada**. A porta `3101` é do **gateway do Bellvia**, não do ProspectAI. Ver `P04-REL-01C-RELATORIO.md` §1–§2 e §4. Os parágrafos abaixo ficam como publicados na 1.1.0, exceto onde marcados "(corrigido)".
+
 **Nada foi publicado, mesclado, migrado ou reiniciado.** A Executora não executou nada no servidor: a observação (E08) foi feita por você, com um roteiro somente leitura. `F:\drmind` (Bellvia) não foi modificado.
 
 ## A. Resumo
@@ -19,7 +21,7 @@ A boa notícia: **o servidor tem folga** (193 GB livres, ~8 GB de memória dispo
 
 ## B. Ambiente encontrado (observado em 02/11/2026 15:52 UTC)
 
-- **Servidor** `108.174.144.216` (Ubuntu 24.04.4, Docker 29.7.1, Compose v5.3.1), uptime de 2 dias 21 h, carga baixa. `/opt/apps/prospectai`, projeto `prospectai-prod`: **7 serviços em execução**, 0 reinícios, todos recriados em 30/10/2026.
+- **Servidor** `108.174.144.216` (Ubuntu 24.04.4, Docker 29.7.1, Compose v5.3.1), uptime de 2 dias 21 h, carga baixa. `/opt/apps/prospectai`, projeto `prospectai-prod`: **7 serviços em execução**, contadores de reinício em 0, criados em 30/10/2026 (13:34–14:35) e iniciados juntos às 15:38 após reinício do servidor (corrigido na 1.1.1).
 - **Domínio:** resolve para o servidor; certificado Let's Encrypt válido até 06/01/2027; o nginx do host entrega ao gateway `127.0.0.1:3102` da stack. **Cenário C confirmado.**
 - **Estado de saúde hoje:** `/api/v1/health` = `ok` (`database`, `redis`, `scraper` = `ok`); `/login` 200; `/api/v1/system/version` = `0.1.1`, `production`, **`commit: null`**.
 - **Commit implantado:** a **árvore** está em `2c4b1b2` (`main`, merge do PR #6, 30/10). As **imagens** não são identificáveis pelo endpoint. **Achado:** a `api` em execução usa a imagem etiquetada `pre-dbrem06`, **não** a `:latest`.

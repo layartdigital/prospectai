@@ -1,8 +1,9 @@
 # P04-REL-01C — Procedimentos preparados (NÃO EXECUTADOS)
 
-**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (DevOps/SRE, Database Engineering, AppSec) · **Versão:** 1.0.0 · **Data:** 02/11/2026
+**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (DevOps/SRE, Database Engineering, AppSec) · **Versão:** 1.1.0 · **Data:** 02/11/2026
 **Relação:** anexo do `P04-REL-01C-RELATORIO.md`; complementa `P04-REL-01-DEPLOYMENT-PLAN.md` e `P04-REL-01-ROLLBACK-PLAN.md` (v1.1.0). Referência: PR #7 (rascunho), commit `0ed11b99708d03e6a5153538cabe73158a5d48a1`.
 **`F:\drmind` (Bellvia) não foi modificado.**
+**Versão 1.1.0:** ajustado com a evidência E09 (REL-01C v1.1.0): logs de ~92 KB, banco pequeno (dumps de ~223 KB), dois dumps de 30/10 como candidatos, imagem `408bd870` nunca implantada, reinício do servidor de 30/10 (errata). **Continua sem execução.**
 
 > **Este documento só descreve. Nada aqui foi executado e nada aqui está autorizado.** A decisão do proprietário de 02/11/2026 mandou *preparar* backup, restauração de teste, preservação de logs e rollback, e **proibiu** executá-los nesta rodada (sem backup novo, sem restauração de teste, sem reinício, sem alteração de imagens, sem merge). Cada procedimento abaixo tem uma **pré-condição de autorização** própria. Todos usam o prefixo de projeto, nomes exatos de container e **nenhum** `prune`, `down`, `--remove-orphans`, `docker compose config`, nem comando sem nome de serviço.
 
@@ -61,6 +62,8 @@ sha256sum "$REG/logs-$STAMP"/*.json.log "$MAN" > "$REG/logs-$STAMP/SHA256SUMS" &
 | Conteúdo | **nunca** vai para o repositório nem para o chat: pode ter dado pessoal, token ou cookie. Leitura só por quem o proprietário indicar, em ambiente controlado |
 | Retenção | até **liberação escrita do proprietário**; sem rotação automática; esta pasta fica **fora** de qualquer limpeza |
 
+**Dimensão (E09):** `postgres` 10.429 B, `api` 72.823 B, `worker` 3.541 B, `web` 5.124 B (~92 KB). Os SHA-256 de referência de 02/11 16:38Z estão em REL-01C §4.C; `postgres`, `api` e `web` **não escrevem desde 30/10**, então a cópia deve reproduzir **exatamente** esses hashes (se não reproduzir, algo escreveu entre as duas leituras: parar e registrar). O reinício do servidor de 30/10 **não** descartou os logs (reiniciar ≠ recriar).
+
 **Limites que o plano declara:** (a) o log de um container só cobre a vida **desta instância** (criada em 30/10/2026); o que a instância anterior escreveu foi descartado na recriação e **não é recuperável** por este procedimento; (b) o `redis`, o `gateway` e o `gmaps-scraper` não são exigidos pela ordem e ficam fora (o `gateway` pode ter acessos relevantes: o proprietário decide); (c) o proprietário deve dizer se o T1 depende de algum log **dentro** do banco (arquivos de log do PostgreSQL), que este plano não cobre.
 
 **Critério de sucesso:** 4 cópias, 4 hashes de origem = hashes de cópia, manifesto completo, `SHA256SUMS` conferido também fora do servidor. **Abort:** qualquer divergência de hash, falta de espaço em `$REG`, ou `$REG` já existente com conteúdo (não sobrescrever).
@@ -73,6 +76,7 @@ sha256sum "$REG/logs-$STAMP"/*.json.log "$MAN" > "$REG/logs-$STAMP/SHA256SUMS" &
 
 ```bash
 # P2.0 — pré-checagem do papel (somente leitura; sessão forçada a somente leitura)
+#   (o histórico do shell do proprietário mostra o administrador do banco como `propectai`; o procedimento lê $POSTGRES_USER do container em vez de supor)
 docker exec -i -e PGOPTIONS='-c default_transaction_read_only=on' "$P-postgres-1" \
   sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At' <<'SQL'
 select rolsuper::text || ' ' || rolbypassrls::text from pg_roles where rolname = current_user;
@@ -110,6 +114,8 @@ sha256sum "$REG/db-$STAMP"/* > "$REG/db-$STAMP/SHA256SUMS"; chmod 400 "$REG/db-$
 
 **Pré-condição de autorização:** criar **um container descartável** (`docker run`) e remover **esse** container ao final. O banco real **não** é contactado.
 
+**P3a — restaurar primeiro o dump que já existe (recomendado como 1º passo).** Os candidatos da classe A do REL-01C (§4.B) são `/opt/backups/prospectai-dbrem06-20261030-1523/propectai.dump` (30/10 15:23, o mais recente) e o de `dbrem04` (12:30). **Não exige dump novo e não toca o original**: copia-se o arquivo para dentro do container descartável. Usar `DUMP=<caminho>` no lugar de `$REG/db-$STAMP/propectai.dump` nos comandos abaixo; o `globals.sql` não existe para esses dumps, então os papéis `propectai_app`, `propectai_sistema`, `propectai_migrator` e `propectai_dono` precisam ser criados **no container descartável** (sem senha) antes do `pg_restore`, ou o restore usa `--no-owner --no-privileges` e a validação 5 fica `NOT_VERIFIED`. As validações 1–4 valem igual (a referência de contagens é a do banco real **no mesmo instante** do teste, ou `contagens-base` quando houver dump novo).
+
 **Isolamento do teste:** sem rede (`--network none`), sem volume (dados em `tmpfs`), imagem **idêntica** à do banco real (mesmo ID), senha aleatória gerada na hora, nome com prefixo do projeto e sufixo único. Não toca nenhuma rede ou volume existente, e **o dump nunca entra no container pela rede**: usa-se `docker cp`.
 
 ```bash
@@ -144,8 +150,8 @@ Nenhum `prune`. O resultado (tabela de contagens + hash do dump + horário) vai 
 
 Base: `P04-REL-01-ROLLBACK-PLAN.md` v1.1.0 (retag da imagem **em execução**, recriar `web` e depois `api`, sem rollback de banco). Acréscimos desta rodada:
 
-1. **Duas etiquetas, mesmo ID.** O snapshot `pre-p04-<STAMP>` e a etiqueta já existente `pre-dbrem06` apontam, **se a hipótese do relatório se confirmar**, para a imagem hoje em execução na `api`. **Nenhuma das duas é removida** (sem `docker rmi`, sem `prune`).
-2. **`:latest` não é referência de nada.** Se o relatório 01C confirmar que a `:latest` da API é uma construção **posterior e nunca implantada**, o `build` do release a sobrescreve; isso é aceitável **apenas** porque o snapshot por ID existe antes (plano D1.2). O rollback **nunca** volta para `:latest`.
+1. **Duas etiquetas, mesmo ID (confirmado pelo E09).** A etiqueta já existente `pre-dbrem06` **é** a imagem em execução da `api` (`64b25a48…`); o snapshot `pre-p04-<STAMP>` apontará para o mesmo ID. **Nenhuma das duas é removida** (sem `docker rmi`, sem `prune`). Para a **web** não existe etiqueta da imagem em execução (`dd9dd874…`, 07/10): o `pre-p04-<STAMP>` é o **único** caminho de volta dela.
+2. **`:latest` não é referência de nada.** O E09 **confirmou** que a `:latest` da API (`408bd870…`, construída em 30/10 15:24) é uma construção **posterior e nunca implantada**. O `build` do release a sobrescreve e a `408bd870` **perderia a etiqueta**. É aceitável **apenas** porque o snapshot por ID da imagem **em execução** existe antes (plano D1.2); se o proprietário quiser **conservar** a `408bd870`, basta uma etiqueta extra **antes do build** (`docker tag 408bd870aa0a prospectai-prod-api:p04-nao-implantada-<STAMP>`; só autorizada na ordem de publicação). O rollback **nunca** volta para `:latest`.
 3. **Ordem de pré-requisitos do rollback existir:** P1 (logs) concluído → P2/P3 (backup restaurável) concluídos → D1.2 (snapshot por ID, verificado com `docker image inspect -f '{{.Id}}'` igual ao ID do container) → só então D4+.
 4. **Gatilhos e verificações:** G1–G9 do plano de rollback, inalterados; a verificação de `/api/v1/intelligence/graph` sem sessão passa a ser **404 → 401 na publicação** e **401 → 404 no rollback** (e o *build ID* do Next volta ao valor registrado em D0).
 5. **O que o rollback não restaura:** logs descartados na recriação (daí P1 antes), e dados criados durante a janela (o banco não é revertido).
@@ -158,8 +164,8 @@ Cada degrau exige **autorização expressa própria** do proprietário; nenhum �
 | Degrau | Ordem sugerida | O que autoriza | Toca serviço? | Saída |
 |---|---|---|---|---|
 | 0 | **P04-REL-01C** (esta rodada) | leituras somente leitura (roteiro 01C) | não | evidência A–E |
-| 1 | Decisões do proprietário | T1 (que logs, e se já foi coletado); dump a ser feito por papel com leitura total; janela; quem opera | não | registro escrito |
-| 2 | **P04-REL-02A — Preservação e backup** | P1 + P2 + P3, escrevendo **só** em `/opt/backups/p04-rel` e criando **um** container descartável | **não** (nenhum serviço do projeto) | REL-08 `PASS`, REL-10 resolvido, cadeia de custódia dos logs |
+| 1 | Decisões do proprietário | T1 (que logs, e se já foi coletado); causa do reinício de 30/10; cadastro público aberto (manter? há contas de terceiros?); dump por papel com leitura total; etiquetar ou não a `408bd870`; janela; quem opera | não | registro escrito |
+| 2 | **P04-REL-02A — Preservação e backup** | P1 (logs) → **P3a** (restaurar o dump existente `dbrem06`) → P2 (dump novo) → P3 (restaurar o dump novo), escrevendo **só** em `/opt/backups/p04-rel` e criando **um** container descartável por vez | **não** (nenhum serviço do projeto) | REL-08 `PASS`, REL-10 resolvido, cadeia de custódia dos logs |
 | 3 | **P04-REL-02B — Publicação controlada** | `git fetch`/`bundle` para a árvore do servidor, `checkout --detach` do SHA, `build` de `api` e `web`, snapshot por ID, `up -d --no-deps` de **api** e depois **web**, prova de `StartedAt` dos não tocados | **sim** (`api` e `web`) | gates REL-03/09 `PASS`; smoke S0 |
 | 4 | **P04-REL-02C — Smoke e aceitação** | S1–S4; segunda conta/workspace de teste; aceitação ou rollback | não (leitura) / grava só se autorizado | parecer de homologação |
 | 5 | Decisão do merge do PR #7 | tirar o rascunho e mesclar | — | só **depois** da aceitação |

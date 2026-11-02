@@ -1,6 +1,6 @@
 # P04-REL-01 — H. Índice de evidências
 
-**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (Documentação) · **Versão:** 1.1.0 · **Data:** 02/11/2026
+**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (Documentação) · **Versão:** 1.1.1 · **Data:** 02/11/2026
 **Relação com a homologação:** registra de onde veio cada afirmação dos documentos P04-REL-01. Tudo abaixo é **sanitizado**: nenhuma credencial, cookie, token ou valor de variável. `F:\drmind` (Bellvia) não foi modificado.
 
 ## 1. Comandos executados nesta rodada (todos somente leitura)
@@ -15,11 +15,12 @@
 | E06 | computador do proprietário | `device_bash` (DNS/HTTP/SSH) | **falhou ao iniciar a VM:** "too little free disk space … needs up to 17 GB" |
 | E07 | sessão da Executora | execução de teste do roteiro `P04-REL-01-preflight-somente-leitura.sh` **no container da própria sessão** | **Não é evidência do servidor.** Provou só: sintaxe válida (`bash -n`), não grava em disco e **degrada sem falhar** quando não há Docker nem as pastas do projeto |
 
-### 1.1 Observação do servidor feita pelo proprietário (E08)
+### 1.1 Observações do servidor feitas pelo proprietário (E08 e E09)
 
 | ID | Onde | O que | Resultado |
 |---|---|---|---|
 | **E08** | servidor (`/opt/apps/prospectai`), como `root`, via `scp` + `ssh` a partir do computador do proprietário | execução **uma única vez**, em **2026-11-02T15:52:26Z**, do roteiro `P04-REL-01-preflight-somente-leitura.sh` **v1.0.0** (somente leitura; sem bloco 13) | saída em UTF-8 com BOM e CRLF, **319 linhas, 21.605 bytes**, **SHA-256 `b39e573ac6cc0b06a36afaec20b28984f0101e47f5fbd9bccbc5d1a23af864e5`** |
+| **E09** | servidor, como `root`, via `scp` + `ssh` | execução **uma vez**, em **2026-11-02T16:38:19Z**, do roteiro `P04-REL-01C-leituras-somente-leitura.sh` v1.0.0 | saída (UTF-8, 259 linhas, 21.168 bytes), **SHA-256 `22d0abc521ba3659a8f0b5922fae7625a2c060e0412781fcdb0acd1de936897e`**; **sanitizada e analisada em `P04-REL-01C-RELATORIO.md`** (não é reproduzida aqui; não versionada) |
 
 **Guarda da saída bruta.** O arquivo está com o proprietário em `C:\ResgateProjetos\prospectai\Claude outputs\preflight.txt` e **não é versionado**: o repositório é público e a saída traz caminhos, tamanhos, endereços e pastas do servidor — e, na seção 12, **nomes de pastas de outras aplicações** (defeito do roteiro v1.0, corrigido na v1.1; esses nomes **não** foram copiados para nenhum documento). Revisão da Executora: **sem segredo** (somente nomes de variável, sem valores).
 (Uma primeira tentativa do proprietário, no computador pessoal, falhou por o roteiro não existir no caminho; não é evidência do servidor e não foi usada. Seu arquivo, de 7.820 bytes, **não** é E08.)
@@ -89,15 +90,15 @@ Seções 1–3 → REL-07; 4–6 → REL-02/06/10; 7–8 → REL-03; 9–11 → 
 
 ## 6. Hashes SHA-256 dos arquivos desta rodada
 
-(v1.1.0; calculados sobre o conteúdo dos arquivos no commit; este índice não se auto-referencia. O roteiro está na **v1.1.0**; a v1.0.0, executada em E08, está no commit `1da1936`, SHA-256 `b60e70a955a1a8cedfaa4ab23e57995047d8a0012478919c3eea29e064372020`.)
+(v1.1.1; calculados sobre o conteúdo dos arquivos no commit; este índice não se auto-referencia. O roteiro está na **v1.1.0**; a v1.0.0, executada em E08, está no commit `1da1936`, SHA-256 `b60e70a955a1a8cedfaa4ab23e57995047d8a0012478919c3eea29e064372020`.)
 
 ```text
-f0289799f04ee2bede4f6525ee0596cbe3f061240af66c58a48db9ff03bb80a9  P04-REL-01-INFRASTRUCTURE-PREFLIGHT.md
+1f77e2b3ee791073ce9bc1ee753b2c6671dc33ced319dc6c8e98056f9f89023e  P04-REL-01-INFRASTRUCTURE-PREFLIGHT.md
 096662e8344ac8a46044d85ac9ab9af6ccd536353fc38767461e6fe81e36895a  P04-REL-01-DEPLOYMENT-PLAN.md
 db29dfa76d59e1d580c5f505dc5045783897c2f364fe85fcd938c8a1d2c6005a  P04-REL-01-ROLLBACK-PLAN.md
-90a043226550a1d5ffc2b596bea6b4070f04e981cab8b02b051cda7386467403  P04-REL-01-RISK-REGISTER.md
+0a9dc697c92fd378d46ad60b6817b0e073e4344cd11b91b2cfef94c449c94694  P04-REL-01-RISK-REGISTER.md
 e629e1b7fc56c38c36ea72dae6a89cf194a7540a738ee9cd2ca93fc3fca672b8  P04-REL-01-SMOKE-TEST-PLAN.md
 a94c7a21ad52793d346913dc8215dfd88715c5d4ee3ae7cdf5ac77b051c3ab89  P04-REL-01-RELEASE-CHECKLIST.md
-c715612db58fcc067c81e97f6da0bd57510d6d4fdc33f5d78921e7457bc6b949  P04-REL-01-EXECUTIVE-SUMMARY.md
+6f891aebeac429efc8bd2125b8e5cf6dfad0d0d362ddbce4c3a6f71502153bfd  P04-REL-01-EXECUTIVE-SUMMARY.md
 1cde721946530ae77480e5e14df895f0c8602612c8d4c9e9604b5554d313388e  P04-REL-01-preflight-somente-leitura.sh
 ```

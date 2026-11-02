@@ -1,8 +1,10 @@
 # P04-REL-01 — A. Preflight da infraestrutura
 
-**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (Squad DevOps/SRE, com AppSec e Database Engineering) · **Versão do documento:** 1.1.0 · **Data:** 02/11/2026
+**Projeto:** ProspectAI · **Módulo:** Intelligence Explorer 0.1.0 · **Responsável:** Executora (Squad DevOps/SRE, com AppSec e Database Engineering) · **Versão do documento:** 1.1.1 · **Data:** 02/11/2026
 **Relação com a homologação:** parte do P04-REL-01, posterior ao encerramento P04-CLOSE-01. Commit de release: `cebbfa6e54b96c1e4e840eb1d631e3b0a94eba79` (PR #7, rascunho; CI #77 e #78 aprovados, informados pelo proprietário).
 **`F:\drmind` (Bellvia) não foi modificado.** Nada foi executado, alterado, reiniciado ou escrito no servidor pela Executora.
+
+> **Errata 1.1.1 (P04-REL-01C, 02/11/2026).** A coleta complementar mostrou que **os containers não foram "recriados às 15:38" de 30/10**: foram **criados** entre 13:34 e 14:35 e **iniciados juntos** às 15:38:22 porque o **servidor reiniciou** (uptime de 2 d 21 h no preflight e `docker-proxy` iniciado no mesmo segundo). A hipótese de "reversão deliberada para `pre-dbrem06`" **foi descartada**: a `api` roda a `pre-dbrem06` porque foi criada quando essa era a `:latest`, e a `:latest` atual (build de 15:24) **nunca foi implantada**. A porta `3101` é do **gateway do Bellvia**, não do ProspectAI. Ver `P04-REL-01C-RELATORIO.md` §1–§2 e §4. Os parágrafos abaixo ficam como publicados na 1.1.0, exceto onde marcados "(corrigido)".
 
 > **O que mudou da 1.0.0 para a 1.1.0.** A 1.0.0 foi escrita sem acesso ao servidor. Em 02/11/2026 às 15:52 UTC o proprietário executou o roteiro somente leitura `P04-REL-01-preflight-somente-leitura.sh` (v1.0.0) como `root` e devolveu a saída (E08). Esta versão substitui as hipóteses por **observações**, reclassifica a topologia e **dispara uma regra de parada** (§5).
 
@@ -94,7 +96,7 @@ Duas imagens novas de ~1,7–1,9 GB e o cache do build cabem folgadamente. **Ris
 Consequências, por ordem de importância:
 
 1. **Os passos de snapshot da 1.0.0 (`docker tag prospectai-prod-api:latest …`) etiquetariam a imagem errada** e o rollback voltaria para uma imagem que **não era a que estava no ar**. **Corrigido** no plano e no rollback: etiquetar o **ID da imagem do container** (`docker inspect -f '{{.Image}}' prospectai-prod-api-1`).
-2. **Por que a `api` roda a imagem `pre-dbrem06`** não está documentado. **HIPÓTESE:** reversão deliberada na janela do DB-REM-06 de 30/10 (o log da API foi escrito pela última vez às 15:38, exatamente no horário em que todos os serviços foram recriados). **Confirmação:** perguntar ao proprietário (§9, pergunta 1) e conferir `docker image inspect --format '{{.Created}}'` das duas imagens (item do roteiro v1.1).
+2. **Por que a `api` roda a imagem `pre-dbrem06`** não está documentado. **HIPÓTESE (descartada pela errata 1.1.1; ver REL-01C §4.A):** reversão deliberada na janela do DB-REM-06 de 30/10. **Corrigido:** o container foi criado às 13:34 com a `:latest` de então; a `:latest` atual é um build posterior (15:24) nunca implantado; todos os serviços voltaram juntos às 15:38 por reinício do servidor. **Confirmação:** perguntar ao proprietário (§9, pergunta 1) e conferir `docker image inspect --format '{{.Created}}'` das duas imagens (item do roteiro v1.1).
 3. **Já existe desalinhamento entre serviços:** `worker` na `:latest` mais nova, `api` na anterior. Não é causado por este release, mas **o release o altera** (a API passaria a ser a construída da árvore).
 4. **Delta real entre o que roda e o que seria construído.** A árvore do servidor está na `main` (`2c4b1b2`). O `git log` mostra que, desde 01/10, os commits da `main` que tocam código de runtime são: `1404989` (07/10, web: chamadas same-origin), `077fc9c` e `aba2ee7` (27/10, gateway/`main.ts` da API/nginx), `1e467fa`/`4052aa7` (28/10, DB-REM-01: `prisma*.service`, `packages/types`) e `239ff0e` (30/10, config do worker). DB-REM-02/03/06 são **só migrations** (não entram na imagem de runtime) e `12d3a4d`/`9fe5efa` só alteram o compose. **HIPÓTESE:** como a imagem da web tem ~3 semanas e a da `api` tem ~3 dias (provavelmente de 29–30/10, depois de DB-REM-01, de 28/10), o delta de código da `main` que ainda não está nas imagens é **pequeno ou nulo**, e o delta efetivo do release é o do Explorer. **Não está provado**: só `docker image inspect` (data de criação) e comparação com a árvore confirmam. Até lá, **tratar o blast radius como "tudo o que a `main` mudou desde a build das imagens + Explorer"**, não só "Explorer".
 
@@ -108,7 +110,7 @@ O projeto Compose `propectai` (arquivo `docker-compose.yml`, `exited(3)`) tem 3 
 
 ### 6.5 Logs e o GATE-DB-42501
 
-Todos os containers usam o driver `json-file` **sem rotação** (`map[]`). Tamanhos (só metadados; conteúdo não lido): `api` 72.823 B (última escrita 30/10 15:38), `worker` 3.541 B, `postgres` 10.429 B (30/10 18:18), `web` 5.124 B, `gateway` 597.842 B, `redis` 2,9 MB, `gmaps-scraper` 4.957 B. **Recriar um container descarta o seu log.** Como `api`, `worker` e `postgres` somam < 90 KB, **exportá-los com hash é barato** (passo D1.4) — mas continua sendo uma decisão do proprietário sobre **quais logs** o GATE-DB-42501 exige e **se o T1 de 01/11 já foi coletado**. Não antecipei o T1 nem toquei nos logs. **`postgres` nunca é recriado neste release.**
+Todos os containers usam o driver `json-file` **sem rotação** (`map[]`). Tamanhos (só metadados; conteúdo não lido): `api` 72.823 B (última escrita 30/10 15:38, seis segundos depois do boot — corrigido), `worker` 3.541 B, `postgres` 10.429 B (30/10 18:18), `web` 5.124 B, `gateway` 597.842 B, `redis` 2,9 MB, `gmaps-scraper` 4.957 B. **Recriar um container descarta o seu log.** Como `api`, `worker` e `postgres` somam < 90 KB, **exportá-los com hash é barato** (passo D1.4) — mas continua sendo uma decisão do proprietário sobre **quais logs** o GATE-DB-42501 exige e **se o T1 de 01/11 já foi coletado**. Não antecipei o T1 nem toquei nos logs. **`postgres` nunca é recriado neste release.**
 
 ### 6.6 Backups (REL-08)
 
@@ -126,7 +128,7 @@ Conclusão: **não há backup recente verificado** *comprovado*. Pode haver dump
 
 ### 6.6.1 Arquivos de configuração
 
-`compose.prod.yml` (30/10 14:29), `.env.production` (13:33), `.env.banco` (12:31), `.env.dono` (16:10, **depois** da recriação das 15:38): `600 root:root`. `infra/nginx/default.conf` `664` (27/10). Nomes de chave: `.env.production` tem `JWT_ACCESS_SECRET` (usado pelo Explorer), `APP_VERSION` **uma vez** (sem duplicata), **sem** `GIT_COMMIT`/`BUILT_AT`; `.env.banco` tem `DATABASE_URL_APP` e `DATABASE_URL_SISTEMA`; `.env.dono` tem `DATABASE_URL`, `DATABASE_URL_MIGRATOR`, `POSTGRES_*` e `SEED_*`. O compose da `main` (que a árvore do servidor tem) exige exatamente esses arquivos: **não há defasagem de configuração** (a ressalva da 1.0.0, R03, fica descartada para o servidor).
+`compose.prod.yml` (30/10 14:29), `.env.production` (13:33), `.env.banco` (12:31), `.env.dono` (16:10, **depois do reinício** das 15:38 — corrigido; o arquivo só é lido na criação do container): `600 root:root`. `infra/nginx/default.conf` `664` (27/10). Nomes de chave: `.env.production` tem `JWT_ACCESS_SECRET` (usado pelo Explorer), `APP_VERSION` **uma vez** (sem duplicata), **sem** `GIT_COMMIT`/`BUILT_AT`; `.env.banco` tem `DATABASE_URL_APP` e `DATABASE_URL_SISTEMA`; `.env.dono` tem `DATABASE_URL`, `DATABASE_URL_MIGRATOR`, `POSTGRES_*` e `SEED_*`. O compose da `main` (que a árvore do servidor tem) exige exatamente esses arquivos: **não há defasagem de configuração** (a ressalva da 1.0.0, R03, fica descartada para o servidor).
 
 ### 6.7 Git do servidor
 
