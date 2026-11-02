@@ -83,3 +83,7 @@ gate0_*.csv
 #
 # O nome tem espaco, e o git aceita sem aspas nem escape.
 Claude outputs/
+# E2E do Intelligence Explorer (P04-QA-04): manifesto gerado pelas fixtures e saidas do Playwright de CI.
+apps/web/e2e/.generated/
+apps/web/test-results-ci/
+apps/web/test-results-ci-*/

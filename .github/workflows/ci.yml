@@ -425,6 +425,276 @@ jobs:
                -f docs/intelligence/gate0/verificacoes-fase-b.sql
 
   # ===========================================================================
+  # P04-QA-04: E2E REAL. Navegador (Chromium/Playwright) contra a aplicacao
+  # inteira, em build de producao, num banco efemero que nasce e morre no job:
+  #
+  #   PostgreSQL 16 (servico do job) <- NestJS (node apps/api/dist/main.js)
+  #        ^ migrations em dois estagios + seed + fixtures   |
+  #                                                          v
+  #   Chromium -> gateway :3100 --/api--> API :3101
+  #                          \--resto--> Next.js (next start) :3200
+  #
+  # O gateway e o equivalente do nginx de producao (uma origem so, `/api` para a
+  # API). Ele repassa tudo para a aplicacao real; nao responde nada sozinho.
+  # Nao ha Prisma simulado, Next emulado, resposta HTTP artificial nem
+  # autenticacao ficticia. Nao ha `continue-on-error`, `|| true`, nem
+  # `test.skip`: se um teste obrigatorio cai, o job cai e o "Resultado do CI"
+  # cai junto. Nenhum segredo do repositorio e usado e nada aqui toca producao.
+  # ===========================================================================
+  e2e:
+    name: E2E real (Playwright)
+    runs-on: ubuntu-latest
+    needs: tipos
+    timeout-minutes: 60
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: propectai
+          POSTGRES_PASSWORD: propectai_ci_only
+          POSTGRES_DB: propectai
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U propectai -d propectai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6381:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # `APP_VERSION` NAO e definida de proposito: o rodape mostra "v0.1.1" na
+      # API e na web (o teste do fluxo 1 confere). Os jobs `builds` e `testes`
+      # usam `ci`; aqui o produto roda como roda no servidor.
+      NEXT_TELEMETRY_DISABLED: '1'
+
+      DATABASE_URL: postgresql://propectai:propectai_ci_only@localhost:5434/propectai?schema=public
+      DATABASE_URL_MIGRATOR: postgresql://propectai_migrator:migrator_ci_only@localhost:5434/propectai?schema=public
+      DATABASE_URL_APP: postgresql://propectai_app:app_ci_only@localhost:5434/propectai?schema=public
+      DATABASE_URL_SISTEMA: postgresql://propectai_sistema:sistema_ci_only@localhost:5434/propectai?schema=public
+      REDIS_URL: redis://localhost:6381
+
+      # Valores descartaveis, como nos outros jobs: o banco morre com o job e
+      # nao aceita conexao de fora. Nao sao segredos e nao viram secrets.
+      JWT_ACCESS_SECRET: ci-access-nao-e-segredo-nao-sai-do-job
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 7d
+      COOKIE_DOMAIN: localhost
+      # A origem do E2E e HTTP; cookie `Secure` nao seria devolvido pelo navegador.
+      COOKIE_SECURE: 'false'
+      SEED_OWNER_PASSWORD: ci-owner-descartavel-nao-e-segredo
+      SEED_SDR_PASSWORD: ci-sdr-descartavel-e-diferente-do-outro
+      # Senha do usuario do workspace Beta (fixtures). Descartavel e diferente das outras.
+      E2E_BETA_PASSWORD: ci-beta-descartavel-e-so-deste-job
+
+      LEAD_SOURCE_PROVIDER: mock
+      SITE_AUDIT_PROVIDER: mock
+      AI_PROVIDER: mock
+
+      API_PORT: '3101'
+      WEB_ORIGIN: http://localhost:3100
+      API_INTERNAL_URL: http://127.0.0.1:3101
+      E2E_BASE_URL: http://localhost:3100
+      E2E_LOGS: ${{ github.workspace }}/e2e-logs
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Compilar o pacote de tipos
+        run: pnpm --filter @propectai/types build
+
+      - run: pnpm db:generate
+
+      # ---- banco efemero: mesmas etapas do job `testes` -------------------
+      - name: Aplicar migrations ate o DB-REM-06 (superusuario)
+        run: |
+          ULTIMA=20261030190000_dono_sem_superusuario
+          test -d "prisma/migrations/$ULTIMA"
+          T="$RUNNER_TEMP/migrations-superusuario"
+          mkdir -p "$T/migrations"
+          cp prisma/schema.prisma "$T/"
+          cp prisma/migrations/migration_lock.toml "$T/migrations/"
+          for d in prisma/migrations/*/; do
+            n="$(basename "$d")"
+            cp -r "$d" "$T/migrations/$n"
+            [ "$n" = "$ULTIMA" ] && break
+          done
+          [ "$(basename "$(ls -d "$T"/migrations/*/ | tail -1)")" = "$ULTIMA" ]
+          pnpm exec prisma migrate deploy --schema "$T/schema.prisma"
+
+      - name: Dar senha aos quatro papeis
+        env:
+          PGPASSWORD: propectai_ci_only
+        run: |
+          psql -h localhost -p 5434 -U propectai -d propectai -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER ROLE propectai_migrator PASSWORD 'migrator_ci_only';
+          ALTER ROLE propectai_app       PASSWORD 'app_ci_only';
+          ALTER ROLE propectai_sistema   PASSWORD 'sistema_ci_only';
+          ALTER ROLE propectai_dono      PASSWORD 'dono_ci_only';
+          SQL
+
+      - name: Aplicar as migrations seguintes (propectai_dono)
+        env:
+          DATABASE_URL: postgresql://propectai_dono:dono_ci_only@localhost:5434/propectai?schema=public
+        run: pnpm db:deploy
+
+      - name: Semear o catalogo e o workspace de demonstracao (Alfa)
+        run: pnpm db:seed
+
+      - name: Fixtures sinteticas do E2E (Alfa enriquecido e Beta)
+        run: pnpm db:e2e-fixtures
+
+      # ---- builds de producao ---------------------------------------------
+      - name: Build da API (nest build)
+        run: pnpm --filter @propectai/api build
+
+      - name: Build da web (next build)
+        run: pnpm --filter @propectai/web build
+
+      - name: Instalar o Chromium do Playwright
+        run: pnpm --filter @propectai/web exec playwright install --with-deps chromium
+
+      # ---- pilha real: API + Next + gateway -------------------------------
+      - name: Iniciar a API (build de producao, so com as credenciais de runtime)
+        # `env -u` tira do processo da API as URLs do superusuario e do
+        # migrator: ela sobe como no servidor, apenas com `propectai_app` e
+        # `propectai_sistema`. Se algum caminho ainda dependesse do dono, o
+        # login quebraria aqui em vez de passar escondido.
+        run: |
+          mkdir -p "$E2E_LOGS"
+          NODE_ENV=production env -u DATABASE_URL -u DATABASE_URL_MIGRATOR \
+            nohup node apps/api/dist/main.js > "$E2E_LOGS/api.log" 2>&1 &
+          echo $! > "$E2E_LOGS/api.pid"
+
+      - name: Iniciar o Next.js (next start)
+        run: |
+          NODE_ENV=production nohup pnpm --filter @propectai/web exec next start --port 3200 \
+            > "$E2E_LOGS/web.log" 2>&1 &
+          echo $! > "$E2E_LOGS/web.pid"
+
+      - name: Iniciar o gateway same-origin
+        run: |
+          GATEWAY_PORT=3100 WEB_TARGET_PORT=3200 API_TARGET_PORT=3101 \
+            nohup node apps/web/e2e/ci/gateway.mjs > "$E2E_LOGS/gateway.log" 2>&1 &
+          echo $! > "$E2E_LOGS/gateway.pid"
+
+      - name: Esperar a pilha responder (API, web e /api pelo gateway)
+        run: |
+          esperar() {
+            for i in $(seq 1 90); do
+              if curl -fsS -o /dev/null "$2"; then echo "ok: $1 ($2) apos ${i} tentativa(s)"; return 0; fi
+              sleep 2
+            done
+            echo "FALHOU: $1 nao respondeu em $2" >&2
+            return 1
+          }
+          esperar "API direta"   http://127.0.0.1:3101/api/v1/health
+          esperar "Next direto"  http://127.0.0.1:3200/login
+          esperar "Gateway /api" http://127.0.0.1:3100/api/v1/health
+          esperar "Gateway web"  http://127.0.0.1:3100/login
+          echo "--- /api/v1/health pelo gateway ---"
+          curl -fsS http://127.0.0.1:3100/api/v1/health; echo
+
+      # ---- Playwright ------------------------------------------------------
+      # O Explorer roda ANTES da regressao: os fluxos antigos escrevem no lead
+      # de maior score do tenant de demonstracao, que pode ser o lead-hub das
+      # fixtures, e as contagens exatas (11 notas, 4 atividades...) dependem de
+      # ele estar intacto.
+      - name: E2E-01 a E2E-08 - Intelligence Explorer
+        working-directory: apps/web
+        env:
+          E2E_RESULTS_DIR: test-results-ci-explorer
+        run: pnpm exec playwright test -c playwright.ci.config.ts explorer-
+
+      # `!cancelled()`: a regressao roda mesmo se o Explorer reprovar, para o
+      # relatorio mostrar os dois lados. Nao e `continue-on-error`: o passo
+      # anterior reprovado reprova o job.
+      - name: E2E-09 - regressao do produto (fluxos 0 a 4 existentes)
+        if: ${{ !cancelled() }}
+        working-directory: apps/web
+        env:
+          E2E_RESULTS_DIR: test-results-ci-regressao
+        run: pnpm exec playwright test -c playwright.ci.config.ts fluxo-
+
+      # ---- logs e evidencias (sempre) -------------------------------------
+      - name: Encerrar a pilha e conferir os logs de inicializacao e desligamento
+        if: always()
+        run: |
+          for nome in gateway web api; do
+            if [ -f "$E2E_LOGS/$nome.pid" ]; then
+              pid="$(cat "$E2E_LOGS/$nome.pid")"
+              if kill -0 "$pid" 2>/dev/null; then kill -TERM "$pid"; fi
+            fi
+          done
+          sleep 3
+          for nome in api web gateway; do
+            echo "================ $nome.log (ultimas 60 linhas) ================"
+            tail -n 60 "$E2E_LOGS/$nome.log" 2>/dev/null || echo "(sem log)"
+          done
+
+      - name: Resumo dos testes (contagem por estado)
+        if: always()
+        run: |
+          for r in explorer regressao; do
+            f="apps/web/test-results-ci-$r/resultado.json"
+            if [ -f "$f" ]; then
+              node -e '
+                const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+                const s = r.stats ?? {};
+                console.log(process.argv[2] + ": esperados(passaram)=" + s.expected + " inesperados(falharam)=" + s.unexpected + " instaveis=" + s.flaky + " pulados=" + s.skipped);
+              ' "$f" "$r"
+            else
+              echo "$r: sem resultado.json (o passo nao chegou a rodar)"
+            fi
+          done
+
+      # Sanitizacao: nada com senha ou cookie de sessao pode ser publicado. Se a
+      # varredura achar qualquer um, o job cai e a publicacao e PULADA.
+      - name: Varredura de sanitizacao das evidencias
+        id: sanitizacao
+        if: always()
+        run: |
+          if grep -rIlF \
+               -e "$SEED_OWNER_PASSWORD" -e "$SEED_SDR_PASSWORD" -e "$E2E_BETA_PASSWORD" \
+               -e "pa_at=" -e "pa_rt=" -e "Set-Cookie" -e "set-cookie" \
+               apps/web/test-results-ci-explorer apps/web/test-results-ci-regressao e2e-logs 2>/dev/null; then
+            echo "SANITIZACAO FALHOU: os arquivos acima contem senha ou cookie." >&2
+            exit 1
+          fi
+          echo "sanitizacao ok: nenhuma senha de CI nem cookie de sessao nas evidencias"
+
+      - name: Publicar evidencias (capturas, relatorio JSON/HTML e logs)
+        if: ${{ always() && steps.sanitizacao.outcome != 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-evidencias
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            apps/web/test-results-ci-explorer/**
+            apps/web/test-results-ci-regressao/**
+            e2e-logs/*.log
+            !**/*.zip
+            !**/trace*
+
+  # ===========================================================================
   # P04-QA-02: ponto unico para "required status check". `if: always()` para que
   # ele rode (e falhe) mesmo quando um job anterior foi pulado por falha de
   # `needs:` — um job pulado nao reprova sozinho, e sem este portao um PR com
@@ -434,13 +704,14 @@ jobs:
     name: Resultado do CI
     runs-on: ubuntu-latest
     if: always()
-    needs: [tipos, builds, testes]
+    needs: [tipos, builds, testes, e2e]
     steps:
       - name: Todos os jobs obrigatorios precisam ter passado
         env:
           TIPOS: ${{ needs.tipos.result }}
           BUILDS: ${{ needs.builds.result }}
           TESTES: ${{ needs.testes.result }}
+          E2E: ${{ needs.e2e.result }}
         run: |
-          echo "tipos=$TIPOS builds=$BUILDS testes=$TESTES"
-          [ "$TIPOS" = "success" ] && [ "$BUILDS" = "success" ] && [ "$TESTES" = "success" ]
+          echo "tipos=$TIPOS builds=$BUILDS testes=$TESTES e2e=$E2E"
+          [ "$TIPOS" = "success" ] && [ "$BUILDS" = "success" ] && [ "$TESTES" = "success" ] && [ "$E2E" = "success" ]

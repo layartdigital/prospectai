@@ -1,4 +1,4 @@
-# P04 — Índice de evidências (atualizado em P04-QA-03)
+# P04 — Índice de evidências (atualizado em P04-QA-04)
 
 **`F:\drmind` (Bellvia) não foi modificado.** Todas as evidências abaixo são de **bancada local** (PostgreSQL 16 local descartável com o schema real migrado e os papéis reais `propectai_app` sem BYPASSRLS; Prisma simulado sobre `psql`; esbuild + Chromium/Playwright). **Nenhuma** foi produzida contra produção e **nenhuma substitui o CI do monorepo**.
 
@@ -16,6 +16,21 @@
 | Integridade `pipeline_cards` (QA-02) | `bancada/integridade-pipeline-cards.sql` / `.out` | unicidade `…leadId_key` ≠ proteção de tenant; cartão cruzado aceito em lead sem cartão; FK composta de estágio recusa | achado corrigido |
 | `chaveDeIdentidade` | `packages/types/src/session-identity.test.ts` | 6 testes vitest escritos; as 7 asserções equivalentes foram executadas com `tsx` (o vitest não está instalado neste ambiente) | **não executado em vitest** |
 | Tipos | `packages/types/src/intelligence-*.test.ts` | 35 testes e `tsc --strict` | OK |
+
+## P04-QA-04 — E2E real (GitHub Actions)
+
+Artefatos de **autoria** desta rodada. Nenhum deles é evidência de execução: o resultado só existe depois do run do job `e2e` (artefato `e2e-evidencias`, ver `qa/E2E-REAL.md`).
+
+| Item | Arquivo | O que é | Estado |
+|---|---|---|---|
+| Portão no CI | `.github/workflows/ci.yml` (job `e2e`, `resultado`) | Next/NestJS/Prisma/PostgreSQL reais + Playwright; obrigatório no “Resultado do CI” | **NOT_EXECUTED** (aguarda push) |
+| Specs E2E-01…08 | `apps/web/e2e/explorer-01…04-*.spec.ts`, `explorer-support.ts` | 27 testes (6 + 5 + 12 + 4 por arquivo; ver matriz) | tipados (0 erros); **NOT_EXECUTED** |
+| Regressão E2E-09 | `apps/web/e2e/fluxo-0…4-*.spec.ts` | existentes, sem alteração | **NOT_EXECUTED** no CI |
+| Gateway e config | `apps/web/e2e/ci/gateway.mjs`, `apps/web/playwright.ci.config.ts` | /api → API, resto → Next; sem trace/vídeo/retry | gateway testado localmente com servidores de teste |
+| Fixtures | `prisma/e2e-explorer-fixtures.ts` | Alfa enriquecido + Beta, só banco local | sintaxe OK; **NOT_EXECUTED** |
+| Matriz e conformidade | `P04-QA-04-RELATORIO.md` | cenário → teste → o que provará → resultado | preenchida como NOT_EXECUTED |
+| Como funciona | `qa/E2E-REAL.md` | passos do job, regras, fixtures, leitura | — |
+| Linha de base do CI | Actions #75 (`0028802`) | 4/4 jobs verdes; sem teste de navegador real | PASS (informado pelo proprietário) |
 
 ## O que NÃO existe (não foi executado)
 

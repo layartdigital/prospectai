@@ -88,7 +88,8 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   const requisicoesDeLogin: string[] = [];
   page.on('request', (req) => {
     if (req.url().includes('/auth/login')) {
-      requisicoesDeLogin.push(`${req.method()} ${req.url()} :: ${req.postData() ?? ''}`);
+      // Corpo omitido de proposito: leva a senha. So interessa saber que a requisicao saiu.
+      requisicoesDeLogin.push(`${req.method()} ${req.url()} :: (corpo omitido)`);
     }
   });
 

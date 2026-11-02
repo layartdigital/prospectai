@@ -3,6 +3,8 @@
 **Módulo:** Intelligence Explorer **0.1.0** · **PR #7** · **Branch:** `feat/prompt-04-intelligence-explorer` · **Commit validado pelo CI:** `a093622738251a2c2432212c84eb7e0ff8d4078a` · **Commit desta rodada:** ver mensagem de entrega e `git log` (um commit sobre `a093622`).
 **`F:\drmind` (Bellvia) não foi modificado.** Nenhum deploy, merge, migration, restart ou alteração em produção; a stack `prospectai-prod` e a coleta pendente do GATE-DB-42501 não foram tocadas. IA, Flowsint, novas migrations e SEC-DATA-01 não foram iniciados.
 
+> **Correção de histórico (registrada na P04-QA-04, 02/11/2026).** O commit desta rodada (`0028802`) foi publicado no PR #7 e o **CI #75 o aprovou: 4/4 jobs verdes** (Tipos, Builds (API e web), Testes e verificação de RLS, Resultado do CI). O #75, porém, **não executou nenhum teste de navegador na aplicação real** — apenas tipos, lint, builds, a suíte da API (inclusive o spec HTTP do Explorer) e o portão de RLS. Por isso o veredito `INCONCLUSIVE` desta rodada **permanece correto**, e as menções abaixo a “novo CI pendente” descrevem o estado no momento da entrega. A evidência de navegador real é objeto da P04-QA-04 (`P04-QA-04-RELATORIO.md`).
+
 ## Veredito
 
 ```

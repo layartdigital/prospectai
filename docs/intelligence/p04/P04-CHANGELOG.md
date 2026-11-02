@@ -40,3 +40,17 @@ Rota `/intelligence`, 2 endpoints, grafo de relações verificáveis do próprio
 
 **Sem mudança** de contrato de API, schema, migration, CI ou produção.
 
+## 0.1.0 + QA-04 (P04-QA-04) — portão E2E real no GitHub Actions, 02/11/2026 (versão do módulo inalterada: 0.1.0)
+
+**Integração contínua**
+- Novo job `e2e` em `.github/workflows/ci.yml`: PostgreSQL 16 efêmero + Redis, migrations em dois estágios, seed, fixtures sintéticas Alfa/Beta, `nest build` + `next build`, API e Next reais em produção atrás de um gateway same-origin mínimo, Chromium/Playwright. `Resultado do CI` passou a exigir `tipos`, `builds`, `testes` **e** `e2e`.
+- Specs `explorer-01…04` (E2E-01…08) e regressão `fluxo-0…4` (E2E-09, sem alteração). `playwright.ci.config.ts` (sem trace/vídeo/retry). Varredura de sanitização antes de publicar as evidências.
+- `global-setup.ts`: o diagnóstico de falha do login deixou de imprimir o corpo da requisição (continha a senha).
+
+**Dados de teste**
+- `prisma/e2e-explorer-fixtures.ts` (`pnpm db:e2e-fixtures`): só banco local/efêmero; Alfa enriquecido e tenant Beta.
+
+**Sem mudança** de código do produto, contrato de API, schema, migration ou produção. Nenhuma dependência nova.
+
+**Estado:** autoria concluída; **execução pendente do primeiro run no Actions** (ver `P04-QA-04-RELATORIO.md`).
+
