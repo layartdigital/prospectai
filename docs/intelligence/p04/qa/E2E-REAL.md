@@ -16,6 +16,8 @@
 
 O job falha se qualquer passo falhar; `Resultado do CI` exige `tipos`, `builds`, `testes` **e** `e2e`.
 
+> **Resultado de referência (P04-CLOSE-01):** Actions #77, commit `78e9fe2` — Explorer 27/27, regressão 29/29, 0 falhas/instáveis/pulados.
+
 ## Por que existe um gateway
 
 Em produção o nginx dá ao navegador uma origem só: `/api/*` vai para a API, o resto para o Next. Em `next dev` o `rewrites()` faz isso; em `next start` ele **não** faz (de propósito, ver `next.config.mjs`). Sem algo no lugar do nginx, o login do navegador não alcança a API. O gateway é esse algo, com `node:http` e nenhuma dependência: repassa a requisição inteira (cabeçalhos, cookies, corpo) e devolve a resposta inteira. Não inventa resposta.

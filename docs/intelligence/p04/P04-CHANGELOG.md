@@ -64,5 +64,14 @@ Rota `/intelligence`, 2 endpoints, grafo de relações verificáveis do próprio
 - Relatório bruto do Playwright fora do workspace (`$RUNNER_TEMP`); novo `apps/web/e2e/ci/sanitizar-resultados.mjs` gera a saída publicável por lista permitida e diagnostica marcadores por categoria de campo (sem valores). Varredura e upload cobrem só `e2e-publicavel/` e os logs de processo. HTML, JSON bruto e anexos de falha não são mais publicados.
 - Novo passo que imprime banco/Redis/scraper separados e reprova se banco ou Redis não estiverem `ok`.
 
-**Sem mudança** de produto, contrato de API, schema, migration ou produção. **Estado:** aguarda o run #77.
+**Sem mudança** de produto, contrato de API, schema, migration ou produção. **Estado:** aprovado no run #77 (ver P04-CLOSE-01).
 
+## 0.1.0 — encerramento documental (P04-CLOSE-01), 02/11/2026 (versão do módulo inalterada: 0.1.0)
+
+**Homologação automatizada registrada:** GitHub Actions **#77** (commit `78e9fe2`, https://github.com/layartdigital/prospectai/actions/runs/41450846331): CI 5/5 verde; **Explorer E2E 27/27**; **regressão do produto 29/29**; 0 falhas, 0 instáveis, 0 pulados; sanitização PASS; upload verificado. Contagens lidas no log do passo “Resumo dos testes”. PR #7 permanece **Draft**; **sem merge e sem deploy**.
+
+**Histórico técnico consolidado** (ver `P04-CLOSE-01-RELATORIO.md`): sincronização entre resposta HTTP e renderização React (E2E-05a); leitura correta do healthcheck `degraded` sem scraper; saída publicável sanitizada por lista permitida dos relatórios do Playwright; isolamento de sessão e de workspace comprovado em navegador real; E2E com Prisma, NestJS, Next.js e PostgreSQL reais.
+
+**Limitações mantidas:** fixtures sintéticas; tetos de 60/150 nós não exercitados no navegador (cobertos em outros níveis); `SEC-DATA-01` e `GATE-DB-42501` em trilhas próprias; sem implantação em servidor de homologação; IA e providers investigativos fora desta versão.
+
+**Sem mudança** de código funcional, contrato, schema, migration ou produção. `PRODUCTION_RELEASE = NOT_AUTHORIZED`.

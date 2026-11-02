@@ -5,6 +5,8 @@
 
 > **Correção de histórico (registrada na P04-QA-04, 02/11/2026).** O commit desta rodada (`0028802`) foi publicado no PR #7 e o **CI #75 o aprovou: 4/4 jobs verdes** (Tipos, Builds (API e web), Testes e verificação de RLS, Resultado do CI). O #75, porém, **não executou nenhum teste de navegador na aplicação real** — apenas tipos, lint, builds, a suíte da API (inclusive o spec HTTP do Explorer) e o portão de RLS. Por isso o veredito `INCONCLUSIVE` desta rodada **permanece correto**, e as menções abaixo a “novo CI pendente” descrevem o estado no momento da entrega. A evidência de navegador real é objeto da P04-QA-04 (`P04-QA-04-RELATORIO.md`).
 
+> **Atualização P04-CLOSE-01 (02/11/2026).** A lacuna que mantinha esta rodada `INCONCLUSIVE` (teste de navegador na aplicação real) foi fechada pela QA-04/QA-04R: o Actions **#77** aprovou 27/27 cenários do Explorer (incluindo troca de sessão e de workspace) e 29/29 de regressão. O veredito histórico desta rodada não foi reescrito.
+
 ## Veredito
 
 ```

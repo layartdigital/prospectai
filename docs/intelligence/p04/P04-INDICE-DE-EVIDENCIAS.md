@@ -1,4 +1,6 @@
-# P04 — Índice de evidências (atualizado em P04-QA-04)
+# P04 — Índice de evidências (atualizado em P04-CLOSE-01)
+
+> **Estado atual:** o Explorer foi homologado pelo CI real do GitHub — Actions **#77** (commit `78e9fe2`): **Explorer E2E 27/27, regressão 29/29, 0 falhas/instáveis/pulados, sanitização PASS, upload verificado**. As evidências de **bancada** abaixo são históricas (QA-01…03) e **não** foram substituídas por estas; as de CI estão na seção “P04-CLOSE-01”.
 
 **`F:\drmind` (Bellvia) não foi modificado.** Todas as evidências abaixo são de **bancada local** (PostgreSQL 16 local descartável com o schema real migrado e os papéis reais `propectai_app` sem BYPASSRLS; Prisma simulado sobre `psql`; esbuild + Chromium/Playwright). **Nenhuma** foi produzida contra produção e **nenhuma substitui o CI do monorepo**.
 
@@ -17,9 +19,25 @@
 | `chaveDeIdentidade` | `packages/types/src/session-identity.test.ts` | 6 testes vitest escritos; as 7 asserções equivalentes foram executadas com `tsx` (o vitest não está instalado neste ambiente) | **não executado em vitest** |
 | Tipos | `packages/types/src/intelligence-*.test.ts` | 35 testes e `tsc --strict` | OK |
 
+## P04-CLOSE-01 — resultados comprovados no GitHub Actions #77
+
+**Run:** https://github.com/layartdigital/prospectai/actions/runs/41450846331 · **commit** `78e9fe2588ee1ee0aafe1804c4f62c1b2d58d225` · PR #7 **Draft** · sem merge · 0 deploys.
+
+| Item | Resultado | Fonte |
+|---|---|---|
+| `CI_77` (Tipos, Builds, Testes e RLS, E2E real, Resultado do CI) | **PASS** (5/5 verdes) | página do PR #7 e do run |
+| `EXPLORER_E2E` | **27/27** (0 falhas · 0 instáveis · 0 pulados) | log do passo “Resumo dos testes” |
+| `PRODUCT_REGRESSION` | **29/29** (0 falhas · 0 instáveis · 0 pulados) | log do passo “Resumo dos testes” |
+| `ARTIFACT_SANITIZATION` | **PASS** | passos “Montar a saída publicável e sanitizada” e “Varredura de sanitização do que será publicado” verdes |
+| `ARTIFACT_UPLOAD` | **VERIFIED** (passo verde; conteúdo não inspecionado pela Executora) | passo “Publicar evidências sanitizadas” |
+| Artefato `e2e-evidencias` | retenção 30 dias · **ID e expiração: PENDENTE** (a informar pelo proprietário) | ver `P04-CLOSE-01-RELATORIO.md`, seção 5 |
+| CI do commit documental | **PENDENTE** (run #78 a registrar) | — |
+
+As contagens foram lidas na saída de texto do log, enviada pelo proprietário; a Executora não tem acesso direto ao Actions. Relatório definitivo: `P04-CLOSE-01-RELATORIO.md`.
+
 ## P04-QA-04 — E2E real (GitHub Actions)
 
-Artefatos de **autoria** desta rodada. Nenhum deles é evidência de execução: o resultado só existe depois do run do job `e2e` (artefato `e2e-evidencias`, ver `qa/E2E-REAL.md`).
+Artefatos de **autoria** desta rodada (commit `84a96c6`); o resultado de execução está na seção anterior (#77 aprovado) e em `P04-QA-04-RELATORIO.md`. Os estados `NOT_EXECUTED` desta tabela são o **registro histórico da autoria**, superados pelo #77.
 
 | Item | Arquivo | O que é | Estado |
 |---|---|---|---|
@@ -32,18 +50,21 @@ Artefatos de **autoria** desta rodada. Nenhum deles é evidência de execução:
 | Como funciona | `qa/E2E-REAL.md` | passos do job, regras, fixtures, leitura | — |
 | Linha de base do CI | Actions #75 (`0028802`) | 4/4 jobs verdes; sem teste de navegador real | PASS (informado pelo proprietário) |
 
-## P04-QA-04R — correção direcionada (autoria; execução pendente do run #77)
+## P04-QA-04R — correção direcionada (commit `78e9fe2`; **aprovada no run #77**)
 
 | Item | Arquivo | O que é | Estado |
 |---|---|---|---|
-| Sanitizador | `apps/web/e2e/ci/sanitizar-resultados.mjs` | saída publicável por lista permitida; diagnóstico por categoria de campo; falha apaga a saída | testado com JSON sintético e real; **NOT_EXECUTED** no CI |
-| Correção A | `apps/web/e2e/explorer-support.ts`, `explorer-02-…spec.ts` | espera dos nós devolvidos pela API; contagem exata de motivos | tipado (0 erros); **NOT_EXECUTED** |
-| Correção B | `apps/web/e2e/fluxo-1-sessao-e-dashboard.spec.ts`, passo de saúde em `ci.yml` | rodapé conferido contra o `/health` real | tipado; **NOT_EXECUTED** |
-| Correção C | `.github/workflows/ci.yml`, `.gitignore` | bruto em `$RUNNER_TEMP`; publicar só o sanitizado | YAML válido; **NOT_EXECUTED** |
+| Sanitizador | `apps/web/e2e/ci/sanitizar-resultados.mjs` | saída publicável por lista permitida; diagnóstico por categoria de campo; falha apaga a saída | testado com JSON sintético e real; **PASS no #77** |
+| Correção A | `apps/web/e2e/explorer-support.ts`, `explorer-02-…spec.ts` | espera dos nós devolvidos pela API; contagem exata de motivos | tipado (0 erros); **PASS no #77** |
+| Correção B | `apps/web/e2e/fluxo-1-sessao-e-dashboard.spec.ts`, passo de saúde em `ci.yml` | rodapé conferido contra o `/health` real | tipado; **PASS no #77** |
+| Correção C | `.github/workflows/ci.yml`, `.gitignore` | bruto em `$RUNNER_TEMP`; publicar só o sanitizado | YAML válido; **PASS no #77** |
 | Relatório | `P04-QA-04-RELATORIO.md` (seção QA-04R) | causa raiz, classificação, antes × depois, riscos | — |
 | Linha de base | Actions #76 (`84a96c6`) | Explorer 25/27 · regressão 28/29 · sanitização bloqueou | informado pelo proprietário |
+| Resultado | Actions #77 (`78e9fe2`) | Explorer 27/27 · regressão 29/29 · sanitização PASS | **PASS** (log) |
 
-## O que NÃO existe (não foi executado)
+## O que NÃO existe (não foi executado) — texto histórico
+
+> **Atualização P04-CLOSE-01:** a lista abaixo descreve o que faltava nas rodadas de **bancada**. Desde o CI #75/#77, typecheck, `prisma generate`, builds, jest da API (inclusive o spec HTTP do Explorer), suíte completa, portão de RLS e a regressão do produto em navegador real **foram executados e estão verdes** (jobs Tipos, Builds, Testes e RLS, E2E real). Seguem **não executados**: `validar-p04-qa.ps1` (script local, fora do CI), implantação em servidor e qualquer teste em produção.
 
 typecheck real do monorepo, `prisma generate`, ESLint, `nest build`, `next build`, jest da API (inclui `intelligence-tenant.spec.ts`), suíte completa, portão de RLS, vitest, regressão do produto, captura da ficha do lead no aplicativo completo, troca de workspace no aplicativo completo, execução do `ci.yml` e do `validar-p04-qa.ps1`. Obtê-los: `qa/COMO-RODAR.md` (Rota A: CI do GitHub).
 

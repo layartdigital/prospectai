@@ -4,6 +4,8 @@
 **Branch:** `feat/prompt-04-intelligence-explorer` · **Parada para homologação — nada foi mesclado, publicado ou implantado.**
 **`F:\drmind` (Bellvia) não foi modificado.**
 
+> **Encerramento (P04-CLOSE-01, 02/11/2026):** o commit `78e9fe2` foi homologado pelo GitHub Actions #77 — Explorer E2E 27/27, regressão 29/29, 0 falhas. Veredito final do Prompt 04: `P04_IMPLEMENTATION = COMPLETE`, `P04_AUTOMATED_HOMOLOGATION = PASS`, `PRODUCTION_RELEASE = NOT_AUTHORIZED`. Ver `P04-CLOSE-01-RELATORIO.md`. O bloco de veredito abaixo descreve a **primeira entrega** (`DELIVERY_STATUS = PARTIAL`) e não foi reescrito.
+
 > **Atualizações posteriores:** correções de homologação em `P04-QA-RELATORIO.md` (QA-01) e `P04-QA-02-RELATORIO.md` (QA-02, o mais recente: CI estendido, troca de workspace, script local endurecido). Este relatório descreve a primeira entrega e não foi reescrito.
 
 ---
