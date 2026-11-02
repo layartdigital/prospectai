@@ -30,13 +30,35 @@ test.describe('sessão e visão geral', () => {
     await expect(kpiValue(page, 'Leads encontrados')).toHaveText(/^[1-9]\d*$/);
   });
 
-  test('rodapé mostra versão, ambiente e status da API', async ({ page }) => {
+  test('rodapé mostra versão, ambiente e status da API', async ({ page, request }) => {
     await login(page);
 
     const footer = page.locator('footer');
     await expect(footer).toContainText('PropectAI v0.1.1');
+
     // Critério 20 + o healthcheck que passou a incluir o scraper.
-    await expect(footer).toContainText('API ok');
+    //
+    // O rodapé mostra o status AGREGADO da API: `ok` só quando banco, Redis e
+    // scraper estão de pé; com o scraper fora e os dois essenciais de pé, o
+    // sistema é `degraded` (semântica de `SystemController.health`, deliberada:
+    // tudo funciona exceto iniciar coleta nova). O teste não aceita "qualquer
+    // coisa": exige banco e Redis `ok` no payload real e que o rodapé mostre
+    // exatamente o status que esse payload implica. Onde o scraper roda (o
+    // ambiente local de desenvolvimento) continua exigindo `API ok`; no CI, que
+    // não sobe o scraper porque nenhum cenário inicia coleta, exige `API degraded`
+    // — e só por causa do scraper.
+    const saude = await request.get('/api/v1/health');
+    expect(saude.status()).toBe(200);
+    const corpo = (await saude.json()) as {
+      status: string;
+      checks: { database: string; redis: string; scraper: string };
+    };
+    expect(corpo.checks.database, 'PostgreSQL precisa estar ok').toBe('ok');
+    expect(corpo.checks.redis, 'Redis precisa estar ok').toBe('ok');
+
+    const esperado = corpo.checks.scraper === 'ok' ? 'ok' : 'degraded';
+    expect(corpo.status).toBe(esperado);
+    await expect(footer).toContainText(`API ${esperado}`);
   });
 
   test('Meus Leads pagina no servidor e combina filtros', async ({ page }) => {

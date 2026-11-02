@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Configuracao do E2E em CI (P04-QA-04).
+ * Configuracao do E2E em CI (P04-QA-04, revisada na P04-QA-04R).
  *
  * Difere de `playwright.config.ts` em tres pontos, todos de infraestrutura:
  *
@@ -9,12 +9,15 @@ import { defineConfig, devices } from '@playwright/test';
  *     o gateway por conta propria, espera cada um responder e guarda o log de
  *     cada processo. Se o Playwright subisse o stack (`webServer`), uma falha de
  *     inicializacao viraria "timeout do webServer" sem log da causa.
- *  2. **Sem `trace`.** O trace do Playwright grava cookies e o corpo das
- *     requisicoes — incluindo o POST de login com a senha. Mesmo descartavel, a
- *     regra da rodada e nao publicar isso. As evidencias sao capturas e logs
- *     explicitos, escritos pelas specs.
- *  3. **Saida em diretorio proprio** (`E2E_RESULTS_DIR`), para o job publicar o
- *     resultado de cada etapa (specs do Explorer e regressao) separadamente.
+ *  2. **Sem `trace` nem video.** O trace do Playwright grava cookies e o corpo
+ *     das requisicoes — incluindo o POST de login com a senha.
+ *  3. **Saida BRUTA fora do que e publicado** (`E2E_RESULTS_DIR`). No CI esse
+ *     diretorio fica em `$RUNNER_TEMP`, fora do workspace: o JSON, o relatorio
+ *     HTML (que embute os dados dos testes comprimidos, portanto inverificaveis
+ *     por varredura de texto) e os anexos de falha nunca entram no artefato. O
+ *     que se publica e a saida montada por `e2e/ci/sanitizar-resultados.mjs`
+ *     (lista permitida de campos) mais as capturas sinteticas que as specs
+ *     gravam em `E2E_EVIDENCE_DIR`.
  *
  * Tudo o mais (timeouts, serial, locale, fuso, viewport) e igual ao da config
  * local, para que o que passa aqui seja o mesmo teste que roda na maquina de

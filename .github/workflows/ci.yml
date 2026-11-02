@@ -609,8 +609,35 @@ jobs:
           esperar "Next direto"  http://127.0.0.1:3200/login
           esperar "Gateway /api" http://127.0.0.1:3100/api/v1/health
           esperar "Gateway web"  http://127.0.0.1:3100/login
-          echo "--- /api/v1/health pelo gateway ---"
-          curl -fsS http://127.0.0.1:3100/api/v1/health; echo
+
+      # P04-QA-04R: o /health agrega tres componentes e o rodape da web mostra o
+      # agregado. Aqui cada componente aparece separado no log. PostgreSQL e
+      # Redis sao obrigatorios (o job cai se algum nao estiver `ok`). O scraper
+      # (gosom/google-maps-scraper) NAO e iniciado neste job: nenhum cenario
+      # depende dele e o provider de coleta e `mock`. Portanto `scraper: down` e
+      # `status: degraded` sao o estado ESPERADO da pilha de teste — e e
+      # exatamente o que o produto deve reportar. Nada foi falsificado para
+      # mudar isso (nao ha scraper de mentira nem healthcheck afrouxado).
+      - name: Estado real de saude da pilha (banco, Redis e scraper separados)
+        run: |
+          curl -fsS http://127.0.0.1:3100/api/v1/health > "$RUNNER_TEMP/health.json"
+          node -e '
+            const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const c = h.checks ?? {};
+            console.log("status agregado : " + h.status);
+            console.log("database        : " + c.database);
+            console.log("redis           : " + c.redis);
+            console.log("scraper         : " + c.scraper + (c.scraper === "ok" ? "" : "  (esperado: o scraper nao faz parte deste job)"));
+            if (c.database !== "ok" || c.redis !== "ok") {
+              console.error("FALHOU: PostgreSQL e Redis precisam estar ok para o E2E ter valor.");
+              process.exit(1);
+            }
+            const esperado = c.scraper === "ok" ? "ok" : "degraded";
+            if (h.status !== esperado) {
+              console.error("FALHOU: status agregado " + h.status + " incoerente com os componentes (esperado " + esperado + ").");
+              process.exit(1);
+            }
+          ' "$RUNNER_TEMP/health.json"
 
       # ---- Playwright ------------------------------------------------------
       # O Explorer roda ANTES da regressao: os fluxos antigos escrevem no lead
@@ -620,7 +647,10 @@ jobs:
       - name: E2E-01 a E2E-08 - Intelligence Explorer
         working-directory: apps/web
         env:
-          E2E_RESULTS_DIR: test-results-ci-explorer
+          # Saida BRUTA fora do workspace: nunca entra em artefato.
+          E2E_RESULTS_DIR: ${{ runner.temp }}/e2e-bruto/explorer
+          # Capturas sinteticas (so da aplicacao) na pasta que PODE ser publicada.
+          E2E_EVIDENCE_DIR: ${{ github.workspace }}/e2e-publicavel/explorer/evidencias
         run: pnpm exec playwright test -c playwright.ci.config.ts explorer-
 
       # `!cancelled()`: a regressao roda mesmo se o Explorer reprovar, para o
@@ -630,7 +660,8 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: apps/web
         env:
-          E2E_RESULTS_DIR: test-results-ci-regressao
+          E2E_RESULTS_DIR: ${{ runner.temp }}/e2e-bruto/regressao
+          E2E_EVIDENCE_DIR: ${{ github.workspace }}/e2e-publicavel/regressao/evidencias
         run: pnpm exec playwright test -c playwright.ci.config.ts fluxo-
 
       # ---- logs e evidencias (sempre) -------------------------------------
@@ -649,11 +680,11 @@ jobs:
             tail -n 60 "$E2E_LOGS/$nome.log" 2>/dev/null || echo "(sem log)"
           done
 
-      - name: Resumo dos testes (contagem por estado)
+      - name: Resumo dos testes (contagem por estado, do relatorio bruto)
         if: always()
         run: |
           for r in explorer regressao; do
-            f="apps/web/test-results-ci-$r/resultado.json"
+            f="$RUNNER_TEMP/e2e-bruto/$r/resultado.json"
             if [ -f "$f" ]; then
               node -e '
                 const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -665,34 +696,52 @@ jobs:
             fi
           done
 
-      # Sanitizacao: nada com senha ou cookie de sessao pode ser publicado. Se a
-      # varredura achar qualquer um, o job cai e a publicacao e PULADA.
-      - name: Varredura de sanitizacao das evidencias
+      # ---- saida publicavel (P04-QA-04R) -----------------------------------
+      # O relatorio bruto do Playwright (JSON, HTML, anexos) e interno e fica em
+      # $RUNNER_TEMP. Este passo monta, por LISTA PERMITIDA de campos, o unico
+      # resultado que pode ser publicado, e imprime no log QUANTOS marcadores
+      # sensiveis o bruto tinha e em que categoria de campo (nunca os valores).
+      # Se a saida montada ainda tiver marcador, o script apaga o arquivo e sai
+      # com erro: o job fica vermelho e a publicacao e pulada. Sem `|| true`.
+      - name: Montar a saida publicavel e sanitizada
+        id: sanitizar
+        if: always()
+        run: |
+          node apps/web/e2e/ci/sanitizar-resultados.mjs \
+            --saida "$GITHUB_WORKSPACE/e2e-publicavel" \
+            "explorer=$RUNNER_TEMP/e2e-bruto/explorer/resultado.json" \
+            "regressao=$RUNNER_TEMP/e2e-bruto/regressao/resultado.json"
+
+      # Varredura independente, sobre TUDO o que sera publicado (inclui os logs
+      # dos processos e as capturas): se achar senha ou cookie, o job cai e a
+      # publicacao e PULADA. O PNG e binario; `-a` o trata como texto para que
+      # um marcador embutido em metadados tambem seja achado.
+      - name: Varredura de sanitizacao do que sera publicado
         id: sanitizacao
         if: always()
         run: |
-          if grep -rIlF \
+          if grep -rIlaF \
                -e "$SEED_OWNER_PASSWORD" -e "$SEED_SDR_PASSWORD" -e "$E2E_BETA_PASSWORD" \
                -e "pa_at=" -e "pa_rt=" -e "Set-Cookie" -e "set-cookie" \
-               apps/web/test-results-ci-explorer apps/web/test-results-ci-regressao e2e-logs 2>/dev/null; then
+               e2e-publicavel e2e-logs 2>/dev/null; then
             echo "SANITIZACAO FALHOU: os arquivos acima contem senha ou cookie." >&2
             exit 1
           fi
-          echo "sanitizacao ok: nenhuma senha de CI nem cookie de sessao nas evidencias"
+          echo "sanitizacao ok: nenhuma senha de CI nem cookie de sessao no que sera publicado"
+          find e2e-publicavel e2e-logs -type f | sort
 
-      - name: Publicar evidencias (capturas, relatorio JSON/HTML e logs)
-        if: ${{ always() && steps.sanitizacao.outcome != 'failure' }}
+      # So a pasta publicavel e os logs dos processos. O relatorio HTML, o JSON
+      # bruto e os anexos de falha ficam em $RUNNER_TEMP e nunca sobem.
+      - name: Publicar evidencias sanitizadas
+        if: ${{ always() && steps.sanitizar.outcome == 'success' && steps.sanitizacao.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: e2e-evidencias
           if-no-files-found: warn
           retention-days: 30
           path: |
-            apps/web/test-results-ci-explorer/**
-            apps/web/test-results-ci-regressao/**
+            e2e-publicavel/**
             e2e-logs/*.log
-            !**/*.zip
-            !**/trace*
 
   # ===========================================================================
   # P04-QA-02: ponto unico para "required status check". `if: always()` para que

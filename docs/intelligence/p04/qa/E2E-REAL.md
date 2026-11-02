@@ -23,6 +23,7 @@ Em produção o nginx dá ao navegador uma origem só: `/api/*` vai para a API, 
 ## Regras do portão
 
 - Sem `continue-on-error`, `|| true`, `test.skip`/`fixme`, `retries` ou `waitForTimeout`. `forbidOnly` ativo.
+- Sanitização obrigatória e sem exceção: se o sanitizador ou a varredura reprovarem, o job fica vermelho e o artefato não é publicado.
 - Sem `trace` e sem `video` (gravariam cookies e o POST do login). As evidências são capturas explícitas de telas autenticadas com dados sintéticos e os logs de processo.
 - `APP_VERSION` **não** é definida neste job (o rodapé mostra `0.1.1`, como no servidor).
 - Credenciais do job (`SEED_OWNER_PASSWORD`, `SEED_SDR_PASSWORD`, `E2E_BETA_PASSWORD`, URLs de banco) são **descartáveis**, vivem só no `env` do job e nunca saem dele; não são secrets do repositório.
@@ -37,7 +38,13 @@ Em produção o nginx dá ao navegador uma origem só: `/api/*` vai para a API, 
 
 ## Como ler o resultado
 
-No artefato `e2e-evidencias`: `test-results-ci-explorer/` e `test-results-ci-regressao/` com `resultado.json` (estado de cada teste), `relatorio-html/index.html`, `evidencias/*.png` (capturas) e `artefatos/` (capturas de falha); `e2e-logs/*.log` (inicialização, requisições e desligamento de API, Next e gateway). O título de cada teste começa pelo ID da matriz (`E2E-0x`).
+No artefato `e2e-evidencias` (P04-QA-04R): `e2e-publicavel/RESUMO.md` (tabela por teste), `e2e-publicavel/<etapa>/resultado-publicavel.json` (estado, duração e resumo tratado do erro de cada teste; o ID da matriz abre o título), `e2e-publicavel/<etapa>/evidencias/*.png` (capturas sintéticas de telas autenticadas) e `e2e-logs/*.log` (API, Next e gateway). O relatório bruto do Playwright (JSON, HTML, anexos de falha) **não é publicado**: fica em `$RUNNER_TEMP`, porque pode conter contexto de execução e o HTML não é verificável por varredura de texto. Para entender uma falha, use o resumo tratado, o log do job e os logs de processo.
+
+O passo “Montar a saída publicável e sanitizada” imprime no log do job, por categoria de campo, **quantos** marcadores sensíveis o relatório bruto tinha (nunca os valores). Se a saída publicável ainda tiver algum, o passo reprova e o upload é pulado; o mesmo vale para a varredura seguinte.
+
+## Saúde da pilha no E2E
+
+O `/api/v1/health` agrega PostgreSQL, Redis e scraper; só o scraper apenas degrada. O scraper **não** sobe neste job (provider de coleta `mock`), então o estado esperado é `scraper: down` e `status: degraded`, e o rodapé mostra `API degraded`. O job reprova se banco ou Redis não estiverem `ok`, e o teste do fluxo 1 confere o rodapé contra o payload real.
 
 ## Rodar fora do CI (opcional, não exigido)
 

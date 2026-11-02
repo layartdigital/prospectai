@@ -87,3 +87,4 @@ Claude outputs/
 apps/web/e2e/.generated/
 apps/web/test-results-ci/
 apps/web/test-results-ci-*/
+e2e-publicavel/

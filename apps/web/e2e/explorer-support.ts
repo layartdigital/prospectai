@@ -208,8 +208,21 @@ export function botaoDeRelacao(page: Page, rotulo: string): Locator {
   });
 }
 
-/** Clica na relacao e espera a resposta 200 da API de expansao. */
-export async function carregarRelacao(page: Page, rotulo: string): Promise<void> {
+/**
+ * Clica na relacao, espera a resposta 200 da API de expansao **e espera a tela
+ * aplicar o resultado**: cada no devolvido pela API precisa estar no SVG antes
+ * de a funcao retornar.
+ *
+ * (P04-QA-04R) A versao anterior parava na resposta HTTP. Entre o `200` e o
+ * render do React ha um intervalo, e uma leitura do DOM nesse intervalo via zero
+ * nos de `SCORE_REASON` embora a API tivesse devolvido oito. Agora o intervalo e
+ * esperado pela condicao observavel (o no existir no DOM), sem pausa fixa. Se a
+ * interface realmente perdesse os nos, esta espera estoura com a lista dos que
+ * faltam — e isso aponta defeito do produto, nao do teste.
+ *
+ * Devolve as referencias que a API enviou nesta pagina.
+ */
+export async function carregarRelacao(page: Page, rotulo: string): Promise<string[]> {
   const botao = botaoDeRelacao(page, rotulo);
   await expect(botao).toBeEnabled();
   const [resposta] = await Promise.all([
@@ -219,6 +232,13 @@ export async function carregarRelacao(page: Page, rotulo: string): Promise<void>
     botao.click(),
   ]);
   expect(resposta.status()).toBe(200);
+
+  const corpo = (await resposta.json()) as { nodes: { ref: string }[] };
+  const refs = corpo.nodes.map((n) => n.ref);
+  for (const ref of refs) {
+    await expect(no(page, ref), `a tela deve desenhar ${ref}, devolvido pela API`).toBeAttached();
+  }
+  return refs;
 }
 
 /** Percentual de zoom mostrado no canto do grafo. */

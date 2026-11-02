@@ -32,6 +32,17 @@ Artefatos de **autoria** desta rodada. Nenhum deles é evidência de execução:
 | Como funciona | `qa/E2E-REAL.md` | passos do job, regras, fixtures, leitura | — |
 | Linha de base do CI | Actions #75 (`0028802`) | 4/4 jobs verdes; sem teste de navegador real | PASS (informado pelo proprietário) |
 
+## P04-QA-04R — correção direcionada (autoria; execução pendente do run #77)
+
+| Item | Arquivo | O que é | Estado |
+|---|---|---|---|
+| Sanitizador | `apps/web/e2e/ci/sanitizar-resultados.mjs` | saída publicável por lista permitida; diagnóstico por categoria de campo; falha apaga a saída | testado com JSON sintético e real; **NOT_EXECUTED** no CI |
+| Correção A | `apps/web/e2e/explorer-support.ts`, `explorer-02-…spec.ts` | espera dos nós devolvidos pela API; contagem exata de motivos | tipado (0 erros); **NOT_EXECUTED** |
+| Correção B | `apps/web/e2e/fluxo-1-sessao-e-dashboard.spec.ts`, passo de saúde em `ci.yml` | rodapé conferido contra o `/health` real | tipado; **NOT_EXECUTED** |
+| Correção C | `.github/workflows/ci.yml`, `.gitignore` | bruto em `$RUNNER_TEMP`; publicar só o sanitizado | YAML válido; **NOT_EXECUTED** |
+| Relatório | `P04-QA-04-RELATORIO.md` (seção QA-04R) | causa raiz, classificação, antes × depois, riscos | — |
+| Linha de base | Actions #76 (`84a96c6`) | Explorer 25/27 · regressão 28/29 · sanitização bloqueou | informado pelo proprietário |
+
 ## O que NÃO existe (não foi executado)
 
 typecheck real do monorepo, `prisma generate`, ESLint, `nest build`, `next build`, jest da API (inclui `intelligence-tenant.spec.ts`), suíte completa, portão de RLS, vitest, regressão do produto, captura da ficha do lead no aplicativo completo, troca de workspace no aplicativo completo, execução do `ci.yml` e do `validar-p04-qa.ps1`. Obtê-los: `qa/COMO-RODAR.md` (Rota A: CI do GitHub).
@@ -79,4 +90,16 @@ f204d33f00ea0819377f30c2ad235458bccd5a477279be2f42e79da97cfcea84 | capturas/11-t
 eb471a3c0a0d98c0aed7dacbd39bcdd793054d28ac8f4ab8223d69d25be6ed2d | capturas/troca-1-antes-alfa.png
 76bee70797e5c972250efea02935187880ddec224eb0bedc7f01e523de1cfd11 | capturas/troca-2-aviso-descartado.png
 234a8937b4ee44147192c5d04401f7033458c61dce36828a253cafa1b115a303 | capturas/troca-3-depois-beta.png
+```
+
+### Hashes SHA-256 — arquivos da QA-04R (conteúdo do commit)
+
+```
+7a379f4aa280782011695cc89c483658bca170aa66a3b9cbbb78c6e0e22ae6f7 | apps/web/e2e/ci/sanitizar-resultados.mjs
+d9b9c2d2ec049f5d47d7d3a532cb631ce5534a1cb088fd108ae9b7797ff3a3c9 | apps/web/e2e/explorer-support.ts
+d85374c4a6429f114c518f14553f1df9b1a2478f22ca579406fb315e268c6beb | apps/web/e2e/explorer-02-expansao-e-interface.spec.ts
+dba4bbce8908111581e2c762b1d833851a2a703e81cb202eff2f3d557e37416f | apps/web/e2e/fluxo-1-sessao-e-dashboard.spec.ts
+f7c2fa66045e2d4968e37d80bf3973eb841803e58142d5c0533fbaa3e0aa2c68 | apps/web/playwright.ci.config.ts
+06ef3984cc00e920111ed1a2981802535f70c3a74bf755c5206064a3c05b0f7e | .github/workflows/ci.yml
+d15b1788337eda7cbaa7afd08117242936b8a5d0a9da2aa2ddb4ec06a9d18d99 | .gitignore
 ```

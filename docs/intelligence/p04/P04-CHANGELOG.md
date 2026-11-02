@@ -54,3 +54,15 @@ Rota `/intelligence`, 2 endpoints, grafo de relações verificáveis do próprio
 
 **Estado:** autoria concluída; **execução pendente do primeiro run no Actions** (ver `P04-QA-04-RELATORIO.md`).
 
+## 0.1.0 + QA-04R (P04-QA-04R) — correção direcionada após o run #76, 02/11/2026 (versão do módulo inalterada: 0.1.0)
+
+**Testes (sem mudança no código do produto)**
+- `explorer-support.ts`: `carregarRelacao` espera cada nó devolvido pela API aparecer no SVG (sem pausa fixa) e devolve as referências. E2E-05a passa a conferir contagem exata de `SCORE_REASON` no DOM.
+- `fluxo-1`: o teste do rodapé verifica o `/api/v1/health` real (banco e Redis `ok`; status coerente com o scraper) em vez de exigir `API ok` com o scraper ausente.
+
+**Integração contínua**
+- Relatório bruto do Playwright fora do workspace (`$RUNNER_TEMP`); novo `apps/web/e2e/ci/sanitizar-resultados.mjs` gera a saída publicável por lista permitida e diagnostica marcadores por categoria de campo (sem valores). Varredura e upload cobrem só `e2e-publicavel/` e os logs de processo. HTML, JSON bruto e anexos de falha não são mais publicados.
+- Novo passo que imprime banco/Redis/scraper separados e reprova se banco ou Redis não estiverem `ok`.
+
+**Sem mudança** de produto, contrato de API, schema, migration ou produção. **Estado:** aguarda o run #77.
+

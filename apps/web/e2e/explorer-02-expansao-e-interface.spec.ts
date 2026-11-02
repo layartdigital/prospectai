@@ -276,8 +276,12 @@ test.describe('E2E-05 interface do Explorer', () => {
 
     const score = refsDoTipo(await refsDoGrafo(page), 'SCORE')[0] ?? '';
     await selecionarNo(page, score);
-    await carregarRelacao(page, 'Motivo do score');
-    expect(refsDoTipo(await refsDoGrafo(page), 'SCORE_REASON').length).toBeGreaterThan(0);
+    // A API devolve os motivos (as fixtures usam o motor de score real: 8 motivos) e
+    // a tela precisa te-los desenhado quando `carregarRelacao` retorna.
+    const motivos = await carregarRelacao(page, 'Motivo do score');
+    expect(motivos.length, 'a API devolveu motivos do score').toBeGreaterThan(0);
+    expect(motivos.every((r) => r.startsWith('SCORE_REASON:'))).toBe(true);
+    await expect(page.locator('svg [data-no^="SCORE_REASON:"]')).toHaveCount(motivos.length);
     expect(semDuplicados(await refsDoGrafo(page))).toBe(true);
 
     await evidencia(page, 'e2e-05-interface-completa');

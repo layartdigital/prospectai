@@ -3,6 +3,8 @@
 **Módulo:** Intelligence Explorer **0.1.0** · **PR #7 (rascunho)** · **Branch:** `feat/prompt-04-intelligence-explorer` · **Commit de partida:** `002880203714a07f46ee0e5103fb48d118d1321e` (QA-03, validado pelo CI #75) · **Commit desta rodada:** ver a mensagem de entrega e `git log` (um commit sobre `0028802`).
 **`F:\drmind` (Bellvia) não foi modificado.** Nenhum deploy, merge, migration em produção, restart ou acesso ao servidor produtivo; a stack `prospectai-prod` e a coleta pendente do GATE-DB-42501 não foram tocadas. SEC-DATA-01, SEC-DB-02, Company 360, Flowsint e novas funcionalidades de IA **não** foram iniciados.
 
+> **Atualização P04-QA-04R (correção direcionada após o run #76):** ver a seção **“P04-QA-04R”** ao final deste documento. O veredito da QA-04 acima descreve a autoria; o estado atual está na seção QA-04R.
+
 ## Veredito
 
 ```
@@ -122,3 +124,85 @@ O `P04-QA-03-RELATORIO.md` foi anotado: o CI #75 aprovou `0028802` (4/4 jobs), m
 ## Próximo passo recomendado
 
 Publicar, deixar o run terminar e devolver o resultado. Só então decidir, em ordem separada, qualquer publicação controlada (merge do PR #7 por você, deploy com checklist e janela próprios). SEC-DATA-01 e GATE-DB-42501 T1 seguem exatamente onde estavam.
+
+---
+
+## P04-QA-04R — correção direcionada após o primeiro E2E real (Actions #76)
+
+**`F:\drmind` (Bellvia) não foi modificado.** Nenhum deploy, merge, migration, acesso ao PostgreSQL de produção, restart de serviço produtivo, alteração de outras stacks, SEC-DATA-01, SEC-DB-02 ou GATE-DB-42501. Nenhuma funcionalidade nova, migration ou mudança de infraestrutura produtiva. **Nenhum código do produto foi alterado**: as três correções estão em specs, no CI e no gerador de saída publicável.
+
+**Ponto de partida:** commit `84a96c6abfad30ce760a27f092f414d84cd4c471`, run #76 (informado pelo proprietário): tipos, builds, HTTP e RLS passaram; Explorer **25 passaram / 1 falhou / 1 não executado**; regressão **28 passaram / 1 falhou**; a sanitização reprovou e **bloqueou corretamente** a publicação das evidências.
+
+### Veredito
+
+```
+P04_QA_04R_EXECUTION  = PARTIAL     (correções escritas, tipadas e testadas no que é testável aqui; o run do Actions
+                                     que as confirma ainda não existe — depende do push do proprietário)
+P04_QA_04R_RESULT     = INCONCLUSIVE
+```
+
+Sem registro npm, Docker nem push a partir desta sessão, **não executei** a suíte E2E: não há como afirmar PASS antes do run seguinte (#77). O que foi verificado de fato está na tabela “Verificado aqui”.
+
+### Causa raiz por falha
+
+| # | Falha no #76 | Causa raiz | Classificação | Correção |
+|---|---|---|---|---|
+| A | E2E-05a: `Expected: > 0 / Received: 0` em `SCORE_REASON`, logo após `carregarRelacao(page, 'Motivo do score')`. E2E-05b “não executado” | O auxiliar esperava só a **resposta HTTP 200** de `/intelligence/expand` e o teste lia o DOM no mesmo instante, antes de o React desenhar os nós. A API **devolveu** os 8 motivos (as fixtures geram 8 pelo `computeScore` real). E2E-05b ficou “não executado” porque o arquivo roda em modo `serial`: depois de uma falha, o Playwright não executa os seguintes | **Defeito de teste (sincronização)** — não é defeito do produto | `carregarRelacao` agora lê o corpo da resposta e espera, pela condição observável (`toBeAttached`), **cada nó devolvido pela API** estar no SVG. Se a interface realmente perdesse nós, a espera estoura listando o nó que faltou (aponta defeito do produto). E2E-05a passou a afirmar: a API devolveu ≥ 1 motivo, todos `SCORE_REASON:`, a contagem de `SCORE_REASON` no SVG é **exatamente** a devolvida, sem duplicados. Sem `waitForTimeout`, sem retry, asserção **mais forte** que a anterior |
+| B | E2E-09 (fluxo 1): esperado `API ok`, rodapé mostrou `API degraded` | `/api/v1/health` agrega PostgreSQL, Redis e **scraper**; só o scraper degrada. O scraper (`gosom/google-maps-scraper`) **não faz parte do job** e nenhum cenário depende dele (`LEAD_SOURCE_PROVIDER=mock`). `degraded` é o que o produto **deve** reportar nessa pilha | **Expectativa do teste incompatível com a infraestrutura de teste** (scraper ausente de propósito) — não é defeito do produto | O teste consulta o `/health` real e afirma: 200, `database=ok`, `redis=ok`, `status === (scraper==='ok' ? 'ok' : 'degraded')`, e que o rodapé mostra exatamente `API <esse status>`. O passo novo do CI imprime os três componentes separados e **reprova** se banco ou Redis não estiverem `ok`. Não alterei o healthcheck, não aceitei indisponibilidade de banco/Redis, não troquei `degraded` por `ok` e não adicionei scraper falso |
+| C | Varredura de sanitização achou marcadores em `resultado.json` do Explorer e da regressão | O JSON bruto do Playwright carrega contexto completo de cada falha (trecho de código com literais, mensagens, stdout, anexos). Sem o log do run, **não consigo afirmar** quais campos exatos continham os marcadores; sei por inspeção do JSON real (Playwright 1.63) que segredos aparecem em `results[].error.snippet`, `results[].errors[].message` e saídas. Além disso o relatório **HTML** embute os dados comprimidos, portanto **não pode ser verificado por varredura de texto** e nunca deveria ser publicado | **Infraestrutura de publicação** (a barreira funcionou; o desenho de publicar o bruto, não) | Bruto agora vai para `$RUNNER_TEMP` (fora do workspace, nunca em artefato). Novo `apps/web/e2e/ci/sanitizar-resultados.mjs` monta a **saída publicável por lista permitida** de campos e imprime no log, por categoria de campo, **quantos** marcadores o bruto tinha (nunca os valores) — o run #77 dirá exatamente onde estavam. A varredura do CI passou a cobrir só o que será publicado (`e2e-publicavel` + logs), com `-a` para tratar binários como texto. A sanitização **continua obrigatória e sem exceção**: se falhar, o job fica vermelho e o upload não roda |
+
+### Saída publicável (Correção C)
+
+Preservado por teste: ID e título do cenário, arquivo, projeto, estado (`expected/unexpected/flaky/skipped`), estado do último resultado, duração, tentativas, **categoria e resumo tratado do erro**, totais, commit, repositório, workflow, run e tentativa; mais as capturas de tela sintéticas das specs e os logs de processo. **Nunca copiado:** stdout/stderr, anexos, passos, configuração, trechos de código, cabeçalhos, cookies, corpos de requisição, relatório HTML, JSON bruto.
+
+Tratamento do erro: remove cores ANSI, corta em “Call log”, descarta linhas de trecho de código, limita a 8 linhas / 900 caracteres, troca senhas do job, `pa_at=`/`pa_rt=`, `Set-Cookie`, `Authorization`, `Bearer` e JWT por marcadores neutros; se ainda restar marcador, o texto é omitido. Depois de escrever, o script **relê** o que gravou: achou marcador → apaga o arquivo e sai com código 1.
+
+### Verificado aqui (não é execução do E2E)
+
+| Verificação | Resultado |
+|---|---|
+| Tipagem estrita (TS 6.0.3, `noUnusedLocals/Parameters`) das specs, do suporte e da config de CI | 0 erros |
+| Sanitizador com JSON sintético contendo as três senhas, `pa_at=`, `Set-Cookie`, `Authorization: Bearer`, JWT e senha no título | diagnóstico contou 9 ocorrências por categoria de campo **sem imprimir valores**; saída publicável sem nenhum marcador (0 ocorrências por `grep`); o resumo do erro preservou `Expected: > 0 / Received: 0` |
+| Sanitizador com JSON real do Playwright (sonda local) | 2 testes, 1 aprovado, 1 reprovado; saída ok |
+| Caminho de falha (campo não redigido com `Set-Cookie`) | script sai com código 1 e apaga o arquivo; nada fica para publicar |
+| Resultado ausente (etapa que não rodou) | registrado como “sem resultado”, sem erro e sem inventar dados |
+| `ci.yml` | YAML válido; sem `continue-on-error`; sem `|| true`; upload só roda com `sanitizar` e `sanitizacao` em `success` |
+
+### Arquivos alterados
+
+`apps/web/e2e/explorer-support.ts` · `apps/web/e2e/explorer-02-expansao-e-interface.spec.ts` · `apps/web/e2e/fluxo-1-sessao-e-dashboard.spec.ts` · `apps/web/playwright.ci.config.ts` (só comentário) · `apps/web/e2e/ci/sanitizar-resultados.mjs` (novo) · `.github/workflows/ci.yml` · `.gitignore` · documentação (este relatório, changelog, índice, `qa/E2E-REAL.md`).
+
+### Antes × depois
+
+| | Antes (#76, `84a96c6`) | Depois (QA-04R, a confirmar no #77) |
+|---|---|---|
+| Explorer | 25 passaram · 1 falhou · 1 não executado | esperado 27/27 — **NOT_EXECUTED até o run** |
+| Regressão | 28 passaram · 1 falhou | esperado 29/29 — **NOT_EXECUTED até o run** |
+| Sanitização | reprovada (bloqueou) | esperada aprovada sobre a saída publicável — **a confirmar** |
+| Publicação | bloqueada | só `e2e-publicavel/**` e logs, só se a sanitização passar |
+
+### Matriz E2E (27 + 29)
+
+Cenários E2E-01…08 (27 testes) e E2E-09 (29 testes): **resultado do commit da QA-04R = NOT_EXECUTED** (nenhum rodou nesta sessão). Referência do #76: todos passaram exceto E2E-05a (falhou, corrigido em A), E2E-05b (não executado por dependência serial de E2E-05a) e o teste do rodapé do fluxo 1 (corrigido em B). A matriz da seção anterior continua válida quanto ao que cada teste prova; E2E-05 agora prova também que o DOM contém **exatamente** os nós devolvidos pela API.
+
+### Riscos residuais
+
+1. **Não há run do commit corrigido.** Pode haver outra falha oculta atrás de E2E-05b (nunca executado no #76) — é o risco principal.
+2. **Origem exata dos marcadores do #76 é inferida**, não observada (sem acesso ao log). O diagnóstico do próximo run elimina a dúvida. Se um marcador estiver em campo **publicado** (por exemplo o título de um teste), o job continua vermelho de propósito.
+3. O reporter `list` imprime erros no **log do job** do GitHub (não é artefato). Os testes não contêm senha literal, mas o log do job não passa pelo sanitizador; as senhas do CI são descartáveis e restritas ao job.
+4. O scraper segue fora do E2E: o caminho “scraper ok” do rodapé não é exercitado (o teste cobre os dois ramos pela regra, mas só o ramo `degraded` ocorre no CI).
+5. As capturas de falha do Playwright (`artefatos/`) não são publicadas; diagnosticar uma falha exige o resumo tratado, o log do job e os logs de processo.
+
+### Commit e run
+
+Commit desta rodada: ver a mensagem de entrega (um commit sobre `84a96c6`). Link do run #77: será o do Actions do PR #7 após o push do proprietário — **não existe ainda**.
+
+**Para publicar** (sem merge):
+
+```powershell
+cd C:\ResgateProjetos\prospectai
+git fetch "C:\ResgateProjetos\prospectai\Claude outputs\PROSPECTAI-P04-QA04R.bundle" feat/prompt-04-intelligence-explorer:qa04r-entrada
+git switch feat/prompt-04-intelligence-explorer
+git merge --ff-only qa04r-entrada
+git push origin feat/prompt-04-intelligence-explorer
+```
