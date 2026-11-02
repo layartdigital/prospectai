@@ -1,0 +1,7 @@
+graph lead com 5010 notas	consultas=16	tempo_bancada_ms=989
+expand SEARCH->LEAD pageSize=1	consultas=13	tempo_bancada_ms=634
+expand SEARCH->LEAD pageSize=25	consultas=13	tempo_bancada_ms=598
+expand SEARCH->LEAD offset=2990	consultas=13	tempo_bancada_ms=713
+expand NOTE pageSize=500 offset=0	consultas=3	tempo_bancada_ms=190
+expand NOTE offset=5000	consultas=3	tempo_bancada_ms=180
+expand SEARCH->LEAD (25 leads, 5+ relacoes cada)	consultas=13	tempo_bancada_ms=567

@@ -1,0 +1,18 @@
+=== (1) catalogo: como a FK de leadId esta definida em pipeline_cards (e a de stageId, que e composta)
+               conname                |                                                      definicao                                                      
+--------------------------------------+---------------------------------------------------------------------------------------------------------------------
+ pipeline_cards_leadId_fkey           | FOREIGN KEY ("leadId") REFERENCES leads(id) ON UPDATE CASCADE ON DELETE CASCADE
+ pipeline_cards_ownerId_fkey          | FOREIGN KEY ("ownerId") REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET NULL
+ pipeline_cards_tenantId_fkey         | FOREIGN KEY ("tenantId") REFERENCES tenants(id) ON UPDATE CASCADE ON DELETE CASCADE
+ pipeline_cards_tenantId_stageId_fkey | FOREIGN KEY ("tenantId", "stageId") REFERENCES pipeline_stages("tenantId", id) ON UPDATE CASCADE ON DELETE RESTRICT
+(4 rows)
+         indexname         |                                            indexdef                                             
+---------------------------+-------------------------------------------------------------------------------------------------
+ pipeline_cards_leadId_key | CREATE UNIQUE INDEX "pipeline_cards_leadId_key" ON public.pipeline_cards USING btree ("leadId")
+CREATE FUNCTION
+=== (2) reproduz o que a QA-01 viu: lead_beta_00000001 JA tem o cartao orfao semeado -> recusa por unicidade
+NOTICE:  cartao do ALFA em lead_beta_00000001 (ja tem cartao) -> RECUSADO por UNICIDADE (duplicate key value violates unique constraint "pipeline_cards_leadId_key"): nao e protecao de tenant
+=== (3) o teste CERTO: lead do Beta SEM cartao (lead_beta_intruso1) — so a FK de leadId poderia recusar
+NOTICE:  cartao do ALFA em lead_beta_intruso1 (sem cartao) -> ACEITO
+=== (4) controle: a FK composta (tenantId, stageId) recusa estagio de OUTRO tenant (o mecanismo funciona onde existe)
+NOTICE:  cartao do ALFA com estagio do BETA -> RECUSADO por FK (insert or update on table "pipeline_cards" violates foreign key constraint "pipeline_cards_tenantId_stageId_fkey")

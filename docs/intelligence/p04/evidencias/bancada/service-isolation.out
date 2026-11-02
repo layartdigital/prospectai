@@ -1,0 +1,274 @@
+TAP version 13
+# Subtest: o dono enxerga as proprias relacoes (servico real, RLS real)
+    # Subtest: grafo inicial: lead, pesquisa, score, presenca e cartao, com 4 arestas verificadas
+    ok 1 - grafo inicial: lead, pesquisa, score, presenca e cartao, com 4 arestas verificadas
+      ---
+      duration_ms: 1034.056018
+      type: 'test'
+      ...
+    # Subtest: contagens de filhos vem em expansions, sem enviar os filhos
+    ok 2 - contagens de filhos vem em expansions, sem enviar os filhos
+      ---
+      duration_ms: 817.810054
+      type: 'test'
+      ...
+    # Subtest: telefone sai mascarado no plano que mascara
+    ok 3 - telefone sai mascarado no plano que mascara
+      ---
+      duration_ms: 775.065523
+      type: 'test'
+      ...
+    # Subtest: plano que libera o numero mostra o numero
+    ok 4 - plano que libera o numero mostra o numero
+      ---
+      duration_ms: 652.646263
+      type: 'test'
+      ...
+    # Subtest: notas: pagina de 25, recortadas, proxima posicao e resto
+    ok 5 - notas: pagina de 25, recortadas, proxima posicao e resto
+      ---
+      duration_ms: 298.810781
+      type: 'test'
+      ...
+    # Subtest: nao devolve JSON livre nem URL do prospect
+    ok 6 - nao devolve JSON livre nem URL do prospect
+      ---
+      duration_ms: 413.220837
+      type: 'test'
+      ...
+    # Subtest: sinais sem verificacao chegam como DESCONHECIDO; AUSENTE e PRESENTE so quando o banco disse
+    ok 7 - sinais sem verificacao chegam como DESCONHECIDO; AUSENTE e PRESENTE so quando o banco disse
+      ---
+      duration_ms: 54.173503
+      type: 'test'
+      ...
+    # Subtest: motivos do score, etapa do cartao e checagens
+    ok 8 - motivos do score, etapa do cartao e checagens
+      ---
+      duration_ms: 323.545871
+      type: 'test'
+      ...
+    # Subtest: expandir a pesquisa lista so os leads do proprio tenant (4), sem o intruso do Beta
+    ok 9 - expandir a pesquisa lista so os leads do proprio tenant (4), sem o intruso do Beta
+      ---
+      duration_ms: 572.868378
+      type: 'test'
+      ...
+    1..9
+ok 1 - o dono enxerga as proprias relacoes (servico real, RLS real)
+  ---
+  duration_ms: 4945.012164
+  type: 'suite'
+  ...
+# Subtest: isolamento entre tenants
+    # Subtest: Beta com o id do lead do Alfa recebe 404 no grafo
+    ok 1 - Beta com o id do lead do Alfa recebe 404 no grafo
+      ---
+      duration_ms: 38.382283
+      type: 'test'
+      ...
+    # Subtest: id de outro tenant e id inexistente respondem igual
+    ok 2 - id de outro tenant e id inexistente respondem igual
+      ---
+      duration_ms: 84.74595
+      type: 'test'
+      ...
+    # Subtest: Beta nao expande nenhum tipo de no do Alfa (12 combinacoes)
+    ok 3 - Beta nao expande nenhum tipo de no do Alfa (12 combinacoes)
+      ---
+      duration_ms: 573.593878
+      type: 'test'
+      ...
+    # Subtest: Beta so enxerga o proprio grafo, sem nenhum id do Alfa
+    ok 4 - Beta so enxerga o proprio grafo, sem nenhum id do Alfa
+      ---
+      duration_ms: 781.485385
+      type: 'test'
+      ...
+    # Subtest: lead do Beta com searchId do Alfa nao ganha no de pesquisa
+    ok 5 - lead do Beta com searchId do Alfa nao ganha no de pesquisa
+      ---
+      duration_ms: 692.578306
+      type: 'test'
+      ...
+    # Subtest: e o Alfa nao enxerga o lead do Beta pelo mesmo caminho
+    ok 6 - e o Alfa nao enxerga o lead do Beta pelo mesmo caminho
+      ---
+      duration_ms: 86.051749
+      type: 'test'
+      ...
+    # Subtest: sem contexto de tenant a RLS nega tudo (a bancada consulta cru, fora do servico)
+    ok 7 - sem contexto de tenant a RLS nega tudo (a bancada consulta cru, fora do servico)
+      ---
+      duration_ms: 102.84421
+      type: 'test'
+      ...
+    1..7
+ok 2 - isolamento entre tenants
+  ---
+  duration_ms: 2360.733295
+  type: 'suite'
+  ...
+# Subtest: soft delete
+    # Subtest: nota apagada nao entra na contagem nem na pagina
+    ok 1 - nota apagada nao entra na contagem nem na pagina
+      ---
+      duration_ms: 882.400524
+      type: 'test'
+      ...
+    # Subtest: lead apagado responde 404 no grafo e na expansao
+    ok 2 - lead apagado responde 404 no grafo e na expansao
+      ---
+      duration_ms: 77.545917
+      type: 'test'
+      ...
+    1..2
+ok 3 - soft delete
+  ---
+  duration_ms: 960.242597
+  type: 'suite'
+  ...
+# Subtest: limites no servidor
+    # Subtest: relacao nao permitida, referencia malformada e profundidade
+    ok 1 - relacao nao permitida, referencia malformada e profundidade
+      ---
+      duration_ms: 1.044998
+      type: 'test'
+      ...
+    # Subtest: pageSize e limitado ao teto mesmo se o cliente pedir mais (o DTO barra antes; aqui, defesa em profundidade)
+    ok 2 - pageSize e limitado ao teto mesmo se o cliente pedir mais (o DTO barra antes; aqui, defesa em profundidade)
+      ---
+      duration_ms: 129.096653
+      type: 'test'
+      ...
+    # Subtest: parseNodeRef recusa o que o servico nunca deve consultar
+    ok 3 - parseNodeRef recusa o que o servico nunca deve consultar
+      ---
+      duration_ms: 0.306881
+      type: 'test'
+      ...
+    1..3
+ok 4 - limites no servidor
+  ---
+  duration_ms: 130.697414
+  type: 'suite'
+  ...
+# Subtest: QA-01 · profundidade imposta pelo servidor
+    # Subtest: todo no devolvido traz prova; a raiz e os filhos diretos partem de 0 e 1
+    ok 1 - todo no devolvido traz prova; a raiz e os filhos diretos partem de 0 e 1
+      ---
+      duration_ms: 747.689949
+      type: 'test'
+      ...
+    # Subtest: profundidade valida: cliente usa a prova recebida da raiz e recebe filhos em depth 1
+    ok 2 - profundidade valida: cliente usa a prova recebida da raiz e recebe filhos em depth 1
+      ---
+      duration_ms: 783.154389
+      type: 'test'
+      ...
+    # Subtest: cadeia real ate o teto: lead -> pesquisa -> lead -> presenca passa; o proximo passo (sinais, depth 4) e recusado
+    ok 3 - cadeia real ate o teto: lead -> pesquisa -> lead -> presenca passa; o proximo passo (sinais, depth 4) e recusado
+      ---
+      duration_ms: 1482.096159
+      type: 'test'
+      ...
+    # Subtest: parentDepth artificialmente reduzido (com a prova do depth real) e recusado
+    ok 4 - parentDepth artificialmente reduzido (com a prova do depth real) e recusado
+      ---
+      duration_ms: 1309.638683
+      type: 'test'
+      ...
+    # Subtest: prova ausente, adulterada, de outro no, de outro tenant e depth malformado sao recusados
+    ok 5 - prova ausente, adulterada, de outro no, de outro tenant e depth malformado sao recusados
+      ---
+      duration_ms: 753.298925
+      type: 'test'
+      ...
+    # Subtest: segredo diferente invalida as provas (rotacao do segredo exige recarregar o grafo)
+    ok 6 - segredo diferente invalida as provas (rotacao do segredo exige recarregar o grafo)
+      ---
+      duration_ms: 708.215309
+      type: 'test'
+      ...
+    # Subtest: a recusa acontece antes do banco: nenhuma consulta e feita com prova invalida
+    ok 7 - a recusa acontece antes do banco: nenhuma consulta e feita com prova invalida
+      ---
+      duration_ms: 0.747624
+      type: 'test'
+      ...
+    1..7
+ok 5 - QA-01 · profundidade imposta pelo servidor
+  ---
+  duration_ms: 5785.718198
+  type: 'suite'
+  ...
+# Subtest: QA-01 · soft delete: entidades de lead excluido
+    # Subtest: score de lead excluido nao abre por referencia conhecida
+    ok 1 - score de lead excluido nao abre por referencia conhecida
+      ---
+      duration_ms: 45.949586
+      type: 'test'
+      ...
+    # Subtest: presenca digital de lead excluido nao abre por referencia conhecida
+    ok 2 - presenca digital de lead excluido nao abre por referencia conhecida
+      ---
+      duration_ms: 40.544009
+      type: 'test'
+      ...
+    # Subtest: auditoria de lead excluido nao abre por referencia conhecida
+    ok 3 - auditoria de lead excluido nao abre por referencia conhecida
+      ---
+      duration_ms: 41.802058
+      type: 'test'
+      ...
+    # Subtest: cartao do pipeline de lead excluido nao abre por referencia conhecida
+    ok 4 - cartao do pipeline de lead excluido nao abre por referencia conhecida
+      ---
+      duration_ms: 40.391928
+      type: 'test'
+      ...
+    # Subtest: lead excluido: grafo e expansao direta respondem 404; nada de seus filhos aparece
+    ok 5 - lead excluido: grafo e expansao direta respondem 404; nada de seus filhos aparece
+      ---
+      duration_ms: 324.299663
+      type: 'test'
+      ...
+    # Subtest: as mesmas entidades de um lead ATIVO continuam abrindo (controle positivo)
+    ok 6 - as mesmas entidades de um lead ATIVO continuam abrindo (controle positivo)
+      ---
+      duration_ms: 454.221274
+      type: 'test'
+      ...
+    # Subtest: a pesquisa nao lista o lead excluido
+    ok 7 - a pesquisa nao lista o lead excluido
+      ---
+      duration_ms: 562.306772
+      type: 'test'
+      ...
+    # Subtest: cartao orfao (tenant Alfa apontando para lead do Beta) nao abre para ninguem
+    ok 8 - cartao orfao (tenant Alfa apontando para lead do Beta) nao abre para ninguem
+      ---
+      duration_ms: 81.969049
+      type: 'test'
+      ...
+    # Subtest: Beta com ids de entidades do Alfa (ativas ou de lead excluido) recebe sempre 404
+    ok 9 - Beta com ids de entidades do Alfa (ativas ou de lead excluido) recebe sempre 404
+      ---
+      duration_ms: 213.967525
+      type: 'test'
+      ...
+    1..9
+ok 6 - QA-01 · soft delete: entidades de lead excluido
+  ---
+  duration_ms: 1806.325468
+  type: 'suite'
+  ...
+1..6
+# tests 37
+# suites 6
+# pass 37
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 16350.837118

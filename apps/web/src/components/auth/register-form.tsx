@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 
 import { clientApiUrl } from '@/lib/client-api-url';
+import { anunciarMudancaDeSessao } from '@/lib/session-events';
 
 /** Espelha o MinLength(10) do RegisterDto. Se mudar lá, muda aqui. */
 const MIN_PASSWORD_LENGTH = 10;
@@ -76,6 +77,7 @@ export function RegisterForm() {
       // Vai para o onboarding, não para o dashboard: dashboard de tenant sem
       // nenhum lead é a pior primeira tela possível. O wizard termina em
       // /search, que é onde a conta nova de fato começa a usar o produto.
+      anunciarMudancaDeSessao('login');
       router.push('/onboarding');
       router.refresh();
     } catch {

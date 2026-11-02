@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 
 import { clientApiUrl } from '@/lib/client-api-url';
+import { anunciarMudancaDeSessao } from '@/lib/session-events';
 
 export function LoginForm() {
   const router = useRouter();
@@ -59,6 +60,8 @@ export function LoginForm() {
         return;
       }
 
+      // Se outra aba tinha dados de outra conta abertos, ela os descarta na hora.
+      anunciarMudancaDeSessao('login');
       const next = searchParams.get('next');
       router.push(next && next.startsWith('/') ? next : '/dashboard');
       router.refresh();

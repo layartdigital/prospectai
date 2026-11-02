@@ -38,6 +38,12 @@ on:
   pull_request:
     branches: [main]
 
+# P04-QA-02 (31/10/2026): este workflow so LE o repositorio. Nao ha deploy, SSH,
+# acesso ao servidor de producao nem segredo de producao em nenhum job: os bancos
+# sao efemeros (servico do runner) e todas as credenciais abaixo sao descartaveis.
+permissions:
+  contents: read
+
 # Um push novo cancela a execucao anterior do mesmo ramo. A suite leva ~6 min e
 # nao ha valor em terminar a verificacao de um commit ja substituido.
 concurrency:
@@ -122,7 +128,45 @@ jobs:
       # `typecheck:all`, e nao `typecheck`: o primeiro cobre tambem os testes e
       # os scripts (`tsconfig.tests.json`, `tsconfig.scripts.json`), e foi em
       # arquivo de teste que os defeitos apareceram.
-      - run: pnpm typecheck:all
+      - name: Typecheck completo (fontes, testes e scripts)
+        run: pnpm typecheck:all
+
+      # P04-QA-02: lint e passo obrigatorio. Sem `continue-on-error`: qualquer
+      # erro de ESLint/`next lint` derruba o job e, por `needs:`, tudo o que
+      # vem depois.
+      - name: Lint
+        run: pnpm lint
+
+  # ===========================================================================
+  # P04-QA-02 (31/10/2026): builds de producao da API e da web.
+  #
+  # Separados do job `testes` de proposito: aquele define `NODE_ENV=test` no
+  # nivel do job, e `next build` recusa/avisa com NODE_ENV nao padrao. Aqui
+  # NODE_ENV nao e definido, e cada build roda pelo turbo para que `^build`
+  # (o pacote `@propectai/types`) seja construido antes.
+  # ===========================================================================
+  builds:
+    name: Builds (API e web)
+    runs-on: ubuntu-latest
+    needs: tipos
+    env:
+      APP_VERSION: ci
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+
+      - name: Build da API (nest build)
+        run: pnpm exec turbo run build --filter=@propectai/api
+
+      - name: Build da web (next build)
+        run: pnpm exec turbo run build --filter=@propectai/web
 
   # ===========================================================================
   testes:
@@ -336,6 +380,15 @@ jobs:
         run: pnpm db:seed
 
       # ---------------------------------------------------------------------
+      # P04-QA-02: o teste HTTP de isolamento do Intelligence Explorer roda
+      # sozinho e primeiro, como passo proprio. Se ele cair, o log aponta o
+      # Explorer direto em vez de se perder entre os ~400 testes da suite.
+      # Mesmo codigo da suite completa: nao ha mock de Prisma — banco real,
+      # papel `propectai_app` (sem BYPASSRLS) e requisicoes HTTP reais.
+      - name: Isolamento HTTP do Intelligence Explorer
+        run: pnpm --filter @propectai/api exec jest test/intelligence-tenant.spec.ts --runInBand
+
+      # ---------------------------------------------------------------------
       - name: Suite completa
         run: pnpm test
 
@@ -370,3 +423,344 @@ jobs:
         run: |
           psql -h localhost -p 5434 -U propectai -d propectai \
                -f docs/intelligence/gate0/verificacoes-fase-b.sql
+
+  # ===========================================================================
+  # P04-QA-04: E2E REAL. Navegador (Chromium/Playwright) contra a aplicacao
+  # inteira, em build de producao, num banco efemero que nasce e morre no job:
+  #
+  #   PostgreSQL 16 (servico do job) <- NestJS (node apps/api/dist/main.js)
+  #        ^ migrations em dois estagios + seed + fixtures   |
+  #                                                          v
+  #   Chromium -> gateway :3100 --/api--> API :3101
+  #                          \--resto--> Next.js (next start) :3200
+  #
+  # O gateway e o equivalente do nginx de producao (uma origem so, `/api` para a
+  # API). Ele repassa tudo para a aplicacao real; nao responde nada sozinho.
+  # Nao ha Prisma simulado, Next emulado, resposta HTTP artificial nem
+  # autenticacao ficticia. Nao ha `continue-on-error`, `|| true`, nem
+  # `test.skip`: se um teste obrigatorio cai, o job cai e o "Resultado do CI"
+  # cai junto. Nenhum segredo do repositorio e usado e nada aqui toca producao.
+  # ===========================================================================
+  e2e:
+    name: E2E real (Playwright)
+    runs-on: ubuntu-latest
+    needs: tipos
+    timeout-minutes: 60
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: propectai
+          POSTGRES_PASSWORD: propectai_ci_only
+          POSTGRES_DB: propectai
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U propectai -d propectai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6381:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # `APP_VERSION` NAO e definida de proposito: o rodape mostra "v0.1.1" na
+      # API e na web (o teste do fluxo 1 confere). Os jobs `builds` e `testes`
+      # usam `ci`; aqui o produto roda como roda no servidor.
+      NEXT_TELEMETRY_DISABLED: '1'
+
+      DATABASE_URL: postgresql://propectai:propectai_ci_only@localhost:5434/propectai?schema=public
+      DATABASE_URL_MIGRATOR: postgresql://propectai_migrator:migrator_ci_only@localhost:5434/propectai?schema=public
+      DATABASE_URL_APP: postgresql://propectai_app:app_ci_only@localhost:5434/propectai?schema=public
+      DATABASE_URL_SISTEMA: postgresql://propectai_sistema:sistema_ci_only@localhost:5434/propectai?schema=public
+      REDIS_URL: redis://localhost:6381
+
+      # Valores descartaveis, como nos outros jobs: o banco morre com o job e
+      # nao aceita conexao de fora. Nao sao segredos e nao viram secrets.
+      JWT_ACCESS_SECRET: ci-access-nao-e-segredo-nao-sai-do-job
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 7d
+      COOKIE_DOMAIN: localhost
+      # A origem do E2E e HTTP; cookie `Secure` nao seria devolvido pelo navegador.
+      COOKIE_SECURE: 'false'
+      SEED_OWNER_PASSWORD: ci-owner-descartavel-nao-e-segredo
+      SEED_SDR_PASSWORD: ci-sdr-descartavel-e-diferente-do-outro
+      # Senha do usuario do workspace Beta (fixtures). Descartavel e diferente das outras.
+      E2E_BETA_PASSWORD: ci-beta-descartavel-e-so-deste-job
+
+      LEAD_SOURCE_PROVIDER: mock
+      SITE_AUDIT_PROVIDER: mock
+      AI_PROVIDER: mock
+
+      API_PORT: '3101'
+      WEB_ORIGIN: http://localhost:3100
+      API_INTERNAL_URL: http://127.0.0.1:3101
+      E2E_BASE_URL: http://localhost:3100
+      E2E_LOGS: ${{ github.workspace }}/e2e-logs
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Compilar o pacote de tipos
+        run: pnpm --filter @propectai/types build
+
+      - run: pnpm db:generate
+
+      # ---- banco efemero: mesmas etapas do job `testes` -------------------
+      - name: Aplicar migrations ate o DB-REM-06 (superusuario)
+        run: |
+          ULTIMA=20261030190000_dono_sem_superusuario
+          test -d "prisma/migrations/$ULTIMA"
+          T="$RUNNER_TEMP/migrations-superusuario"
+          mkdir -p "$T/migrations"
+          cp prisma/schema.prisma "$T/"
+          cp prisma/migrations/migration_lock.toml "$T/migrations/"
+          for d in prisma/migrations/*/; do
+            n="$(basename "$d")"
+            cp -r "$d" "$T/migrations/$n"
+            [ "$n" = "$ULTIMA" ] && break
+          done
+          [ "$(basename "$(ls -d "$T"/migrations/*/ | tail -1)")" = "$ULTIMA" ]
+          pnpm exec prisma migrate deploy --schema "$T/schema.prisma"
+
+      - name: Dar senha aos quatro papeis
+        env:
+          PGPASSWORD: propectai_ci_only
+        run: |
+          psql -h localhost -p 5434 -U propectai -d propectai -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER ROLE propectai_migrator PASSWORD 'migrator_ci_only';
+          ALTER ROLE propectai_app       PASSWORD 'app_ci_only';
+          ALTER ROLE propectai_sistema   PASSWORD 'sistema_ci_only';
+          ALTER ROLE propectai_dono      PASSWORD 'dono_ci_only';
+          SQL
+
+      - name: Aplicar as migrations seguintes (propectai_dono)
+        env:
+          DATABASE_URL: postgresql://propectai_dono:dono_ci_only@localhost:5434/propectai?schema=public
+        run: pnpm db:deploy
+
+      - name: Semear o catalogo e o workspace de demonstracao (Alfa)
+        run: pnpm db:seed
+
+      - name: Fixtures sinteticas do E2E (Alfa enriquecido e Beta)
+        run: pnpm db:e2e-fixtures
+
+      # ---- builds de producao ---------------------------------------------
+      - name: Build da API (nest build)
+        run: pnpm --filter @propectai/api build
+
+      - name: Build da web (next build)
+        run: pnpm --filter @propectai/web build
+
+      - name: Instalar o Chromium do Playwright
+        run: pnpm --filter @propectai/web exec playwright install --with-deps chromium
+
+      # ---- pilha real: API + Next + gateway -------------------------------
+      - name: Iniciar a API (build de producao, so com as credenciais de runtime)
+        # `env -u` tira do processo da API as URLs do superusuario e do
+        # migrator: ela sobe como no servidor, apenas com `propectai_app` e
+        # `propectai_sistema`. Se algum caminho ainda dependesse do dono, o
+        # login quebraria aqui em vez de passar escondido.
+        run: |
+          mkdir -p "$E2E_LOGS"
+          NODE_ENV=production env -u DATABASE_URL -u DATABASE_URL_MIGRATOR \
+            nohup node apps/api/dist/main.js > "$E2E_LOGS/api.log" 2>&1 &
+          echo $! > "$E2E_LOGS/api.pid"
+
+      - name: Iniciar o Next.js (next start)
+        run: |
+          NODE_ENV=production nohup pnpm --filter @propectai/web exec next start --port 3200 \
+            > "$E2E_LOGS/web.log" 2>&1 &
+          echo $! > "$E2E_LOGS/web.pid"
+
+      - name: Iniciar o gateway same-origin
+        run: |
+          GATEWAY_PORT=3100 WEB_TARGET_PORT=3200 API_TARGET_PORT=3101 \
+            nohup node apps/web/e2e/ci/gateway.mjs > "$E2E_LOGS/gateway.log" 2>&1 &
+          echo $! > "$E2E_LOGS/gateway.pid"
+
+      - name: Esperar a pilha responder (API, web e /api pelo gateway)
+        run: |
+          esperar() {
+            for i in $(seq 1 90); do
+              if curl -fsS -o /dev/null "$2"; then echo "ok: $1 ($2) apos ${i} tentativa(s)"; return 0; fi
+              sleep 2
+            done
+            echo "FALHOU: $1 nao respondeu em $2" >&2
+            return 1
+          }
+          esperar "API direta"   http://127.0.0.1:3101/api/v1/health
+          esperar "Next direto"  http://127.0.0.1:3200/login
+          esperar "Gateway /api" http://127.0.0.1:3100/api/v1/health
+          esperar "Gateway web"  http://127.0.0.1:3100/login
+
+      # P04-QA-04R: o /health agrega tres componentes e o rodape da web mostra o
+      # agregado. Aqui cada componente aparece separado no log. PostgreSQL e
+      # Redis sao obrigatorios (o job cai se algum nao estiver `ok`). O scraper
+      # (gosom/google-maps-scraper) NAO e iniciado neste job: nenhum cenario
+      # depende dele e o provider de coleta e `mock`. Portanto `scraper: down` e
+      # `status: degraded` sao o estado ESPERADO da pilha de teste — e e
+      # exatamente o que o produto deve reportar. Nada foi falsificado para
+      # mudar isso (nao ha scraper de mentira nem healthcheck afrouxado).
+      - name: Estado real de saude da pilha (banco, Redis e scraper separados)
+        run: |
+          curl -fsS http://127.0.0.1:3100/api/v1/health > "$RUNNER_TEMP/health.json"
+          node -e '
+            const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const c = h.checks ?? {};
+            console.log("status agregado : " + h.status);
+            console.log("database        : " + c.database);
+            console.log("redis           : " + c.redis);
+            console.log("scraper         : " + c.scraper + (c.scraper === "ok" ? "" : "  (esperado: o scraper nao faz parte deste job)"));
+            if (c.database !== "ok" || c.redis !== "ok") {
+              console.error("FALHOU: PostgreSQL e Redis precisam estar ok para o E2E ter valor.");
+              process.exit(1);
+            }
+            const esperado = c.scraper === "ok" ? "ok" : "degraded";
+            if (h.status !== esperado) {
+              console.error("FALHOU: status agregado " + h.status + " incoerente com os componentes (esperado " + esperado + ").");
+              process.exit(1);
+            }
+          ' "$RUNNER_TEMP/health.json"
+
+      # ---- Playwright ------------------------------------------------------
+      # O Explorer roda ANTES da regressao: os fluxos antigos escrevem no lead
+      # de maior score do tenant de demonstracao, que pode ser o lead-hub das
+      # fixtures, e as contagens exatas (11 notas, 4 atividades...) dependem de
+      # ele estar intacto.
+      - name: E2E-01 a E2E-08 - Intelligence Explorer
+        working-directory: apps/web
+        env:
+          # Saida BRUTA fora do workspace: nunca entra em artefato.
+          E2E_RESULTS_DIR: ${{ runner.temp }}/e2e-bruto/explorer
+          # Capturas sinteticas (so da aplicacao) na pasta que PODE ser publicada.
+          E2E_EVIDENCE_DIR: ${{ github.workspace }}/e2e-publicavel/explorer/evidencias
+        run: pnpm exec playwright test -c playwright.ci.config.ts explorer-
+
+      # `!cancelled()`: a regressao roda mesmo se o Explorer reprovar, para o
+      # relatorio mostrar os dois lados. Nao e `continue-on-error`: o passo
+      # anterior reprovado reprova o job.
+      - name: E2E-09 - regressao do produto (fluxos 0 a 4 existentes)
+        if: ${{ !cancelled() }}
+        working-directory: apps/web
+        env:
+          E2E_RESULTS_DIR: ${{ runner.temp }}/e2e-bruto/regressao
+          E2E_EVIDENCE_DIR: ${{ github.workspace }}/e2e-publicavel/regressao/evidencias
+        run: pnpm exec playwright test -c playwright.ci.config.ts fluxo-
+
+      # ---- logs e evidencias (sempre) -------------------------------------
+      - name: Encerrar a pilha e conferir os logs de inicializacao e desligamento
+        if: always()
+        run: |
+          for nome in gateway web api; do
+            if [ -f "$E2E_LOGS/$nome.pid" ]; then
+              pid="$(cat "$E2E_LOGS/$nome.pid")"
+              if kill -0 "$pid" 2>/dev/null; then kill -TERM "$pid"; fi
+            fi
+          done
+          sleep 3
+          for nome in api web gateway; do
+            echo "================ $nome.log (ultimas 60 linhas) ================"
+            tail -n 60 "$E2E_LOGS/$nome.log" 2>/dev/null || echo "(sem log)"
+          done
+
+      - name: Resumo dos testes (contagem por estado, do relatorio bruto)
+        if: always()
+        run: |
+          for r in explorer regressao; do
+            f="$RUNNER_TEMP/e2e-bruto/$r/resultado.json"
+            if [ -f "$f" ]; then
+              node -e '
+                const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+                const s = r.stats ?? {};
+                console.log(process.argv[2] + ": esperados(passaram)=" + s.expected + " inesperados(falharam)=" + s.unexpected + " instaveis=" + s.flaky + " pulados=" + s.skipped);
+              ' "$f" "$r"
+            else
+              echo "$r: sem resultado.json (o passo nao chegou a rodar)"
+            fi
+          done
+
+      # ---- saida publicavel (P04-QA-04R) -----------------------------------
+      # O relatorio bruto do Playwright (JSON, HTML, anexos) e interno e fica em
+      # $RUNNER_TEMP. Este passo monta, por LISTA PERMITIDA de campos, o unico
+      # resultado que pode ser publicado, e imprime no log QUANTOS marcadores
+      # sensiveis o bruto tinha e em que categoria de campo (nunca os valores).
+      # Se a saida montada ainda tiver marcador, o script apaga o arquivo e sai
+      # com erro: o job fica vermelho e a publicacao e pulada. Sem `|| true`.
+      - name: Montar a saida publicavel e sanitizada
+        id: sanitizar
+        if: always()
+        run: |
+          node apps/web/e2e/ci/sanitizar-resultados.mjs \
+            --saida "$GITHUB_WORKSPACE/e2e-publicavel" \
+            "explorer=$RUNNER_TEMP/e2e-bruto/explorer/resultado.json" \
+            "regressao=$RUNNER_TEMP/e2e-bruto/regressao/resultado.json"
+
+      # Varredura independente, sobre TUDO o que sera publicado (inclui os logs
+      # dos processos e as capturas): se achar senha ou cookie, o job cai e a
+      # publicacao e PULADA. O PNG e binario; `-a` o trata como texto para que
+      # um marcador embutido em metadados tambem seja achado.
+      - name: Varredura de sanitizacao do que sera publicado
+        id: sanitizacao
+        if: always()
+        run: |
+          if grep -rIlaF \
+               -e "$SEED_OWNER_PASSWORD" -e "$SEED_SDR_PASSWORD" -e "$E2E_BETA_PASSWORD" \
+               -e "pa_at=" -e "pa_rt=" -e "Set-Cookie" -e "set-cookie" \
+               e2e-publicavel e2e-logs 2>/dev/null; then
+            echo "SANITIZACAO FALHOU: os arquivos acima contem senha ou cookie." >&2
+            exit 1
+          fi
+          echo "sanitizacao ok: nenhuma senha de CI nem cookie de sessao no que sera publicado"
+          find e2e-publicavel e2e-logs -type f | sort
+
+      # So a pasta publicavel e os logs dos processos. O relatorio HTML, o JSON
+      # bruto e os anexos de falha ficam em $RUNNER_TEMP e nunca sobem.
+      - name: Publicar evidencias sanitizadas
+        if: ${{ always() && steps.sanitizar.outcome == 'success' && steps.sanitizacao.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-evidencias
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            e2e-publicavel/**
+            e2e-logs/*.log
+
+  # ===========================================================================
+  # P04-QA-02: ponto unico para "required status check". `if: always()` para que
+  # ele rode (e falhe) mesmo quando um job anterior foi pulado por falha de
+  # `needs:` — um job pulado nao reprova sozinho, e sem este portao um PR com
+  # `tipos` vermelho poderia mostrar so "skipped" nos demais.
+  # ===========================================================================
+  resultado:
+    name: Resultado do CI
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [tipos, builds, testes, e2e]
+    steps:
+      - name: Todos os jobs obrigatorios precisam ter passado
+        env:
+          TIPOS: ${{ needs.tipos.result }}
+          BUILDS: ${{ needs.builds.result }}
+          TESTES: ${{ needs.testes.result }}
+          E2E: ${{ needs.e2e.result }}
+        run: |
+          echo "tipos=$TIPOS builds=$BUILDS testes=$TESTES e2e=$E2E"
+          [ "$TIPOS" = "success" ] && [ "$BUILDS" = "success" ] && [ "$TESTES" = "success" ] && [ "$E2E" = "success" ]

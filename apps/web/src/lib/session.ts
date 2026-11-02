@@ -1,5 +1,6 @@
 import type { SessionResponse } from '@propectai/types';
 import { cookies } from 'next/headers';
+import { cache } from 'react';
 
 const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? 'http://127.0.0.1:3101';
 
@@ -9,8 +10,12 @@ const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? 'http://127.0.0.1:3101'
  * Os cookies de autenticação são HttpOnly, então o Server Component precisa
  * repassá-los explicitamente para a API. Devolve null quando não há sessão,
  * em vez de lançar: quem decide redirecionar é o chamador.
+ *
+ * `cache` (React) deduplica a chamada dentro de UMA requisição de servidor: o layout
+ * `(app)` e a página `/intelligence` leem a mesma sessão sem pedir `/auth/me` duas
+ * vezes. Não há cache entre requisições.
  */
-export async function getSession(): Promise<SessionResponse | null> {
+export const getSession = cache(async (): Promise<SessionResponse | null> => {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
 
@@ -28,4 +33,4 @@ export async function getSession(): Promise<SessionResponse | null> {
     // API fora do ar. Tratado como ausência de sessão pelo chamador.
     return null;
   }
-}
+});

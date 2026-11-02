@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { clientApiUrl } from '@/lib/client-api-url';
+import { anunciarMudancaDeSessao } from '@/lib/session-events';
 
 /**
  * Sair não é um link.
@@ -21,10 +22,12 @@ export function LogoutButton() {
     setLeaving(true);
 
     try {
-      await fetch(clientApiUrl('/auth/logout'), {
+      const resposta = await fetch(clientApiUrl('/auth/logout'), {
         method: 'POST',
         credentials: 'include',
       });
+      // Outras abas abertas (ex.: Intelligence Explorer) descartam os dados na hora.
+      if (resposta.ok) anunciarMudancaDeSessao('logout');
     } catch {
       // Mesmo sem resposta da API, tirar o usuário da aplicação é o correto.
     }

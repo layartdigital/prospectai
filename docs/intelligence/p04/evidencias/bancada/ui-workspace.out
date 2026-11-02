@@ -1,0 +1,27 @@
+PASS W1 pre-condicao: o Explorer mostra dados do Alfa (nos, nomes, painel) — nos=13 nomes=5
+PASS W1 aviso "sessao ou workspace mudou" aparece
+PASS W1 durante o aviso: ZERO rastro do Alfa na tela e no DOM (nomes, ids, nos) — {"nomes":[],"ids":0,"nos":0}
+PASS W1 detalhes do no sumiram (nenhum painel de no, nenhum botao Carregar)
+PASS W1 apos o servidor entregar a identidade nova: tela vazia de Alfa — {"nomes":[],"ids":0,"nos":0}
+PASS W1 permaneceu na rota do Explorer (/intelligence), sem o lead do workspace anterior — http://127.0.0.1:3199/intelligence
+PASS W1 o workspace novo e o do Beta (busca lista so o Beta)
+PASS W1 nenhum estado antigo: filtro de tipos e lista de acessibilidade ausentes
+PASS W2 expansao pendente: houve a chamada de expansao antes da troca
+PASS W2 a resposta tardia do Alfa nao entrou: nenhuma nota, nenhum rastro — {"nomes":[],"ids":0,"nos":0}
+PASS W2 sem indicador de carregamento preso
+PASS W3 grafo pendente do Alfa chegou tarde e nao foi desenhado — {"nomes":[],"ids":0,"nos":0}
+PASS W4 logout: o Explorer sai da tela (redirect /login) sem rastro do workspace — {"nomes":[],"ids":0,"nos":0}
+PASS W5 outro usuario no mesmo workspace: grafo, selecao e lead da URL descartados — http://127.0.0.1:3199/intelligence nos=0
+PASS W6 foco com a mesma identidade nao descarta nada
+PASS W6 rede fora na checagem de sessao nao descarta nada
+PASS W6 erro 500 na checagem de sessao nao descarta nada
+PASS W7 401 numa requisicao do Explorer leva a sessao encerrada e limpa a tela — {"nomes":[],"ids":0,"nos":0}
+PASS W8 sem foco nem clique, a checagem periodica descarta o grafo do Alfa — detectou em ~20s
+PASS W9 logout em outra aba: a aba do Explorer descarta TUDO em < 3 s, sem foco e sem esperar 20 s — 63 ms
+PASS W10 login de outra conta em outra aba: Explorer descarta em < 3 s, sem foco — 262 ms
+PASS W11 logout na mesma aba: descarte imediato, sem esperar /auth/me (que levava 4 s) — 26 ms
+PASS W12 login anunciado com a mesma identidade + mensagens invalidas: nada e descartado
+PASS W13a login recusado pela API nao anuncia nada: Explorer intacto
+PASS W13b LoginForm real: login bem-sucedido em outra aba descarta o Explorer do workspace anterior — 102 ms
+PASS W13c LogoutButton real: logout em outra aba tira o Explorer da tela em < 3 s — 116 ms
+PASS sem erro de JavaScript no console durante as trocas

@@ -1,0 +1,28 @@
+PASS estado vazio verdadeiro (sem lead selecionado, sem grafo)
+PASS grafo inicial tem 5 nos (lead, pesquisa, score, presenca, cartao) — nos=5
+PASS URL passou a carregar ?lead=
+PASS raiz selecionada e painel mostra o lead
+PASS telefone aparece mascarado no painel
+PASS painel muda para o Score
+PASS conexao mostra proveniencia (FK) e selo Vínculo no cadastro
+PASS expandir motivos traz 5 nos
+PASS expandir sinais traz 7 nos
+PASS paginacao de notas: 8 e depois 16 (sem duplicar)
+PASS sinal Instagram e Desconhecido, com a explicacao de que nao e ausencia
+PASS desmarcar "Nota" oculta os 16 nos de nota — 33 -> 17
+PASS roda do mouse aproxima — 88% -> 99%
+PASS botao Afastar reduz o zoom
+PASS arrastar o fundo faz pan
+PASS seta move a vista
+PASS Enter em no focado seleciona
+PASS cartao -> etapa comercial
+PASS pesquisa expande para 4 leads do proprio tenant (sem o intruso do Beta)
+PASS nenhum texto do Beta na tela do Alfa
+PASS recentrar troca a raiz e a URL
+PASS lead inexistente mostra estado de erro com mensagem clara
+PASS Beta abrindo lead do Alfa recebe o mesmo erro, sem nenhum dado do Alfa
+PASS Beta ve o proprio grafo
+PASS 390px: sem scroll horizontal — overflow=0px
+PASS 820px: sem scroll horizontal
+PASS nenhum modal/dialog aberto automaticamente
+PASS sem erro de JavaScript no console

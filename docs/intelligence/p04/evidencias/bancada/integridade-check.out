@@ -1,0 +1,65 @@
+=== tenant ALFA referenciando lead do BETA (FK simples em leadId)
+NOTICE:  lead_notes -> ACEITO (a FK nao impede a referencia entre tenants)
+ tenta 
+-------
+ 
+(1 row)
+
+NOTICE:  lead_activities -> ACEITO (a FK nao impede a referencia entre tenants)
+ tenta 
+-------
+ 
+(1 row)
+
+NOTICE:  lead_contact_records -> ACEITO (a FK nao impede a referencia entre tenants)
+ tenta 
+-------
+ 
+(1 row)
+
+NOTICE:  lead_follow_ups -> ACEITO (a FK nao impede a referencia entre tenants)
+ tenta 
+-------
+ 
+(1 row)
+
+NOTICE:  pipeline_cards -> ERRO inesperado: duplicate key value violates unique constraint "pipeline_cards_leadId_key"
+ tenta 
+-------
+ 
+(1 row)
+
+=== lead do BETA apontando para pesquisa do ALFA (leads.searchId simples)
+NOTICE:  leads.searchId -> ACEITO (a FK nao impede a referencia entre tenants)
+ tenta 
+-------
+ 
+(1 row)
+
+=== controle: FK COMPOSTA (tenantId, leadId) -> deve RECUSAR
+NOTICE:  lead_scores -> RECUSADO pela FK composta
+ tenta 
+-------
+ 
+(1 row)
+
+NOTICE:  lead_digital_presences -> RECUSADO pela FK composta
+ tenta 
+-------
+ 
+(1 row)
+
+NOTICE:  digital_presence_audits -> RECUSADO pela FK composta
+ tenta 
+-------
+ 
+(1 row)
+
+=== registros ja incompativeis neste banco de bancada (cartao orfao semeado de proposito)
+     tabela     | incompativeis 
+----------------+---------------
+ pipeline_cards |             1
+ leads.searchId |             1
+ lead_notes     |             0
+(3 rows)
+
